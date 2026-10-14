@@ -10,8 +10,9 @@
   <a href="{{ url_for('students') }}">Students</a>
   <a href="{{ url_for('faculty_list') }}">Faculty</a>
   <a href="{{ url_for('reports') }}">Reports</a>
+  {% if is_admin %}<a href="{{ url_for('users') }}">Accounts</a>{% endif %}
   <span class="spacer"></span>
-  <span>{{ user['username'] }}{% if not can_edit %} (view only){% endif %}</span>
+  <a href="{{ url_for('account') }}" title="Change your password">{{ user['username'] }}</a>{% if not can_edit %} (view only){% endif %}
   <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button>Log out</button></form>
   {% endif %}

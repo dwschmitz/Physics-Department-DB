@@ -22,14 +22,21 @@ The database file is `physics_grads.db` (override with `PHYSDB_PATH`) and is cre
 Staff use the database through a browser; no command-line knowledge needed.
 ```
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python webapp.py create-user alice --role editor   # prompts for a password
-.venv/bin/python webapp.py create-user bob                   # view-only (default)
+.venv/bin/python webapp.py create-user alice --role admin      # first administrator; prompts for a password
 .venv/bin/python webapp.py run                               # http://127.0.0.1:5000
 ```
-Re-running `create-user` for an existing name resets that person's password/role.
+After that, administrators manage everyone else from the **Accounts** page in the browser.
+`create-user` is still available as a recovery tool: re-running it for an existing name resets that
+person's password and role (for example, to regain admin access if no admin can log in).
 
 - **Viewers** can search, filter, view and download CSV; **editors** can also add, edit and delete
-  students, faculty, advisors, milestones and funding. Fixed-choice fields are dropdowns.
+  students, faculty, advisors, milestones and funding; **administrators** can do all of that and
+  manage accounts. Fixed-choice fields are dropdowns.
+- **Accounts page** (administrators only): add people, change roles, reset passwords, delete accounts.
+  Passwords set by an admin are temporary: the person must choose their own at next login. Resetting
+  a password or deleting an account signs that person out immediately, and role changes apply at
+  once. You can't delete your own account, so at least one administrator always remains. Anyone can
+  change their own password by clicking their username in the top bar.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.
 - `webapp.py run` is Flask's development server. For real use serve it to other machines with a
   production server behind HTTPS, e.g. `gunicorn 'webapp:create_app()'` behind your department's

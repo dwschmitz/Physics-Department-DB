@@ -15,7 +15,7 @@ class WebTests(unittest.TestCase):
         os.environ["PHYSDB_SECRET"] = "test"
         self.app = webapp.create_app(path)
         conn = physdb.connect(path)
-        for name, role in (("ed", "editor"), ("vw", "viewer")):
+        for name, role in (("ed", "editor"), ("vw", "viewer"), ("ad", "admin")):
             conn.execute("INSERT INTO users (username, password_hash, role) VALUES (?,?,?)",
                          (name, generate_password_hash("pw-" + name), role))
         conn.commit(); conn.close()
@@ -36,6 +36,105 @@ class WebTests(unittest.TestCase):
                     program="PhD", status="active", start_year="2022", csrf_token=self.token(c))
         data.update(over)
         return c.post("/students/new", data=data)
+
+    def user_row(self, name):
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        try:
+            return conn.execute("SELECT * FROM users WHERE username = ?", (name,)).fetchone()
+        finally:
+            conn.close()
+
+    def test_only_admin_can_manage_accounts(self):
+        for who in ("ed", "vw"):
+            c = self.client(who)
+            t = self.token(c)
+            self.assertEqual(c.get("/users").status_code, 403)
+            self.assertEqual(c.get("/users/new").status_code, 403)
+            r = c.post("/users/new", data=dict(username="x" * 5, role="admin",
+                       password="long-enough-pw", csrf_token=t))
+            self.assertEqual(r.status_code, 403)
+            self.assertEqual(c.post("/users/1/delete", data={"csrf_token": t}).status_code, 403)
+            self.assertNotIn("Accounts", c.get("/students").get_data(as_text=True))
+        self.assertIn("Accounts", self.client("ad").get("/students").get_data(as_text=True))
+
+    def test_admin_creates_user_who_must_change_password(self):
+        ad = self.client("ad"); t = self.token(ad)
+        r = ad.post("/users/new", data=dict(username="newbie", role="editor",
+                    password="temp-password-1", csrf_token=t))
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(self.user_row("newbie")["must_change"], 1)
+        self.assertEqual(self.user_row("newbie")["role"], "editor")
+        dup = ad.post("/users/new", data=dict(username="newbie", role="viewer",
+                      password="temp-password-1", csrf_token=t))
+        self.assertIn("already taken", dup.get_data(as_text=True))
+        short = ad.post("/users/new", data=dict(username="other", role="viewer",
+                        password="short", csrf_token=t))
+        self.assertIn("at least 10", short.get_data(as_text=True))
+        # new user is funneled to the password page until they change it
+        c = self.app.test_client()
+        c.post("/login", data={"username": "newbie", "password": "temp-password-1"})
+        r = c.get("/students")
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, "/account"))
+        t2 = self.token(c, "/account")
+        bad = c.post("/account", data=dict(current_password="wrong", new_password="brand-new-pass-9",
+                     confirm="brand-new-pass-9", csrf_token=t2))
+        self.assertIn("not your current password", bad.get_data(as_text=True))
+        mismatch = c.post("/account", data=dict(current_password="temp-password-1",
+                          new_password="brand-new-pass-9", confirm="different-pass-9", csrf_token=t2))
+        self.assertIn("t match", mismatch.get_data(as_text=True))
+        ok = c.post("/account", data=dict(current_password="temp-password-1",
+                    new_password="brand-new-pass-9", confirm="brand-new-pass-9", csrf_token=t2))
+        self.assertEqual(ok.status_code, 302)
+        self.assertEqual(c.get("/students").status_code, 200)   # still logged in
+        self.assertEqual(self.user_row("newbie")["must_change"], 0)
+
+    def test_viewer_can_change_own_password(self):
+        c = self.client("vw"); t = self.token(c)
+        r = c.post("/account", data=dict(current_password="pw-vw", new_password="viewer-new-pass",
+                   confirm="viewer-new-pass", csrf_token=t))
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(self.app.test_client().post("/login", data={
+            "username": "vw", "password": "viewer-new-pass"}).status_code, 302)
+
+    def test_reset_signs_out_and_role_change_is_immediate(self):
+        victim = self.client("ed")
+        ad = self.client("ad"); t = self.token(ad)
+        uid = self.user_row("ed")["id"]
+        ad.post(f"/users/{uid}/edit", data=dict(role="viewer", password="", csrf_token=t))
+        self.assertEqual(victim.get("/students/new").status_code, 403)   # demoted at once
+        ad.post(f"/users/{uid}/edit", data=dict(role="viewer", password="reset-password-1", csrf_token=t))
+        self.assertEqual(victim.get("/students").status_code, 302)       # old session is dead
+        self.assertEqual(self.user_row("ed")["must_change"], 1)
+
+    def test_admin_cannot_delete_or_demote_self(self):
+        ad = self.client("ad"); t = self.token(ad)
+        me = self.user_row("ad")["id"]
+        ad.post(f"/users/{me}/delete", data={"csrf_token": t})
+        self.assertIsNotNone(self.user_row("ad"))
+        self.assertEqual(ad.get(f"/users/{me}/edit").headers["Location"], "/account")
+        r = ad.post(f"/users/{me}/edit", data=dict(role="viewer", csrf_token=t))
+        self.assertEqual(self.user_row("ad")["role"], "admin")
+
+    def test_delete_user_ends_their_session(self):
+        victim = self.client("vw")
+        ad = self.client("ad"); t = self.token(ad)
+        ad.post(f"/users/{self.user_row('vw')['id']}/delete", data={"csrf_token": t})
+        self.assertIsNone(self.user_row("vw"))
+        self.assertEqual(victim.get("/students").status_code, 302)
+
+    def test_old_users_table_is_migrated(self):
+        import sqlite3, tempfile, os
+        path = os.path.join(tempfile.mkdtemp(), "old.db")
+        c = sqlite3.connect(path)
+        c.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, "
+                  "password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'viewer' "
+                  "CHECK (role IN ('viewer','editor')))")
+        c.execute("INSERT INTO users (username, password_hash, role) VALUES ('old','h','editor')")
+        c.commit(); c.close()
+        conn = physdb.connect(path)
+        row = conn.execute("SELECT * FROM users").fetchone()
+        self.assertEqual((row["username"], row["role"], row["must_change"]), ("old", "editor", 0))
+        conn.execute("UPDATE users SET role = 'admin'")   # new constraint accepts admin
 
     def test_login_required_and_bad_login(self):
         c = self.app.test_client()

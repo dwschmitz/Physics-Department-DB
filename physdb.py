@@ -17,7 +17,25 @@ def connect(path=DB_PATH):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA.read_text())
+    _migrate_users(conn)
     return conn
+
+
+def _migrate_users(conn):
+    """Upgrade a users table created before the 'admin' role / must_change column existed."""
+    ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'users'").fetchone()[0]
+    if "'admin'" in ddl and "must_change" in ddl:
+        return
+    has_mc = "must_change" in ddl
+    conn.executescript(f"""
+        ALTER TABLE users RENAME TO users_old;
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin')),
+            must_change INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO users (id, username, password_hash, role, must_change)
+            SELECT id, username, password_hash, role, {'must_change' if has_mc else '0'} FROM users_old;
+        DROP TABLE users_old;""")
 
 
 def _find(conn, table, key):

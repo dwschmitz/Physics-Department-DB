@@ -5,6 +5,7 @@ import datetime
 import getpass
 import hmac
 import os
+import re
 import secrets
 import sqlite3
 from pathlib import Path
@@ -17,6 +18,8 @@ import physdb
 
 STATUSES = ["active", "on_leave", "graduated", "withdrawn"]
 PROGRAMS = ["PhD", "MS"]
+ACCOUNT_ROLES = ["viewer", "editor", "admin"]
+MIN_PASSWORD = 10
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
 MILESTONE_KINDS = ["qualifying_exam", "candidacy", "thesis_proposal", "thesis_defense", "other"]
 OUTCOMES = ["pending", "passed", "conditional", "failed"]
@@ -28,6 +31,15 @@ CHILD_TABLES = {
     "funding": "Funding",
 }
 _DUMMY_HASH = generate_password_hash("not-a-real-password")
+
+
+def can_edit(user):
+    return bool(user and user["role"] in ("editor", "admin"))
+
+
+def pw_fingerprint(password_hash):
+    """Stored in the session so that resetting a password signs out old sessions."""
+    return password_hash[-16:]
 
 
 def label(value):
@@ -86,8 +98,10 @@ def parse_form(fields, form):
     """Validate submitted values. Returns (values, errors)."""
     values, errors = {}, {}
     for f in fields:
-        raw = (form.get(f["name"]) or "").strip()
         name, kind = f["name"], f["type"]
+        raw = form.get(name) or ""
+        if kind not in ("password", "secret"):
+            raw = raw.strip()
         if not raw:
             if f["required"]:
                 errors[name] = "This field is required."
@@ -109,6 +123,10 @@ def parse_form(fields, form):
                 raw = float(raw)
                 if raw < 0 or raw != raw:
                     raise ValueError("Enter a non-negative number.")
+            elif kind == "username" and not re.fullmatch(r"[A-Za-z0-9._@-]{3,60}", raw):
+                raise ValueError("Enter 3-60 letters, digits, or . _ @ - (no spaces).")
+            elif kind == "password" and len(raw) < MIN_PASSWORD:
+                raise ValueError(f"Enter at least {MIN_PASSWORD} characters.")
             elif kind == "email" and ("@" not in raw or " " in raw):
                 raise ValueError("Enter a valid email address.")
         except ValueError as e:
@@ -144,7 +162,9 @@ def create_app(db_path=None):
         uid = session.get("user_id")
         if uid is not None:
             g.user = db().execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
-            if g.user is None:
+            if g.user is None or not hmac.compare_digest(
+                    session.get("pwf", ""), pw_fingerprint(g.user["password_hash"])):
+                g.user = None
                 session.clear()
         if request.endpoint in ("login", "static"):
             return None
@@ -154,14 +174,16 @@ def create_app(db_path=None):
             sent = request.form.get("csrf_token", "")
             if not hmac.compare_digest(sent, session.get("csrf", "")):
                 abort(400, "Your session expired. Go back, reload the page and try again.")
-            if g.user["role"] != "editor" and request.endpoint != "logout":
+            if not can_edit(g.user) and request.endpoint not in ("logout", "account"):
                 abort(403, "Your account is view-only.")
+        if g.user["must_change"] and request.endpoint not in ("account", "logout"):
+            return redirect(url_for("account"))
 
     @app.context_processor
     def inject():
         session.setdefault("csrf", secrets.token_urlsafe(32))
         return dict(csrf_token=session["csrf"], user=g.get("user"),
-                    can_edit=bool(g.get("user") and g.user["role"] == "editor"))
+                    can_edit=can_edit(g.get("user")), is_admin=bool(g.get("user") and g.user["role"] == "admin"))
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -174,6 +196,7 @@ def create_app(db_path=None):
                 session.clear()
                 session.permanent = True
                 session["user_id"] = row["id"]
+                session["pwf"] = pw_fingerprint(row["password_hash"])
                 session["csrf"] = secrets.token_urlsafe(32)
                 nxt = request.args.get("next", "")
                 if not nxt.startswith("/") or nxt.startswith("//") or "\\" in nxt:
@@ -186,6 +209,111 @@ def create_app(db_path=None):
     def logout():
         session.clear()
         return redirect(url_for("login"))
+
+    # ---- account management ------------------------------------------------------
+    @app.route("/account", methods=["GET", "POST"])
+    def account():
+        fields = [F("current_password", "Current password", "secret", True),
+                  F("new_password", "New password", "password", True,
+                    help=f"At least {MIN_PASSWORD} characters."),
+                  F("confirm", "Repeat new password", "password", True)]
+        errors = {}
+        if request.method == "POST":
+            values, errors = parse_form(fields, request.form)
+            if "current_password" not in errors and not check_password_hash(
+                    g.user["password_hash"], values["current_password"]):
+                errors["current_password"] = "That is not your current password."
+            if "confirm" not in errors and values["new_password"] != values["confirm"]:
+                errors["confirm"] = "The two passwords don't match."
+            if "new_password" not in errors and values["new_password"] == values["current_password"]:
+                errors["new_password"] = "Enter a password different from the current one."
+            if not errors:
+                new_hash = generate_password_hash(values["new_password"])
+                db().execute("UPDATE users SET password_hash = ?, must_change = 0 WHERE id = ?",
+                             (new_hash, g.user["id"]))
+                db().commit()
+                session["pwf"] = pw_fingerprint(new_hash)
+                flash("Your password has been changed.", "ok")
+                return redirect(url_for("students"))
+        if g.user["must_change"]:
+            flash("Please choose a new password before continuing.", "error")
+        return render_template("form.html", title="Change your password", fields=fields,
+                               values={}, errors=errors, back=url_for("students"))
+
+    def user_fields(creating):
+        return [F("username", "Username", "username", True)] if creating else []
+
+    def role_field():
+        return F("role", "Role", "select", True, [(r, label(r)) for r in ACCOUNT_ROLES],
+                 help="Viewer: look only. Editor: can also change records. "
+                      "Administrator: can also manage accounts.")
+
+    @app.route("/users")
+    def users():
+        require_admin()
+        rows = db().execute("SELECT * FROM users ORDER BY username").fetchall()
+        return render_template("users.html", rows=rows)
+
+    @app.route("/users/new", methods=["GET", "POST"])
+    def user_new():
+        require_admin()
+        fields = user_fields(True) + [role_field(),
+                 F("password", "Temporary password", "password", True,
+                   help=f"At least {MIN_PASSWORD} characters. The person must choose their own at first login.")]
+        errors = {}
+        if request.method == "POST":
+            values, errors = parse_form(fields, request.form)
+            if not errors:
+                try:
+                    db().execute("INSERT INTO users (username, password_hash, role, must_change) "
+                                 "VALUES (?,?,?,1)", (values["username"],
+                                 generate_password_hash(values["password"]), values["role"]))
+                    db().commit()
+                    flash(f"Account '{values['username']}' created.", "ok")
+                    return redirect(url_for("users"))
+                except sqlite3.IntegrityError:
+                    db().rollback()
+                    errors["username"] = "That username is already taken."
+        return render_template("form.html", title="Add account", fields=fields,
+                               values=request.form if request.method == "POST" else {"role": "viewer"},
+                               errors=errors, back=url_for("users"))
+
+    @app.route("/users/<int:uid>/edit", methods=["GET", "POST"])
+    def user_edit(uid):
+        require_admin()
+        u = get_or_404("users", uid)
+        if u["id"] == g.user["id"]:
+            return redirect(url_for("account"))   # own password/role: use the normal page
+        fields = [role_field(),
+                  F("password", "New temporary password", "password", False,
+                    help="Leave blank to keep the current password. Setting one signs the person out "
+                         "everywhere and makes them choose a new password at next login.")]
+        errors = {}
+        if request.method == "POST":
+            values, errors = parse_form(fields, request.form)
+            if not errors:
+                if "role" in values:
+                    db().execute("UPDATE users SET role = ? WHERE id = ?", (values["role"], uid))
+                if values.get("password"):
+                    db().execute("UPDATE users SET password_hash = ?, must_change = 1 WHERE id = ?",
+                                 (generate_password_hash(values["password"]), uid))
+                db().commit()
+                flash("Account updated.", "ok")
+                return redirect(url_for("users"))
+        return render_template("form.html", title=f"Edit account: {u['username']}", fields=fields,
+                               values=request.form if request.method == "POST" else u,
+                               errors=errors, back=url_for("users"))
+
+    @app.post("/users/<int:uid>/delete")
+    def user_delete(uid):
+        require_admin()
+        u = get_or_404("users", uid)
+        if u["id"] == g.user["id"]:
+            flash("You can't delete your own account.", "error")
+        else:
+            db().execute("DELETE FROM users WHERE id = ?", (uid,)); db().commit()
+            flash(f"Account '{u['username']}' deleted.", "ok")
+        return redirect(url_for("users"))
 
     # ---- generic helpers -------------------------------------------------------
     def get_or_404(table, rid, **extra):
@@ -241,8 +369,12 @@ def create_app(db_path=None):
                                errors=errors, back=back)
 
     def require_editor():
-        if g.user["role"] != "editor":
+        if not can_edit(g.user):
             abort(403, "Your account is view-only.")
+
+    def require_admin():
+        if g.user["role"] != "admin":
+            abort(403, "Only administrators can manage accounts.")
 
     # ---- students --------------------------------------------------------------
     @app.route("/")
@@ -418,18 +550,18 @@ def main():
     r = sub.add_parser("run", help="start the development server")
     r.add_argument("--host", default="127.0.0.1"); r.add_argument("--port", type=int, default=5000)
     u = sub.add_parser("create-user", help="add a login, or reset an existing one's password/role")
-    u.add_argument("username"); u.add_argument("--role", choices=["viewer", "editor"], default="viewer")
+    u.add_argument("username"); u.add_argument("--role", choices=ACCOUNT_ROLES, default="viewer")
     args = p.parse_args()
     if args.cmd == "run":
         create_app().run(host=args.host, port=args.port)
     else:
         pw = getpass.getpass("Password: ")
-        if len(pw) < 10 or pw != getpass.getpass("Repeat password: "):
-            raise SystemExit("Passwords must match and be at least 10 characters.")
+        if len(pw) < MIN_PASSWORD or pw != getpass.getpass("Repeat password: "):
+            raise SystemExit(f"Passwords must match and be at least {MIN_PASSWORD} characters.")
         conn = physdb.connect()
         conn.execute("""INSERT INTO users (username, password_hash, role) VALUES (?,?,?)
                         ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,
-                        role=excluded.role""", (args.username, generate_password_hash(pw), args.role))
+                        role=excluded.role, must_change=0""", (args.username, generate_password_hash(pw), args.role))
         conn.commit()
         print(f"User '{args.username}' saved as {args.role}.")
 
