@@ -1,0 +1,5 @@
+{% macro delete_button(action, prompt) %}
+<form class="inline" method="post" action="{{ action }}" onsubmit="return confirm({{ prompt|tojson }})">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn danger small">Delete</button>
+</form>
+{% endmacro %}

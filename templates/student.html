@@ -1,0 +1,38 @@
+{% extends "base.html" %}{% from "_macros.html" import delete_button %}{% block body %}
+<h1>{{ s.first_name }} {{ s.last_name }} <span class="badge {{ s.status }}">{{ s.status|label }}</span></h1>
+<p class="toolbar"><a href="{{ url_for('students') }}">&larr; All students</a>
+{% if can_edit %} <a class="btn small" href="{{ url_for('student_edit', sid=s.id) }}">Edit details</a>
+ {{ delete_button(url_for('student_delete', sid=s.id), 'Permanently delete ' ~ s.first_name ~ ' ' ~ s.last_name ~ ' and all of their records?') }}{% endif %}</p>
+<dl>
+  <dt>University ID</dt><dd>{{ s.university_id }}</dd>
+  <dt>Email</dt><dd>{{ s.email }}</dd>
+  <dt>Program</dt><dd>{{ s.program }}</dd>
+  <dt>Started</dt><dd>{{ s.start_year }}</dd>
+  <dt>Expected graduation</dt><dd>{{ s.expected_grad_year or '—' }}</dd>
+  <dt>Research area</dt><dd>{{ s.research_area or '—' }}</dd>
+  <dt>Notes</dt><dd style="white-space:pre-wrap">{{ s.notes or '—' }}</dd>
+</dl>
+
+<h2>Advisors &amp; committee {% if can_edit %}<a class="btn small" href="{{ url_for('child_new', sid=s.id, table='advising') }}">+ Add</a>{% endif %}</h2>
+<table><tr><th>Name</th><th>Role</th><th>From</th><th>To</th><th></th></tr>
+{% for a in advising %}<tr><td><a href="{{ url_for('faculty_detail', fid=a.faculty_id) }}">{{ a.first_name }} {{ a.last_name }}</a></td>
+<td>{{ a.role|label }}</td><td>{{ a.start_date }}</td><td>{{ a.end_date or 'present' }}</td>
+<td class="actions">{% if can_edit %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='advising', rid=a.id) }}">Edit</a>
+{{ delete_button(url_for('child_delete', sid=s.id, table='advising', rid=a.id), 'Delete this entry?') }}{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">None recorded.</td></tr>{% endfor %}</table>
+
+<h2>Milestones {% if can_edit %}<a class="btn small" href="{{ url_for('child_new', sid=s.id, table='milestones') }}">+ Add</a>{% endif %}</h2>
+<table><tr><th>Milestone</th><th>Date</th><th>Outcome</th><th>Notes</th><th></th></tr>
+{% for m in milestones %}<tr><td>{{ m.kind|label }}</td><td>{{ m.date }}</td><td>{{ m.outcome|label }}</td><td>{{ m.notes or '' }}</td>
+<td class="actions">{% if can_edit %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='milestones', rid=m.id) }}">Edit</a>
+{{ delete_button(url_for('child_delete', sid=s.id, table='milestones', rid=m.id), 'Delete this entry?') }}{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">None recorded.</td></tr>{% endfor %}</table>
+
+<h2>Funding {% if can_edit %}<a class="btn small" href="{{ url_for('child_new', sid=s.id, table='funding') }}">+ Add</a>{% endif %}</h2>
+<table><tr><th>Term</th><th>Type</th><th>Source</th><th>Amount</th><th></th></tr>
+{% for f in funding %}<tr><td>{{ f.term }}</td><td>{{ f.kind|label }}</td><td>{{ f.source or '' }}</td>
+<td>{% if f.amount is not none %}${{ '{:,.0f}'.format(f.amount) }}{% endif %}</td>
+<td class="actions">{% if can_edit %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='funding', rid=f.id) }}">Edit</a>
+{{ delete_button(url_for('child_delete', sid=s.id, table='funding', rid=f.id), 'Delete this entry?') }}{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">None recorded.</td></tr>{% endfor %}</table>
+{% endblock %}

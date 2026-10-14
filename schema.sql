@@ -58,3 +58,11 @@ CREATE TABLE IF NOT EXISTS funding (
 CREATE INDEX IF NOT EXISTS idx_advising_student   ON advising(student_id);
 CREATE INDEX IF NOT EXISTS idx_milestones_student ON milestones(student_id);
 CREATE INDEX IF NOT EXISTS idx_funding_student    ON funding(student_id);
+
+-- Web interface logins. 'viewer' can read; 'editor' can also add/change/delete.
+CREATE TABLE IF NOT EXISTS users (
+    id             INTEGER PRIMARY KEY,
+    username       TEXT UNIQUE NOT NULL,
+    password_hash  TEXT NOT NULL,
+    role           TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor'))
+);

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Physics Graduate Students{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body>
+<header>
+  <strong>Physics Graduate Students</strong>
+  {% if user %}
+  <a href="{{ url_for('students') }}">Students</a>
+  <a href="{{ url_for('faculty_list') }}">Faculty</a>
+  <a href="{{ url_for('reports') }}">Reports</a>
+  <span class="spacer"></span>
+  <span>{{ user['username'] }}{% if not can_edit %} (view only){% endif %}</span>
+  <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button>Log out</button></form>
+  {% endif %}
+</header>
+<main>
+{% for category, message in get_flashed_messages(with_categories=true) %}
+  <div class="flash {{ category }}">{{ message }}</div>
+{% endfor %}
+{% block body %}{% endblock %}
+</main></body></html>

@@ -1,0 +1,32 @@
+body{font:16px/1.5 system-ui,sans-serif;margin:0;color:#1d2733;background:#f5f6f8}
+header{background:#800000;color:#fff;padding:.6rem 1.5rem;display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap}
+header a{color:#fff;text-decoration:none;font-weight:600}header a:hover{text-decoration:underline}
+header .spacer{flex:1}header form{margin:0;display:inline}
+header button{background:none;border:1px solid #fff;color:#fff;border-radius:4px;padding:.2rem .7rem;cursor:pointer}
+main{max-width:70rem;margin:1.5rem auto;padding:0 1rem}
+h1{margin-top:0}h2{margin:1.8rem 0 .5rem;display:flex;align-items:center;gap:1rem}
+table{border-collapse:collapse;width:100%;background:#fff;border:1px solid #d5d9e0}
+th,td{text-align:left;padding:.45rem .7rem;border-bottom:1px solid #e6e9ee;vertical-align:top}
+th{background:#eceff3;font-size:.85rem;text-transform:uppercase;letter-spacing:.03em}
+td.actions{white-space:nowrap;text-align:right}
+.btn,button.btn{display:inline-block;background:#800000;color:#fff;border:0;border-radius:4px;padding:.4rem .9rem;
+ text-decoration:none;font-size:.95rem;cursor:pointer}
+.btn.secondary{background:#fff;color:#800000;border:1px solid #800000}
+.btn.danger{background:#fff;color:#b00020;border:1px solid #b00020}
+.btn.small{padding:.15rem .6rem;font-size:.85rem}
+form.inline{display:inline;margin:0}
+.filters{display:flex;gap:.6rem;flex-wrap:wrap;align-items:end;margin-bottom:1rem}
+.filters label{display:flex;flex-direction:column;font-size:.85rem}
+input,select,textarea{font:inherit;padding:.4rem;border:1px solid #aab2bd;border-radius:4px;max-width:100%}
+.form{background:#fff;border:1px solid #d5d9e0;padding:1.2rem;max-width:36rem}
+.form .field{margin-bottom:1rem}.form label{display:block;font-weight:600;margin-bottom:.2rem}
+.form input,.form select,.form textarea{width:100%;box-sizing:border-box}
+.help{font-size:.85rem;color:#566}.err{color:#b00020;font-size:.9rem;margin-top:.2rem}
+.req{color:#b00020}
+.flash{padding:.6rem 1rem;border-radius:4px;margin-bottom:1rem}
+.flash.ok{background:#e3f4e6;border:1px solid #9bd0a5}.flash.error{background:#fde8ea;border:1px solid #e3a3ab}
+.badge{border-radius:10px;padding:.05rem .6rem;font-size:.8rem;background:#e1e5ea}
+.badge.active{background:#d8f0dc}.badge.on_leave{background:#fff0c2}.badge.withdrawn{background:#f6d6d9}
+dl{display:grid;grid-template-columns:12rem 1fr;gap:.2rem 1rem;background:#fff;border:1px solid #d5d9e0;padding:1rem}
+dt{font-weight:600}dd{margin:0}.muted{color:#667}
+.toolbar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}

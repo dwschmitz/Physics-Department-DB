@@ -133,12 +133,19 @@ def show_student(conn, key):
     return "\n".join(out)
 
 
+def _csv_safe(v):
+    """Neutralize spreadsheet formula injection (cells starting with = + - @)."""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
 def export_csv(conn, fh):
     rows = list_students(conn)
     w = csv.writer(fh)
     w.writerow(rows[0].keys() if rows else ["id"])
     for r in rows:
-        w.writerow(tuple(r))
+        w.writerow(tuple(_csv_safe(v) for v in r))
 
 
 def _row_line(r):

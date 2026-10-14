@@ -18,12 +18,30 @@ python3 physdb.py export > students.csv
 Students and faculty can be referenced by row id, university id, or email.
 The database file is `physics_grads.db` (override with `PHYSDB_PATH`) and is created on first use.
 
+## Web interface
+Staff use the database through a browser; no command-line knowledge needed.
+```
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python webapp.py create-user alice --role editor   # prompts for a password
+.venv/bin/python webapp.py create-user bob                   # view-only (default)
+.venv/bin/python webapp.py run                               # http://127.0.0.1:5000
+```
+Re-running `create-user` for an existing name resets that person's password/role.
+
+- **Viewers** can search, filter, view and download CSV; **editors** can also add, edit and delete
+  students, faculty, advisors, milestones and funding. Fixed-choice fields are dropdowns.
+- Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.
+- `webapp.py run` is Flask's development server. For real use serve it to other machines with a
+  production server behind HTTPS, e.g. `gunicorn 'webapp:create_app()'` behind your department's
+  reverse proxy. Passwords travel in plain text over plain HTTP, so don't expose it without HTTPS.
+- Set `PHYSDB_SECRET` (or protect the generated `.secret_key` file) so sessions can't be forged.
+
 ## Data model (`schema.sql`)
 `students`, `faculty`, `advising` (advisor/committee history with dates), `milestones`
 (qualifier, candidacy, proposal, defense), `funding` (TA/RA/fellowship by term).
 
 ## Tests
-`python3 -m unittest`
+`.venv/bin/python -m unittest`
 
 ## Privacy
 This holds student education records (FERPA). Don't store SSNs, and keep the `.db` file
