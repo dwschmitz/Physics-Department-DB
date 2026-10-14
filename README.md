@@ -20,10 +20,18 @@ The database file is `physics_grads.db` (override with `PHYSDB_PATH`) and is cre
 
 ## Web interface
 Staff use the database through a browser; no command-line knowledge needed.
+Mac / Linux: `./run.sh`  |  Windows: double-click `run.bat`  (or run it from a terminal)
+
+The launcher creates the virtual environment and installs dependencies on first use, asks you to
+create the first administrator if no accounts exist yet, then starts the server at
+http://127.0.0.1:5000. Press Ctrl+C in its window to stop it. It works from any folder, and it
+only reinstalls when `requirements.txt` changes.
+
+Without the launcher, the equivalent manual steps are:
 ```
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python webapp.py create-user alice --role admin      # first administrator; prompts for a password
-.venv/bin/python webapp.py run                               # http://127.0.0.1:5000
+.venv/bin/python webapp.py create-user alice --role admin   # first administrator; prompts for a password
+.venv/bin/python webapp.py run
 ```
 After that, administrators manage everyone else from the **Accounts** page in the browser.
 `create-user` is still available as a recovery tool: re-running it for an existing name resets that

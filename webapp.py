@@ -551,19 +551,29 @@ def main():
     r.add_argument("--host", default="127.0.0.1"); r.add_argument("--port", type=int, default=5000)
     u = sub.add_parser("create-user", help="add a login, or reset an existing one's password/role")
     u.add_argument("username"); u.add_argument("--role", choices=ACCOUNT_ROLES, default="viewer")
+    sub.add_parser("ensure-admin", help="if there are no logins yet, prompt to create the first administrator")
     args = p.parse_args()
     if args.cmd == "run":
         create_app().run(host=args.host, port=args.port)
+    elif args.cmd == "create-user":
+        save_user(args.username, args.role)
     else:
-        pw = getpass.getpass("Password: ")
-        if len(pw) < MIN_PASSWORD or pw != getpass.getpass("Repeat password: "):
-            raise SystemExit(f"Passwords must match and be at least {MIN_PASSWORD} characters.")
-        conn = physdb.connect()
-        conn.execute("""INSERT INTO users (username, password_hash, role) VALUES (?,?,?)
-                        ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,
-                        role=excluded.role, must_change=0""", (args.username, generate_password_hash(pw), args.role))
-        conn.commit()
-        print(f"User '{args.username}' saved as {args.role}.")
+        if physdb.connect().execute("SELECT count(*) FROM users").fetchone()[0] == 0:
+            print("No accounts exist yet. Let's create the first administrator.")
+            name = input("Username [admin]: ").strip() or "admin"
+            save_user(name, "admin")
+
+
+def save_user(username, role):
+    pw = getpass.getpass("Password: ")
+    if len(pw) < MIN_PASSWORD or pw != getpass.getpass("Repeat password: "):
+        raise SystemExit(f"Passwords must match and be at least {MIN_PASSWORD} characters.")
+    conn = physdb.connect()
+    conn.execute("""INSERT INTO users (username, password_hash, role) VALUES (?,?,?)
+                    ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,
+                    role=excluded.role, must_change=0""", (username, generate_password_hash(pw), role))
+    conn.commit()
+    print(f"User '{username}' saved as {role}.")
 
 
 if __name__ == "__main__":
