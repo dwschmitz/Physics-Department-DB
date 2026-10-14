@@ -18,6 +18,5 @@ if errorlevel 1 (
 )
 
 .venv\Scripts\python webapp.py ensure-admin || (pause & exit /b 1)
-echo Starting at http://127.0.0.1:5000  (press Ctrl+C to stop)
 .venv\Scripts\python webapp.py run
 pause

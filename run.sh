@@ -15,5 +15,4 @@ if ! cmp -s requirements.txt .venv/requirements.installed; then
 fi
 
 .venv/bin/python webapp.py ensure-admin
-echo "Starting at http://127.0.0.1:5000  (press Ctrl+C to stop)"
 exec .venv/bin/python webapp.py run

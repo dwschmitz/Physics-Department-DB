@@ -7,7 +7,11 @@ import hmac
 import os
 import re
 import secrets
+import socket
 import sqlite3
+import threading
+import urllib.request
+import webbrowser
 from pathlib import Path
 
 from flask import (Flask, Response, abort, flash, g, redirect, render_template,
@@ -544,17 +548,60 @@ def _persistent_secret():
     return path.read_text().strip()
 
 
+DEFAULT_PORT = 8123
+APP_MARKER = "Physics Graduate Students"
+
+
+def _port_free(host, port):
+    with socket.socket() as s:
+        try:
+            s.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+
+def _our_app_running(host, port):
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/login", timeout=1.5) as r:
+            return APP_MARKER in r.read(4000).decode("utf-8", "ignore")
+    except Exception:
+        return False
+
+
+def serve(host, port, open_browser=True):
+    """Start the server, coping with the usual 'it was already running' / 'port taken' cases."""
+    if _our_app_running(host, port):
+        url = f"http://{host}:{port}"
+        print(f"The app is already running at {url} -- opening it. (To restart it, close the "
+              "window it is running in first.)")
+        if open_browser:
+            webbrowser.open(url)
+        return
+    chosen = next((p for p in range(port, port + 20) if _port_free(host, p)), None)
+    if chosen is None:
+        raise SystemExit(f"Ports {port}-{port + 19} are all in use. Use --port to choose another.")
+    if chosen != port:
+        print(f"Port {port} is used by another program, so using port {chosen} instead.")
+    url = f"http://{host}:{chosen}"
+    print(f"Open {url} in your browser. Press Ctrl+C to stop.")
+    if open_browser:
+        threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+    create_app().run(host=host, port=chosen)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="start the development server")
-    r.add_argument("--host", default="127.0.0.1"); r.add_argument("--port", type=int, default=5000)
+    r.add_argument("--host", default="127.0.0.1"); r.add_argument("--port", type=int, default=DEFAULT_PORT)
+    r.add_argument("--no-browser", action="store_true", help="don't open a browser window")
     u = sub.add_parser("create-user", help="add a login, or reset an existing one's password/role")
     u.add_argument("username"); u.add_argument("--role", choices=ACCOUNT_ROLES, default="viewer")
     sub.add_parser("ensure-admin", help="if there are no logins yet, prompt to create the first administrator")
     args = p.parse_args()
     if args.cmd == "run":
-        create_app().run(host=args.host, port=args.port)
+        serve(args.host, args.port, not args.no_browser)
     elif args.cmd == "create-user":
         save_user(args.username, args.role)
     else:

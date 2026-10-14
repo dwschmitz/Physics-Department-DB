@@ -228,5 +228,17 @@ class WebTests(unittest.TestCase):
         self.assertEqual(c.get("/reports?kind=zzz&years=abc").status_code, 200)
 
 
+class ServeTests(unittest.TestCase):
+    def test_port_helpers(self):
+        import socket
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); busy = s.getsockname()[1]
+        try:
+            self.assertFalse(webapp._port_free("127.0.0.1", busy))
+            self.assertFalse(webapp._our_app_running("127.0.0.1", busy))  # not our app
+        finally:
+            s.close()
+        self.assertTrue(webapp._port_free("127.0.0.1", busy))
+
+
 if __name__ == "__main__":
     unittest.main()

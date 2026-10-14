@@ -24,7 +24,7 @@ Mac / Linux: `./run.sh`  |  Windows: double-click `run.bat`  (or run it from a t
 
 The launcher creates the virtual environment and installs dependencies on first use, asks you to
 create the first administrator if no accounts exist yet, then starts the server at
-http://127.0.0.1:5000. Press Ctrl+C in its window to stop it. It works from any folder, and it
+http://127.0.0.1:8123 and opens it in your browser. Press Ctrl+C in its window to stop it. It works from any folder, and it
 only reinstalls when `requirements.txt` changes.
 
 Without the launcher, the equivalent manual steps are:
@@ -45,6 +45,11 @@ person's password and role (for example, to regain admin access if no admin can 
   a password or deleting an account signs that person out immediately, and role changes apply at
   once. You can't delete your own account, so at least one administrator always remains. Anyone can
   change their own password by clicking their username in the top bar.
+- **If the page won't load:** the app can only run once at a time. If it is already running (for
+  example in another terminal window), the launcher says so and opens it instead of starting a second
+  copy. If something else is using port 8123 it picks the next free port and prints the address.
+  To stop a stray copy: close the window it runs in, or on Mac/Linux use `pkill -f "webapp.py run"`,
+  on Windows end "python" in Task Manager.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.
 - `webapp.py run` is Flask's development server. For real use serve it to other machines with a
   production server behind HTTPS, e.g. `gunicorn 'webapp:create_app()'` behind your department's
