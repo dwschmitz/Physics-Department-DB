@@ -50,8 +50,16 @@ def label(value):
     return str(value).replace("_", " ").capitalize() if value not in ("PhD", "MS", "TA", "RA") else value
 
 
-def F(name, text, kind="text", required=False, choices=None, help=None):
-    return dict(name=name, label=text, type=kind, required=required, choices=choices, help=help)
+def F(name, text, kind="text", required=False, choices=None, help=None, placeholder=False, maxlen=None):
+    """placeholder: show a "choose" entry so a required dropdown can't be left on its first option."""
+    return dict(name=name, label=text, type=kind, required=required, choices=choices, help=help,
+                placeholder=placeholder, maxlen=maxlen)
+
+
+def term_years():
+    """Years offered in the funding menu: newest first, from six years ahead back to 2000."""
+    this_year = datetime.date.today().year
+    return [(y, y) for y in range(this_year + 6, 1999, -1)]
 
 
 def fields_for(table, conn):
@@ -92,8 +100,10 @@ def fields_for(table, conn):
                 F("notes", "Notes", "textarea")]
     if table == "funding":
         return [F("kind", "Type", "select", True, enum(FUNDING_KINDS)),
-                F("term", "Term", required=True, help="For example: Fall 2026"),
+                F("term_year", "Year", "select", True, term_years(), placeholder=True),
+                F("term_season", "Term", "select", True, [(s, s) for s in physdb.SEASONS], placeholder=True),
                 F("source", "Source"),
+                F("poetaf_coa", "POETAF/COA", maxlen=60, help="Account number for this funding."),
                 F("amount", "Amount ($)", "number")]
     raise KeyError(table)
 
@@ -117,6 +127,8 @@ def parse_form(fields, form):
                 if raw not in allowed:
                     raise ValueError("Please choose one of the listed options.")
                 raw = allowed[raw]
+            elif f.get("maxlen") and len(raw) > f["maxlen"]:
+                raise ValueError(f"Enter at most {f['maxlen']} characters.")
             elif kind == "year":
                 raw = int(raw)
                 if not 1950 <= raw <= 2100:
@@ -147,6 +159,7 @@ def create_app(db_path=None):
                       PERMANENT_SESSION_LIFETIME=datetime.timedelta(hours=8))
     app.config["SECRET_KEY"] = os.environ.get("PHYSDB_SECRET") or _persistent_secret()
     app.jinja_env.filters["label"] = label
+    app.jinja_env.filters["term"] = physdb.term_label
 
     def db():
         if "db" not in g:
@@ -368,7 +381,8 @@ def create_app(db_path=None):
             errors, current = {}, (row or {"status": "active", "program": "PhD",
                                    "start_year": datetime.date.today().year,
                                    "start_date": datetime.date.today().isoformat(),
-                                   "outcome": "pending", "role": "advisor"})
+                                   "outcome": "pending", "role": "advisor",
+                                   "term_year": datetime.date.today().year})
         return render_template("form.html", title=title, fields=fields, values=current,
                                errors=errors, back=back)
 
@@ -427,7 +441,8 @@ def create_app(db_path=None):
                                 JOIN faculty f ON f.id = a.faculty_id WHERE a.student_id = ?
                                 ORDER BY a.end_date IS NOT NULL, a.start_date DESC""", (sid,)).fetchall()
         milestones = d.execute("SELECT * FROM milestones WHERE student_id = ? ORDER BY date", (sid,)).fetchall()
-        funding = d.execute("SELECT * FROM funding WHERE student_id = ? ORDER BY id DESC", (sid,)).fetchall()
+        funding = d.execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
+                            (sid,)).fetchall()
         return render_template("student.html", s=s, advising=advising, milestones=milestones,
                                funding=funding, titles=CHILD_TABLES)
 

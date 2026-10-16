@@ -4,6 +4,7 @@ import argparse
 import csv
 import datetime
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -12,13 +13,66 @@ DB_PATH = os.environ.get("PHYSDB_PATH", "physics_grads.db")
 SCHEMA = Path(__file__).with_name("schema.sql")
 
 
+# Terms in calendar order within a year (the university year runs Autumn, Winter, Spring, Summer).
+SEASONS = ["Autumn", "Winter", "Spring", "Summer"]
+# SQL expression giving chronological position of a season within its calendar year.
+SEASON_RANK_SQL = ("CASE term_season WHEN 'Winter' THEN 1 WHEN 'Spring' THEN 2 "
+                   "WHEN 'Summer' THEN 3 WHEN 'Autumn' THEN 4 END")
+# ORDER BY fragment: newest term first, entries without a term last.
+FUNDING_ORDER_SQL = f"term_year IS NULL, term_year DESC, {SEASON_RANK_SQL} DESC, id DESC"
+
+
 def connect(path=DB_PATH):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    legacy = _stash_old_funding(conn)
     conn.executescript(SCHEMA.read_text())
+    if legacy:
+        _restore_old_funding(conn)
     _migrate_users(conn)
     return conn
+
+
+def parse_term(text):
+    """Best-effort parse of old free-text terms like 'Fall 2026' or '2026 winter'."""
+    m = (re.search(r"(?i)\b(autumn|fall|winter|spring|summer)\b\D*?\b(\d{4})\b", text or "")
+         or re.search(r"(?i)\b(\d{4})\b\D*?\b(autumn|fall|winter|spring|summer)\b", text or ""))
+    if not m:
+        return None, None
+    a, b = m.groups()
+    season, year = (a, b) if a.isalpha() else (b, a)
+    season = "Autumn" if season.lower() == "fall" else season.capitalize()
+    return int(year), season
+
+
+def term_label(row):
+    """Display text for a funding row's term."""
+    if row["term_year"] is not None:
+        return f"{row['term_season']} {row['term_year']}"
+    return row["legacy_term"] or ""
+
+
+def _stash_old_funding(conn):
+    """If funding still has the old free-text `term` column, set the table aside for conversion."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(funding)")}
+    if not cols or "term_year" in cols:
+        return False
+    conn.executescript("DROP INDEX IF EXISTS idx_funding_student;"
+                       "ALTER TABLE funding RENAME TO funding_old;")
+    return True
+
+
+def _restore_old_funding(conn):
+    for r in conn.execute("SELECT * FROM funding_old").fetchall():
+        year, season = parse_term(r["term"])
+        conn.execute(
+            "INSERT INTO funding (id, student_id, kind, source, term_year, term_season, legacy_term, amount) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (r["id"], r["student_id"], r["kind"], r["source"], year, season,
+             None if year else r["term"], r["amount"]))
+    conn.executescript("DROP TABLE funding_old;")
+    conn.commit()
 
 
 def _migrate_users(conn):
@@ -87,11 +141,12 @@ def add_milestone(conn, student, kind, date, outcome="pending", notes=None):
     conn.commit()
 
 
-def add_funding(conn, student, kind, term, source=None, amount=None):
+def add_funding(conn, student, kind, year, season, source=None, amount=None, poetaf_coa=None):
     s = _find(conn, "students", student)
     conn.execute(
-        "INSERT INTO funding (student_id, kind, source, term, amount) VALUES (?,?,?,?,?)",
-        (s["id"], kind, source, term, amount))
+        "INSERT INTO funding (student_id, kind, source, poetaf_coa, term_year, term_season, amount) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (s["id"], kind, source, poetaf_coa, year, season, amount))
     conn.commit()
 
 
@@ -145,9 +200,11 @@ def show_student(conn, key):
     for r in conn.execute("SELECT * FROM milestones WHERE student_id = ? ORDER BY date", (s["id"],)):
         out.append(f"    {r['date']}  {r['kind']}: {r['outcome']}")
     out.append("  Funding:")
-    for r in conn.execute("SELECT * FROM funding WHERE student_id = ?", (s["id"],)):
+    for r in conn.execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {FUNDING_ORDER_SQL}",
+                          (s["id"],)):
         amt = f" ${r['amount']:,.0f}" if r["amount"] is not None else ""
-        out.append(f"    {r['term']}: {r['kind']} ({r['source'] or '-'}){amt}")
+        acct = f" [POETAF/COA {r['poetaf_coa']}]" if r["poetaf_coa"] else ""
+        out.append(f"    {term_label(r)}: {r['kind']} ({r['source'] or '-'}){acct}{amt}")
     return "\n".join(out)
 
 
@@ -203,7 +260,9 @@ def build_parser():
 
     a = sub.add_parser("add-funding")
     a.add_argument("student"); a.add_argument("kind", choices=["TA", "RA", "fellowship", "other"])
-    a.add_argument("term"); a.add_argument("--source"); a.add_argument("--amount", type=float)
+    a.add_argument("year", type=int); a.add_argument("season", type=str.capitalize, choices=SEASONS)
+    a.add_argument("--source"); a.add_argument("--amount", type=float)
+    a.add_argument("--poetaf-coa", help="POETAF/COA account number")
 
     a = sub.add_parser("set-status")
     a.add_argument("student"); a.add_argument("status",
@@ -237,7 +296,8 @@ def main(argv=None):
         elif c == "add-milestone":
             add_milestone(conn, args.student, args.kind, args.date, args.outcome, args.notes)
         elif c == "add-funding":
-            add_funding(conn, args.student, args.kind, args.term, args.source, args.amount)
+            add_funding(conn, args.student, args.kind, args.year, args.season, args.source, args.amount,
+                        args.poetaf_coa)
         elif c == "set-status":
             set_status(conn, args.student, args.status)
         elif c == "list":

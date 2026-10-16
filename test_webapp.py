@@ -182,12 +182,12 @@ class WebTests(unittest.TestCase):
         for table, data in {
             "advising": dict(faculty_id="1", role="advisor", start_date="2023-01-01"),
             "milestones": dict(kind="qualifying_exam", date="2024-05-01", outcome="passed"),
-            "funding": dict(kind="TA", term="Fall 2026", amount="12000"),
+            "funding": dict(kind="TA", term_year="2026", term_season="Autumn", poetaf_coa="1234567-ABC", amount="12000"),
         }.items():
             r = c.post(f"/students/1/{table}/new", data={**data, "csrf_token": t})
             self.assertEqual(r.status_code, 302, table)
         page = c.get("/students/1").get_data(as_text=True)
-        for needle in ("Bohr", "Qualifying exam", "$12,000"):
+        for needle in ("Bohr", "Qualifying exam", "$12,000", "Autumn 2026", "1234567-ABC"):
             self.assertIn(needle, page)
         r = c.post("/students/1/advising/1/edit", data=dict(faculty_id="1", role="advisor",
                    start_date="2023-01-01", end_date="2022-01-01", csrf_token=t))
@@ -199,6 +199,30 @@ class WebTests(unittest.TestCase):
         self.assertEqual(c.get("/faculty/1").status_code, 200)
         c.post("/students/1/delete", data={"csrf_token": t})
         self.assertEqual(c.get("/students/1").status_code, 404)
+
+    def test_funding_term_menu_sorting_and_account_field(self):
+        c = self.client("ed"); self.add_student(c); t = self.token(c)
+        form = c.get("/students/1/funding/new").get_data(as_text=True)
+        self.assertIn("POETAF/COA", form)
+        self.assertIn("&mdash; choose &mdash;", form)
+        for season in ("Autumn", "Winter", "Spring", "Summer"):
+            self.assertIn(f'<option value="{season}"', form)
+        base = dict(kind="RA", csrf_token=t)
+        # must pick both a year and a term; values outside the menu are rejected
+        for bad in (dict(term_year="", term_season="Autumn"), dict(term_year="2026", term_season=""),
+                    dict(term_year="2026", term_season="Fall"), dict(term_year="1850", term_season="Spring"),
+                    dict(term_year="2026", term_season="Spring", poetaf_coa="x" * 61)):
+            r = c.post("/students/1/funding/new", data={**base, **bad})
+            self.assertEqual(r.status_code, 200, bad)
+            self.assertIn("Please fix", r.get_data(as_text=True))
+        for year, season in [(2025, "Summer"), (2026, "Autumn"), (2026, "Winter"), (2025, "Autumn"), (2026, "Summer")]:
+            r = c.post("/students/1/funding/new", data={**base, "term_year": year, "term_season": season,
+                       "poetaf_coa": "<b>9</b>" if year == 2026 and season == "Winter" else ""})
+            self.assertEqual(r.status_code, 302)
+        page = c.get("/students/1").get_data(as_text=True)
+        order = [page.index(x) for x in ("Autumn 2026", "Summer 2026", "Winter 2026", "Autumn 2025", "Summer 2025")]
+        self.assertEqual(order, sorted(order))   # newest first, chronological within a year
+        self.assertIn("&lt;b&gt;9", page)        # account number is escaped
 
     def test_other_students_records_not_reachable(self):
         c = self.client("ed")

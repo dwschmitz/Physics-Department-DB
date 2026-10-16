@@ -51,8 +51,12 @@ CREATE TABLE IF NOT EXISTS funding (
     student_id  INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     kind        TEXT NOT NULL CHECK (kind IN ('TA', 'RA', 'fellowship', 'other')),
     source      TEXT,
-    term        TEXT NOT NULL,          -- e.g. 'Fall 2026'
-    amount      REAL
+    poetaf_coa  TEXT,                   -- POETAF/COA account number
+    term_year   INTEGER CHECK (term_year BETWEEN 1950 AND 2100),
+    term_season TEXT CHECK (term_season IN ('Winter', 'Spring', 'Summer', 'Autumn')),
+    legacy_term TEXT,                   -- free-text term from before the fixed menu; re-enter it
+    amount      REAL,
+    CHECK ((term_year IS NULL) = (term_season IS NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_advising_student   ON advising(student_id);

@@ -41,6 +41,46 @@ class PhysDBTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("UPDATE students SET status='bogus'")
 
+    def test_funding_and_term_parsing(self):
+        physdb.add_funding(self.conn, "U1001", "TA", 2026, "Autumn", "Dept", 12000, "ACCT-1")
+        physdb.add_funding(self.conn, "U1001", "RA", 2026, "Winter")
+        text = physdb.show_student(self.conn, "U1001")
+        self.assertIn("Autumn 2026", text); self.assertIn("POETAF/COA ACCT-1", text)
+        self.assertLess(text.index("Autumn 2026"), text.index("Winter 2026"))
+        with self.assertRaises(sqlite3.IntegrityError):
+            physdb.add_funding(self.conn, "U1001", "TA", 2026, "Fall")
+        for raw, want in {"Fall 2026": (2026, "Autumn"), "spring 2027": (2027, "Spring"),
+                          "2025 Summer": (2025, "Summer"), "Winter, 2024": (2024, "Winter"),
+                          "AY 2026": (None, None), "": (None, None), None: (None, None)}.items():
+            self.assertEqual(physdb.parse_term(raw), want, raw)
+
+    def test_old_funding_table_is_migrated(self):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "old.db")
+        c = sqlite3.connect(path)
+        c.executescript("""
+            CREATE TABLE students (id INTEGER PRIMARY KEY, university_id TEXT UNIQUE NOT NULL,
+              first_name TEXT NOT NULL, last_name TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
+              program TEXT NOT NULL DEFAULT 'PhD', status TEXT NOT NULL DEFAULT 'active',
+              start_year INTEGER NOT NULL, expected_grad_year INTEGER, research_area TEXT, notes TEXT);
+            CREATE TABLE funding (id INTEGER PRIMARY KEY,
+              student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+              kind TEXT NOT NULL, source TEXT, term TEXT NOT NULL, amount REAL);
+            CREATE INDEX idx_funding_student ON funding(student_id);
+            INSERT INTO students VALUES (1,'U1','A','B','a@b.c','PhD','active',2020,NULL,NULL,NULL);
+            INSERT INTO funding VALUES (1,1,'TA','Dept','Fall 2026',100), (2,1,'RA',NULL,'AY 25-26',200);
+        """)
+        c.commit(); c.close()
+        conn = physdb.connect(path)
+        rows = {r["id"]: r for r in conn.execute("SELECT * FROM funding")}
+        self.assertEqual((rows[1]["term_year"], rows[1]["term_season"], rows[1]["amount"]), (2026, "Autumn", 100))
+        self.assertEqual((rows[2]["term_year"], rows[2]["legacy_term"]), (None, "AY 25-26"))
+        self.assertEqual(physdb.term_label(rows[2]), "AY 25-26")
+        self.assertIsNone(rows[1]["poetaf_coa"])
+        self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name='funding_old'").fetchone()[0], 0)
+        physdb.connect(path)   # re-running on a migrated DB is a no-op
+        self.assertEqual(conn.execute("SELECT count(*) FROM funding").fetchone()[0], 2)
+
     def test_export(self):
         buf = io.StringIO()
         physdb.export_csv(self.conn, buf)

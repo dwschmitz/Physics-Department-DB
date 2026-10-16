@@ -10,7 +10,7 @@
     <label for="{{ f.name }}">{{ f.label }}{% if f.required %} <span class="req">*</span>{% endif %}</label>
     {% if f.type == 'select' %}
       <select id="{{ f.name }}" name="{{ f.name }}">
-        {% if not f.required %}<option value=""></option>{% endif %}
+        {% if f.placeholder %}<option value="">&mdash; choose &mdash;</option>{% elif not f.required %}<option value=""></option>{% endif %}
         {% for val, text in f.choices %}<option value="{{ val }}" {{ 'selected' if v|string == val|string }}>{{ text }}</option>{% endfor %}
       </select>
     {% elif f.type == 'textarea' %}
