@@ -79,6 +79,28 @@ class PhysDBTests(unittest.TestCase):
             self.assertEqual(physdb.current_term(day), (want, 2026), day)
         self.assertEqual(physdb.current_term(), physdb.current_term(datetime.date.today()))
 
+    def test_clock_at_a_date(self):
+        stu = {"matriculation_term": "Autumn", "matriculation_year": 2022, "status": "active"}
+        at = physdb.clock_label_at
+        self.assertEqual(at(stu, "2022-10-17"), "0.0")                 # during the matriculation term
+        self.assertEqual(at(stu, "2022-09-25"), "0.0")                 # first day of Autumn
+        self.assertEqual(at(stu, "2022-12-31"), "0.0")
+        self.assertEqual(at(stu, "2023-01-10"), "0.25")                # Winter 2023
+        self.assertEqual(at(stu, "2023-03-25"), "0.5")                 # Spring starts Mar 25
+        self.assertEqual(at(stu, "2024-05-01"), "1.5")                 # Spring 2024: 6 terms
+        self.assertEqual(at(stu, "2023-10-01"), "1.0")
+        self.assertEqual(at(stu, datetime.date(2024, 5, 1)), "1.5")    # a date object works too
+        self.assertEqual(at(stu, "2030-01-01"), "7.25")                # future (planned) dates work: Winter 2030, 29 terms in
+        self.assertEqual(at(stu, "2022-09-24"), "—")                   # Summer 2022: before they matriculated
+        self.assertEqual(at(stu, "2020-01-01"), "—")
+        for bad in ("", "not a date", "2024-13-45", None):
+            self.assertEqual(at(stu, bad), "—", bad)
+        # the student's status today doesn't matter for how far along they were then
+        for status in ("graduated", "withdrawn", "on_leave"):
+            self.assertEqual(at({**stu, "status": status}, "2024-05-01"), "1.5", status)
+            self.assertEqual(physdb.clock_label({**stu, "status": status}, ("Autumn", 2026)),
+                             "4.0" if status == "on_leave" else "—")
+
     def test_clock(self):
         now = ("Autumn", 2026)
         def clock(term, year, status="active", at=now):
@@ -213,6 +235,68 @@ class PhysDBTests(unittest.TestCase):
         n, prev, _ = physdb.copy_previous_funding(self.conn, sid("S2"), 2027, "Winter")
         self.assertEqual((n, prev), (2, ("Autumn", 2026)))
         self.assertEqual(rows("S2", 2027, "Winter"), want)                          # replaced Old / Old2
+
+    def _legacy_milestones_db(self, ddl_kinds, name):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), name)
+        c = sqlite3.connect(path)
+        c.executescript(f"""
+            CREATE TABLE students (id INTEGER PRIMARY KEY, university_id TEXT UNIQUE NOT NULL,
+              first_name TEXT NOT NULL, last_name TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active', matriculation_year INTEGER NOT NULL,
+              expected_grad_year INTEGER, research_area TEXT, notes TEXT);
+            INSERT INTO students VALUES (1,'U1','A','B','a@b.c','active',2020,NULL,NULL,NULL);
+            CREATE TABLE milestones (id INTEGER PRIMARY KEY,
+              student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+              kind TEXT NOT NULL CHECK (kind IN ({ddl_kinds})),
+              date TEXT NOT NULL,
+              outcome TEXT NOT NULL DEFAULT 'pending' CHECK (outcome IN ('pending', 'passed', 'conditional', 'failed')),
+              notes TEXT);
+            CREATE INDEX idx_milestones_student ON milestones(student_id);
+            INSERT INTO milestones VALUES (5, 1, 'qualifying_exam', '2022-05-01', 'passed', 'kept note');
+            INSERT INTO milestones VALUES (6, 1, 'thesis_defense', '2026-05-01', 'pending', NULL);
+        """)
+        c.commit(); c.close()
+        return path
+
+    def test_milestone_types_table_is_widened_keeping_rows(self):
+        path = self._legacy_milestones_db("'qualifying_exam','candidacy','thesis_proposal','thesis_defense','other'", "ms.db")
+        conn = physdb.connect(path)
+        rows = [tuple(r) for r in conn.execute("SELECT id, student_id, kind, date, outcome, notes FROM milestones ORDER BY id")]
+        self.assertEqual(rows, [(5, 1, "qualifying_exam", "2022-05-01", "passed", "kept note"),
+                                (6, 1, "thesis_defense", "2026-05-01", "pending", None)])
+        physdb.add_milestone(conn, "U1", "committee_formed", "2023-03-01", "passed")          # the new type is accepted
+        with self.assertRaises(sqlite3.IntegrityError):                                         # others still aren't
+            physdb.add_milestone(conn, "U1", "bogus", "2023-03-01")
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        self.assertNotIn("milestones_old", names); self.assertIn("idx_milestones_student", names)
+        physdb.connect(path)                                                                    # a second start changes nothing
+        self.assertEqual(conn.execute("SELECT count(*) FROM milestones").fetchone()[0], 3)
+        # deleting the student still removes their milestones (the foreign key survived the rebuild)
+        conn.execute("DELETE FROM students WHERE id = 1"); conn.commit()
+        self.assertEqual(conn.execute("SELECT count(*) FROM milestones").fetchone()[0], 0)
+
+    def test_an_interrupted_table_rebuild_is_finished_on_the_next_start(self):
+        kinds = "'qualifying_exam','candidacy','thesis_proposal','thesis_defense','other'"
+        # (1) killed right after the old table was set aside: the new, empty one is created and the rows come back
+        path = self._legacy_milestones_db(kinds, "crash.db")
+        c = sqlite3.connect(path)
+        c.executescript("DROP INDEX idx_milestones_student; ALTER TABLE milestones RENAME TO milestones_old;")
+        c.commit(); c.close()
+        conn = physdb.connect(path)
+        self.assertEqual([r[0] for r in conn.execute("SELECT id FROM milestones ORDER BY id")], [5, 6])
+        self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name = 'milestones_old'").fetchone()[0], 0)
+        # (2) killed part-way through copying the rows back: the missing ones are copied, nothing is doubled or lost
+        path = self._legacy_milestones_db(kinds, "partial.db")
+        c = sqlite3.connect(path)
+        c.executescript("DROP INDEX idx_milestones_student; ALTER TABLE milestones RENAME TO milestones_old;")
+        c.executescript(physdb.SCHEMA.read_text())
+        c.execute("INSERT INTO milestones SELECT * FROM milestones_old WHERE id = 5")        # only one row had been copied
+        c.commit(); c.close()
+        conn = physdb.connect(path)
+        self.assertEqual([tuple(r) for r in conn.execute("SELECT id, kind, notes FROM milestones ORDER BY id")],
+                         [(5, "qualifying_exam", "kept note"), (6, "thesis_defense", None)])
+        self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name = 'milestones_old'").fetchone()[0], 0)
 
     def test_funding_report(self):
         def add(uid, last, status="active"):

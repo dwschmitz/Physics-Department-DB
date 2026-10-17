@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS milestones (
     student_id  INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     kind        TEXT NOT NULL
                 CHECK (kind IN ('qualifying_exam', 'candidacy', 'thesis_proposal',
-                                'thesis_defense', 'other')),
+                                'thesis_defense', 'committee_formed', 'other')),
     date        TEXT NOT NULL,
     outcome     TEXT NOT NULL DEFAULT 'pending'
                 CHECK (outcome IN ('pending', 'passed', 'conditional', 'failed')),

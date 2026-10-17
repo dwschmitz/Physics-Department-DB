@@ -102,6 +102,12 @@ def clock_terms(student, now=None):
     return terms if terms >= 0 else None
 
 
+def _format_terms(terms):
+    """Terms -> years as text: 0 -> '0.0', 1 -> '0.25', 4 -> '1.0', 6 -> '1.5'."""
+    text = f"{terms / len(TERM_STARTS):.2f}"
+    return text[:-1] if text.endswith("0") else text
+
+
 def clock_label(student, now=None):
     """Years since matriculation counted in whole terms (0.25 per term), up to the current term.
 
@@ -109,10 +115,21 @@ def clock_label(student, now=None):
     withdrawn (no end term is recorded) and for students whose matriculation is still in the future.
     """
     terms = clock_terms(student, now)
-    if terms is None:
+    return "—" if terms is None else _format_terms(terms)
+
+
+def clock_label_at(student, when):
+    """The same clock as it stood on a given date (a date or 'YYYY-MM-DD'): used for milestones.
+
+    Unlike clock_label this ignores whether the student has since graduated or withdrawn, since the
+    question is how far along they were then. '—' if the date is before they matriculated (or isn't a date).
+    """
+    try:
+        day = when if isinstance(when, datetime.date) else datetime.date.fromisoformat(str(when))
+    except ValueError:
         return "—"
-    text = f"{terms / len(TERM_STARTS):.2f}"
-    return text[:-1] if text.endswith("0") else text
+    terms = term_index(*current_term(day)) - term_index(student["matriculation_term"], student["matriculation_year"])
+    return "—" if terms < 0 else _format_terms(terms)
 
 
 def connect(path=DB_PATH):
@@ -120,9 +137,11 @@ def connect(path=DB_PATH):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     legacy = _stash_old_funding(conn)
+    _stash_old_milestones(conn)
     conn.executescript(SCHEMA.read_text())
     if legacy:
         _restore_old_funding(conn, legacy)
+    _finish_interrupted_rebuilds(conn)
     _migrate_users(conn)
     _add_faculty_accounts(conn)
     _drop_program_column(conn)
@@ -131,6 +150,39 @@ def connect(path=DB_PATH):
     _migrate_matriculation(conn)
     _add_student_cnet(conn)
     return conn
+
+
+def _table_exists(conn, name):
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)).fetchone() is not None
+
+
+def _stash_old_milestones(conn):
+    """The milestone types are a CHECK rule SQLite can't change in place, so a table that predates a newly
+    allowed type ('committee_formed') is set aside, recreated from schema.sql, and its rows copied back."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'milestones'").fetchone()
+    if row is None or "'committee_formed'" in row[0]:
+        return False
+    conn.executescript("DROP INDEX IF EXISTS idx_milestones_student;"
+                       "ALTER TABLE milestones RENAME TO milestones_old;")
+    return True
+
+
+def _restore_old_milestones(conn):
+    old = {r[1] for r in conn.execute("PRAGMA table_info(milestones_old)")}
+    cols = ", ".join(r[1] for r in conn.execute("PRAGMA table_info(milestones)") if r[1] in old)
+    conn.executescript(f"INSERT OR IGNORE INTO milestones ({cols}) SELECT {cols} FROM milestones_old;"
+                       "DROP TABLE milestones_old;")
+    conn.commit()
+
+
+def _finish_interrupted_rebuilds(conn):
+    """If the program was stopped in the middle of a table rebuild, the old rows are still in <table>_old:
+    copy them back now (rows already restored are skipped) so nothing is ever lost."""
+    if _table_exists(conn, "milestones_old"):
+        _restore_old_milestones(conn)
+    if _table_exists(conn, "funding_old"):
+        _restore_old_funding(conn, "text_term" if "term" in {r[1] for r in conn.execute("PRAGMA table_info(funding_old)")}
+                             else "check")
 
 
 def _migrate_matriculation(conn):
@@ -231,14 +283,14 @@ def _restore_old_funding(conn, why="text_term"):
         # the 'Stipend Supplement' type was renamed 'Supplement': convert saved entries while copying
         picks = ", ".join("CASE kind WHEN 'stipend_supplement' THEN 'supplement' ELSE kind END"
                           if c == "kind" else c for c in cols)
-        conn.executescript(f"INSERT INTO funding ({', '.join(cols)}) SELECT {picks} FROM funding_old;"
+        conn.executescript(f"INSERT OR IGNORE INTO funding ({', '.join(cols)}) SELECT {picks} FROM funding_old;"
                            "DROP TABLE funding_old;")
         conn.commit()
         return
     for r in conn.execute("SELECT * FROM funding_old").fetchall():
         year, season = parse_term(r["term"])
         conn.execute(
-            "INSERT INTO funding (id, student_id, kind, source, term_year, term_season, legacy_term, amount) "
+            "INSERT OR IGNORE INTO funding (id, student_id, kind, source, term_year, term_season, legacy_term, amount) "
             "VALUES (?,?,?,?,?,?,?,?)",
             (r["id"], r["student_id"], r["kind"], r["source"], year, season,
              None if year else r["term"], r["amount"]))
@@ -571,7 +623,7 @@ def build_parser():
     a = sub.add_parser("add-milestone")
     a.add_argument("student")
     a.add_argument("kind", choices=["qualifying_exam", "candidacy", "thesis_proposal",
-                                    "thesis_defense", "other"])
+                                    "thesis_defense", "committee_formed", "other"])
     a.add_argument("date", help="YYYY-MM-DD")
     a.add_argument("--outcome", default="pending",
                    choices=["pending", "passed", "conditional", "failed"])

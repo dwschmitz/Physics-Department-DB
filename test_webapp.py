@@ -1060,6 +1060,68 @@ class WebTests(unittest.TestCase):
         fallback = f.get("/my?year=abc&season=Fall")                                              # bad input falls back
         self.assertEqual(fallback.status_code, 200); self.assertIn("Funding for", fallback.get_data(as_text=True))
 
+    # ======================= milestone clock, and the Committee Formed milestone =======================
+    def _milestone_world(self):
+        c = self.client("ad"); t = self.token(c)
+        self.add_student(c, matriculation_year="2022", matriculation_term="Autumn")          # student 1, matriculated Autumn 2022
+        c.post("/faculty/new", data=dict(first_name="N", last_name="Bohr", email="b@u.edu", cnet="nbohr", csrf_token=t))
+        c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2022-09-01", csrf_token=t))
+        for kind, date, outcome in (("committee_formed", "2023-03-01", "passed"), ("qualifying_exam", "2024-05-01", "passed"),
+                                    ("candidacy", "2022-06-01", "passed"), ("thesis_defense", "2022-10-17", "pending")):
+            r = c.post("/students/1/milestones/new", data=dict(kind=kind, date=date, outcome=outcome, csrf_token=t))
+            self.assertEqual(r.status_code, 302, kind)
+        return c, t
+
+    def _milestone_rows(self, html):
+        sect = html.split("<h2>Milestones")[1].split("<h2>Funding")[0]
+        return [re.findall(r"<td[^>]*>([^<]*)</td>", row)[:4] for row in re.findall(r"<tr><td>.*?</tr>", sect, re.S)]
+
+    def test_milestone_tables_show_the_clock_at_each_date(self):
+        c, t = self._milestone_world()
+        html = c.get("/students/1").get_data(as_text=True)
+        sect = html.split("<h2>Milestones")[1].split("<h2>Funding")[0]
+        heads = re.findall(r"<th[^>]*>([^<]*)</th>", sect.split("</tr>")[0])
+        self.assertEqual(heads[:5], ["Milestone", "Date", "Clock", "Outcome", "Notes"])      # Clock right after Date
+        self.assertEqual(self._milestone_rows(html), [
+            ["Candidacy", "2022-06-01", "—", "Passed"],                # before Autumn 2022: not matriculated yet
+            ["Thesis defense", "2022-10-17", "0.0", "Pending"],        # in the matriculation term
+            ["Committee Formed", "2023-03-01", "0.25", "Passed"],      # Winter 2023
+            ["Qualifying exam", "2024-05-01", "1.5", "Passed"]])       # Spring 2024: six terms in
+        # a student who has since graduated keeps the clock the milestone had at the time
+        c.post("/students/1/edit", data=dict(first_name="Ada", last_name="Lovelace", university_id="U1", cnet="stuaa",
+               email="ada@u.edu", citizenship="citizen", status="graduated", matriculation_year="2022",
+               matriculation_term="Autumn", csrf_token=t))
+        self.assertEqual(self._milestone_rows(c.get("/students/1").get_data(as_text=True))[3],
+                         ["Qualifying exam", "2024-05-01", "1.5", "Passed"])
+        # the same column on a faculty member's read-only page
+        self._make_faculty_login(c, t, fid=1)
+        f = self._faculty_client()
+        fhtml = f.get("/my/students/1").get_data(as_text=True)
+        fsect = fhtml.split("<h2>Milestones")[1].split("<h2>Funding")[0]
+        self.assertEqual(re.findall(r"<th[^>]*>([^<]*)</th>", fsect.split("</tr>")[0]), ["Milestone", "Date", "Clock", "Outcome"])
+        self.assertEqual(self._milestone_rows(fhtml), [
+            ["Candidacy", "2022-06-01", "—", "Passed"], ["Thesis defense", "2022-10-17", "0.0", "Pending"],
+            ["Committee Formed", "2023-03-01", "0.25", "Passed"], ["Qualifying exam", "2024-05-01", "1.5", "Passed"]])
+        # a student with no milestones still renders (empty row spans the new column)
+        c2 = self.client("ad"); t2 = self.token(c2)
+        self.add_student(c2, university_id="U2", email="u2@u.edu", last_name="Empty")
+        self.assertRegex(c2.get("/students/2").get_data(as_text=True), r'<td colspan="6" class="muted">None recorded')
+
+    def test_committee_formed_milestone(self):
+        c, t = self._milestone_world()
+        form = c.get("/students/1/milestones/new").get_data(as_text=True)
+        options = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', form.split('name="kind"')[1].split("</select>")[0])
+        self.assertEqual([v for v, _ in options], ["qualifying_exam", "candidacy", "thesis_proposal", "thesis_defense",
+                                                   "committee_formed", "other"])
+        self.assertIn(("committee_formed", "Committee Formed"), options)
+        self.assertIn("Committee Formed", c.get("/students/1").get_data(as_text=True))
+        bad = c.post("/students/1/milestones/new", data=dict(kind="committee_formd", date="2023-03-01", outcome="passed", csrf_token=t))
+        self.assertEqual(bad.status_code, 200); self.assertIn("Please fix", bad.get_data(as_text=True))
+        # it can be edited and chosen on the "behind schedule" report like any other milestone
+        r = c.get("/reports?kind=committee_formed&years=0")
+        self.assertEqual(r.status_code, 200); self.assertIn('<option value="committee_formed" selected>Committee Formed</option>', r.get_data(as_text=True))
+        self.assertNotIn("Lovelace", re.sub(r"\s+", " ", r.get_data(as_text=True)).split("<table")[1])   # they have one (passed)
+
     def test_faculty_summary_columns_and_active_counts(self):
         c, t = self._faculty_world(); self._make_faculty_login(c, t)
         f = self._faculty_client()

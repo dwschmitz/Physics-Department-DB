@@ -31,10 +31,10 @@ ROLE_ORDER = ACCOUNT_ROLES + ["faculty"]              # faculty logins are made 
 FACULTY_ENDPOINTS = {"faculty_home", "faculty_student", "account", "logout", "login", "static", "home"}
 MIN_PASSWORD = 10
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
-MILESTONE_KINDS = ["qualifying_exam", "candidacy", "thesis_proposal", "thesis_defense", "other"]
+MILESTONE_KINDS = ["qualifying_exam", "candidacy", "thesis_proposal", "thesis_defense", "committee_formed", "other"]
 OUTCOMES = ["pending", "passed", "conditional", "failed"]
 FUNDING_KINDS = ["TA", "RA", "fellowship", "supplement", "other"]
-DISPLAY_NAMES = {"citizen": "Citizen",
+DISPLAY_NAMES = {"committee_formed": "Committee Formed", "citizen": "Citizen",
                  "permanent_resident": "Permanent Resident", "international": "International"}
 
 CHILD_TABLES = {
@@ -503,8 +503,8 @@ def create_app(db_path=None):
             f"""SELECT a.role, a.start_date, a.end_date, f.first_name, f.last_name FROM advising a
                 JOIN faculty f ON f.id = a.faculty_id WHERE a.student_id = ? ORDER BY {physdb.ADVISING_ORDER_SQL}""",
             (sid,)).fetchall()
-        milestones = db().execute("SELECT kind, date, outcome FROM milestones WHERE student_id = ? ORDER BY date",
-                                  (sid,)).fetchall()
+        milestones = [{**dict(m), "clock": physdb.clock_label_at(s, m["date"])} for m in db().execute(
+            "SELECT kind, date, outcome FROM milestones WHERE student_id = ? ORDER BY date", (sid,))]
         funding = db().execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
                                (sid,)).fetchall()
         return render_template("faculty_student.html", s=s, advising=advising, milestones=milestones, funding=funding)
@@ -646,7 +646,8 @@ def create_app(db_path=None):
         advising = d.execute(f"""SELECT a.*, f.first_name, f.last_name FROM advising a
                                 JOIN faculty f ON f.id = a.faculty_id WHERE a.student_id = ?
                                 ORDER BY {physdb.ADVISING_ORDER_SQL}""", (sid,)).fetchall()
-        milestones = d.execute("SELECT * FROM milestones WHERE student_id = ? ORDER BY date", (sid,)).fetchall()
+        milestones = [{**dict(m), "clock": physdb.clock_label_at(s, m["date"])}
+                      for m in d.execute("SELECT * FROM milestones WHERE student_id = ? ORDER BY date", (sid,))]
         funding = d.execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
                             (sid,)).fetchall()
         return render_template("student.html", s=s, advising=advising, milestones=milestones,
