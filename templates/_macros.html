@@ -5,8 +5,8 @@
 {% endmacro %}
 
 {# Clickable, sortable column header. Import with context. #}
-{% macro sort_th(label, key, sort, sdir, title=None) %}
-<th{% if title %} title="{{ title }}"{% endif %} aria-sort="{{ ('ascending' if sdir == 'asc' else 'descending') if sort == key else 'none' }}">
+{% macro sort_th(label, key, sort, sdir, title=None, cls=None) %}
+<th{% if cls %} class="{{ cls }}"{% endif %}{% if title %} title="{{ title }}"{% endif %} aria-sort="{{ ('ascending' if sdir == 'asc' else 'descending') if sort == key else 'none' }}">
   <a class="sortlink{{ ' active' if sort == key }}" href="{{ sort_url(key, sort, sdir) }}">{{ label }}
     <span aria-hidden="true">{{ ('▲' if sdir == 'asc' else '▼') if sort == key else '↕' }}</span></a>
 </th>

@@ -383,6 +383,18 @@ class WebTests(unittest.TestCase):
                    query_string={"next": "/reports/funding?year=2026&season=Winter"})
         self.assertEqual(r.headers["Location"], "/reports/funding?year=2026&season=Winter")
 
+    def test_funding_report_source_column_is_wide_enough(self):
+        c = self.client("ed"); t = self.token(c); self.add_student(c)
+        html = c.get("/reports/funding").get_data(as_text=True)
+        self.assertIn(".source{min-width:20ch}", html)                       # room for ~20 characters
+        self.assertRegex(html, r'<th class="source"[^>]*>\s*<a [^>]*>Source')   # header and cells share the class
+        c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn",
+               source="Department of Energy", csrf_token=t))
+        from unittest import mock
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            html = c.get("/reports/funding").get_data(as_text=True)
+        self.assertIn('<td class="source">Department of Energy</td>', html)
+
     def test_funding_report_has_no_buttons_for_viewers(self):
         ed = self.client("ed"); t = self.token(ed); self.add_student(ed)
         ed.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", csrf_token=t))
