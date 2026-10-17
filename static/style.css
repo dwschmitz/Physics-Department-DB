@@ -9,8 +9,10 @@ table{border-collapse:collapse;width:100%;background:#fff;border:1px solid #d5d9
 th,td{text-align:left;padding:.45rem .7rem;border-bottom:1px solid #e6e9ee;vertical-align:top}
 th{background:#eceff3;font-size:.85rem;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}  /* a heading never wraps onto two lines */
 td.actions{white-space:nowrap;text-align:right}
-.btn,button.btn{display:inline-block;background:#800000;color:#fff;border:0;border-radius:4px;padding:.4rem .9rem;
- text-decoration:none;font-size:.95rem;cursor:pointer}
+.btn,button.btn{display:inline-block;background:#800000;color:#fff;border:1px solid #800000;border-radius:4px;padding:.4rem .9rem;
+ text-decoration:none;font-size:.95rem;cursor:pointer;
+ /* a <button> doesn't inherit these like a link does, which made form buttons (Clear, Filter, Save) shorter */
+ font-family:inherit;line-height:1.5;box-sizing:border-box;vertical-align:middle}
 .btn.secondary{background:#fff;color:#800000;border:1px solid #800000}
 .btn.danger{background:#fff;color:#b00020;border:1px solid #b00020}
 .btn.small{padding:.15rem .6rem;font-size:.85rem}

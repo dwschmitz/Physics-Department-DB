@@ -798,6 +798,16 @@ class WebTests(unittest.TestCase):
             h = vw.get("/reports/funding").get_data(as_text=True)
         self.assertIn("&lsaquo; Prev", h); self.assertIn("Next &rsaquo;", h)
 
+    def test_buttons_and_links_styled_as_buttons_are_the_same_height(self):
+        """Regression: <button> doesn't inherit line-height/font like <a> does, so Clear / Filter / Save came out
+        shorter than the link-buttons beside them. The shared .btn rule must normalise all of that."""
+        from pathlib import Path
+        css = (Path(webapp.__file__).parent / "static" / "style.css").read_text()
+        rule = re.search(r"\.btn,button\.btn\{(.*?)\}", css, re.S).group(1)
+        for needed in ("font-family:inherit", "line-height:1.5", "border:1px solid", "box-sizing:border-box"):
+            self.assertIn(needed, rule)
+        self.assertNotIn("border:0", rule)                         # filled buttons carry a border like the outlined ones
+
     def test_column_headings_never_wrap(self):
         """House rule: a column heading is always on one line, so columns widen rather than wrap a heading."""
         from pathlib import Path
