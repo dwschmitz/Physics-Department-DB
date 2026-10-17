@@ -13,6 +13,11 @@ class WebTests(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         path = os.path.join(self.tmp, "t.db")
         os.environ["PHYSDB_SECRET"] = "test"
+        # CSRF tokens are random URL-safe text, and a page can contain two-letter strings by chance. Tests that check
+        # "this short name is NOT on the page" would then fail about 1 run in 100, so tokens are constant in tests.
+        from unittest import mock
+        patcher = mock.patch.object(webapp.secrets, "token_urlsafe", lambda nbytes=32: "x" * 43)
+        patcher.start(); self.addCleanup(patcher.stop)
         self.app = webapp.create_app(path)
         conn = physdb.connect(path)
         for name, role in (("ed", "editor"), ("vw", "viewer"), ("ad", "admin")):
@@ -295,7 +300,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("2 without", html); self.assertIn("total $3,500", html)
         for needle in ("NSF", "COA-9", "$3,000", "Supplement", "$500", "&lt;b&gt;hi&lt;/b&gt;"):
             self.assertIn(needle, html)
-        self.assertNotIn("$999", html); self.assertNotIn("Dd", html)                          # on leave excluded
+        self.assertNotIn("$999", html); self.assertNotIn("Dd, Stu", html)                     # on leave excluded
         self.assertNotIn("cnet1", html)                                                       # CNET is not on screen
         self.assertNotIn("<b>hi</b>", html)
         row_cc = re.search(r"/students/3\">Cc.*?</tr>", html, re.S).group(0)
@@ -1032,7 +1037,7 @@ class WebTests(unittest.TestCase):
             page = f.get("/my").get_data(as_text=True)
         adv, com = page.split("Students whose committee I am on")
         self.assertEqual(re.findall(r'/my/students/(\d+)">', adv), ["1", "2"])                    # Aa, Bb: advisor + co-advisor
-        self.assertNotIn("Ff", adv); self.assertNotIn("Ee", adv + com)                            # ended / someone else's
+        self.assertNotIn("Ff, Stu", adv); self.assertNotIn("Ee, Stu", adv + com)                  # ended / someone else's
         self.assertEqual(re.findall(r">(\w+), Stu</td>", com), ["Cc", "Dd"])
         self.assertIn("Committee member", com); self.assertIn("Committee chair", com)
         self.assertIn("Marie Curie", com)                                                         # the advisor, named
