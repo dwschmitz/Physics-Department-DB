@@ -150,6 +150,32 @@ class PhysDBTests(unittest.TestCase):
             self.assertEqual(pt(*nt(season, year)), (season, year))
             self.assertEqual(nt(*pt(season, year)), (season, year))
 
+    def test_copy_funding_from_any_term(self):
+        physdb.add_student(self.conn, university_id="C1", first_name="F", last_name="C1", email="c1@m.o",
+                           matriculation_year=2022, expected_grad_year=None, research_area=None, notes=None)
+        sid = physdb._find(self.conn, "students", "C1")["id"]
+        physdb.add_funding(self.conn, "C1", "RA", 2025, "Spring", "Old", 111, "OLD-1", "two terms back")
+        physdb.add_funding(self.conn, "C1", "TA", 2026, "Summer", "Recent", 222)
+        physdb.add_funding(self.conn, "C1", "fellowship", 2026, "Autumn", "Existing", 9)
+        got = lambda y, s: [tuple(r) for r in self.conn.execute(
+            "SELECT kind, source, poetaf_coa, amount, notes FROM funding WHERE student_id = ? AND term_year = ? "
+            "AND term_season = ?", (sid, y, s))]
+        # copy from a term that is NOT the previous one; the existing Autumn entry is replaced
+        self.assertEqual(physdb.copy_funding(self.conn, sid, 2025, "Spring", 2026, "Autumn"), (1, 1))
+        self.assertEqual(got(2026, "Autumn"), [("RA", "Old", "OLD-1", 111.0, "two terms back")])
+        self.assertEqual(got(2025, "Spring"), [("RA", "Old", "OLD-1", 111.0, "two terms back")])   # source untouched
+        self.assertEqual(got(2026, "Summer"), [("TA", "Recent", None, 222.0, None)])             # others untouched
+        # a source with nothing in it changes nothing
+        self.assertEqual(physdb.copy_funding(self.conn, sid, 2024, "Winter", 2026, "Autumn"), (0, 0))
+        self.assertEqual(len(got(2026, "Autumn")), 1)
+        # copying a term onto itself is refused
+        with self.assertRaises(ValueError):
+            physdb.copy_funding(self.conn, sid, 2026, "Autumn", 2026, "Autumn")
+        self.assertEqual(len(got(2026, "Autumn")), 1)
+        # the "previous term" helper is just the common case
+        self.assertEqual(physdb.copy_previous_funding(self.conn, sid, 2026, "Autumn"), (1, ("Summer", 2026), 1))
+        self.assertEqual(got(2026, "Autumn"), [("TA", "Recent", None, 222.0, None)])
+
     def test_copy_previous_funding(self):
         def add(uid):
             physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=uid, email=f"{uid}@m.o",

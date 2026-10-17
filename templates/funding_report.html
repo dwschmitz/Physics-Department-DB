@@ -40,19 +40,42 @@
     {{ post_button(url_for('child_delete', sid=r.student_id, table='funding', rid=r.funding_id, next=here), "Clear",
          "Delete this funding entry (" ~ r.kind|label ~ (", $" ~ '{:,.0f}'.format(r.amount) if r.amount is not none else "") ~ ") for " ~ who ~ " in " ~ term ~ "? This cannot be undone.",
          cls="btn danger small") }}
-    {{ post_button(url_for('funding_copy_prev', sid=r.student_id), "Copy Prev",
-         ("Replace the " ~ this_counts[r.student_id] ~ " funding entr" ~ ("y" if this_counts[r.student_id] == 1 else "ies") ~ " for " ~ who ~ " in " ~ term
-          ~ " with a copy of " ~ prev_counts[r.student_id] ~ " from " ~ prev_label ~ "? The current " ~ ("entry" if this_counts[r.student_id] == 1 else "entries") ~ " will be deleted.")
-         if prev_counts.get(r.student_id) else None,
-         fields={"year": year, "season": season, "next": here}) }}
+    <a class="btn secondary small" data-copy href="{{ url_for('funding_copy', sid=r.student_id, year=year, season=season, next=here) }}"
+        title="Copy funding from another term into {{ term }}">Copy</a>
     {% if r.last_of_student %}<a class="btn small plus" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}"
         title="Add another funding entry for {{ who }} in {{ term }}" aria-label="Add another funding entry for {{ who }} in {{ term }}">+</a>{% endif %}
   {% else %}
-    {{ post_button(url_for('funding_copy_prev', sid=r.student_id), "Copy Prev", fields={"year": year, "season": season, "next": here}) }}
+    <a class="btn secondary small" data-copy href="{{ url_for('funding_copy', sid=r.student_id, year=year, season=season, next=here) }}"
+        title="Copy funding from another term into {{ term }}">Copy</a>
     <a class="btn small plus" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}"
         title="Add a funding entry for {{ who }} in {{ term }}" aria-label="Add a funding entry for {{ who }} in {{ term }}">+</a>
   {% endif %}
 </td>{% endif %}
 </tr>
 {% else %}<tr><td colspan="9" class="muted">There are no active students.</td></tr>{% endfor %}</table>
+{% if can_edit %}
+<dialog id="copy-dialog" aria-label="Copy funding from another term"></dialog>
+<script>
+(function () {
+  var dlg = document.getElementById('copy-dialog');
+  if (!dlg || !dlg.showModal) return;       // very old browsers: the Copy links still work as plain pages
+  function load(url) {
+    return fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'fragment=1', {credentials: 'same-origin'})
+      .then(function (r) { if (!r.ok) { throw new Error(r.status); } return r.text(); })
+      .then(function (html) { dlg.innerHTML = html; });
+  }
+  document.addEventListener('click', function (e) {
+    var open = e.target.closest('a[data-copy]');
+    if (open) {
+      e.preventDefault();
+      load(open.href).then(function () { dlg.showModal(); }, function () { window.location = open.href; });
+      return;
+    }
+    var step = e.target.closest('#copy-dialog a[data-step]');
+    if (step) { e.preventDefault(); load(step.href).catch(function () { window.location = step.href; }); return; }
+    if (e.target.closest('#copy-dialog [data-close]')) { e.preventDefault(); dlg.close(); }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

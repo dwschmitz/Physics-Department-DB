@@ -55,10 +55,12 @@ person's password and role (for example, to regain admin access if no admin can 
   their funding for that term (type, source, POETAF/COA, amount, notes). Active students with nothing
   recorded still appear, with empty fields; a student with several entries gets one row per entry.
   Students on leave, graduated or withdrawn are not included. Download it as CSV for a spreadsheet.
-  Editors get an **Edit** button on each funding entry and a **+** button (term pre-filled) for adding an entry; saving or cancelling returns to the same report. **Copy Prev** copies all of the
-  student's funding from the term just before (type, source, POETAF/COA, amount, notes), replacing what the
-  student already has for the displayed term (it asks first); if the earlier term has nothing, nothing changes.
-  **Clear** deletes that row's entry (it asks first).
+  Editors get these buttons on each row: **Edit** (the entry), **Clear** (deletes that row's entry; it asks
+  first), **Copy**, and **+** (adds an entry; term pre-filled). Saving or cancelling returns to the same report.
+  **Copy** opens a window for copying another term's funding into the displayed term for that student: it starts
+  on the previous term, **Prev / Next** step through other terms, and each term's entries (type, source,
+  POETAF/COA, amount, notes) are shown so you can pick the one you want. The window also shows what is
+  currently recorded and warns that copying replaces it. If the chosen term has nothing, nothing changes.
   The **+** button, always last in the row, adds an entry for that student and term; it appears on a student's last row, so a second entry in the same term (e.g. an RA plus a supplement) is one click away.
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.

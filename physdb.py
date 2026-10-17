@@ -62,26 +62,35 @@ def next_term(season, year):
     return TERM_STARTS[n % len(TERM_STARTS)][0], n // len(TERM_STARTS)
 
 
-def copy_previous_funding(conn, student_id, year, season):
-    """Make a student's funding for (season, year) a copy of their funding the term before.
+def copy_funding(conn, student_id, from_year, from_season, to_year, to_season):
+    """Make a student's funding for one term a copy of their funding for another term.
 
-    Every entry of the previous term (type, source, POETAF/COA, amount, notes) is copied. Any entries the
-    student already has for the displayed term are replaced. If the previous term has no entries nothing is
-    changed at all. Returns (entries copied, previous term as (season, year), entries replaced).
+    Every entry of the source term (type, source, POETAF/COA, amount, notes) is copied. Any entries the student
+    already has for the target term are replaced. If the source term has no entries nothing is changed at all.
+    Returns (entries copied, entries replaced).
     """
-    prev_season, prev_year = previous_term(season, year)
-    prev = conn.execute("SELECT * FROM funding WHERE student_id = ? AND term_year = ? AND term_season = ? "
-                        "ORDER BY id", (student_id, prev_year, prev_season)).fetchall()
-    if not prev:
-        return 0, (prev_season, prev_year), 0
+    if (from_year, from_season) == (to_year, to_season):
+        raise ValueError("choose a different term to copy from")
+    src = conn.execute("SELECT * FROM funding WHERE student_id = ? AND term_year = ? AND term_season = ? "
+                       "ORDER BY id", (student_id, from_year, from_season)).fetchall()
+    if not src:
+        return 0, 0
     with conn:   # all or nothing
         replaced = conn.execute("DELETE FROM funding WHERE student_id = ? AND term_year = ? AND term_season = ?",
-                                (student_id, year, season)).rowcount
-        for r in prev:
+                                (student_id, to_year, to_season)).rowcount
+        for r in src:
             conn.execute("INSERT INTO funding (student_id, kind, source, poetaf_coa, term_year, term_season, "
                          "amount, notes) VALUES (?,?,?,?,?,?,?,?)",
-                         (student_id, r["kind"], r["source"], r["poetaf_coa"], year, season, r["amount"], r["notes"]))
-    return len(prev), (prev_season, prev_year), replaced
+                         (student_id, r["kind"], r["source"], r["poetaf_coa"], to_year, to_season,
+                          r["amount"], r["notes"]))
+    return len(src), replaced
+
+
+def copy_previous_funding(conn, student_id, year, season):
+    """copy_funding from the term just before (season, year). Returns (copied, previous term, replaced)."""
+    prev_season, prev_year = previous_term(season, year)
+    copied, replaced = copy_funding(conn, student_id, prev_year, prev_season, year, season)
+    return copied, (prev_season, prev_year), replaced
 
 
 def clock_terms(student, now=None):

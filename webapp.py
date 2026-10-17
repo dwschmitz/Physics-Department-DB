@@ -676,39 +676,75 @@ def create_app(db_path=None):
         offered = {y for y, _ in term_years()}                 # the Year menu's range; stepping stops at its ends
         step_url = lambda s, y: (url_for("funding_report", year=y, season=s, sort=sort, dir=sdir)
                                  if y in offered else None)
-        prev_counts = {r[0]: r[1] for r in db().execute(
-            "SELECT student_id, count(*) FROM funding WHERE term_year = ? AND term_season = ? GROUP BY student_id",
-            (prev_year, prev_season))}
-        this_counts = {}
-        for r in rows:
-            if r["funding_id"] is not None:
-                this_counts[r["student_id"]] = this_counts.get(r["student_id"], 0) + 1
         return render_template(
             "funding_report.html", rows=rows, year=year, season=season, sort=sort, sdir=sdir,
             years=term_years(), seasons=physdb.SEASONS, n_students=len(students), n_funded=len(funded),
             total=sum(r["amount"] or 0 for r in rows), undated=physdb.undated_funding_count(db()),
             here=request.full_path.rstrip("?"), prev_label=f"{prev_season} {prev_year}",
-            prev_counts=prev_counts, this_counts=this_counts,
             prev_url=step_url(prev_season, prev_year), next_url=step_url(next_season, next_year),
             next_label=f"{next_season} {next_year}")
 
-    @app.post("/students/<int:sid>/funding/copy-prev")
-    def funding_copy_prev(sid):
+    @app.route("/students/<int:sid>/funding/copy", methods=["GET", "POST"])
+    def funding_copy(sid):
+        """Copy another term's funding into a term. GET shows what would be copied (as a page, or just the
+        dialog body with ?fragment=1); POST does it. Params: year/season = the term copied INTO,
+        from_year/from_season = the term copied FROM (default: the term before), next = where to return."""
+        require_editor()
         s = get_or_404("students", sid)
-        try:
-            year, season = int(request.form.get("year", "")), request.form.get("season", "")
-        except ValueError:
-            abort(400)
-        if season not in physdb.SEASONS or year not in [y for y, _ in term_years()]:
-            abort(400)
-        n, (prev_season, prev_year), replaced = physdb.copy_previous_funding(db(), sid, year, season)
-        who = f"{s['last_name']}, {s['first_name']}"
-        if n == 0:
-            flash(f"{who} has no funding recorded for {prev_season} {prev_year}, so nothing was copied.", "error")
+        values = request.values
+        offered = {y for y, _ in term_years()}
+        source_years = set(range(min(offered) - 1, max(offered) + 1))    # one year further back than the menus
+
+        def parse(prefix, years):
+            try:
+                year = int(values.get(prefix + "year", ""))
+            except ValueError:
+                abort(400)
+            season = values.get(prefix + "season", "")
+            if season not in physdb.SEASONS or year not in years:
+                abort(400)
+            return season, year
+
+        to_season, to_year = parse("", offered)
+        if values.get("from_year") or values.get("from_season"):
+            from_season, from_year = parse("from_", source_years)
         else:
-            flash(f"Copied {n} funding entr{'y' if n == 1 else 'ies'} from {prev_season} {prev_year} to "
-                  f"{season} {year} for {who}" + (f" (replacing {replaced})." if replaced else "."), "ok")
-        return redirect(_safe_path(request.form.get("next")) or url_for("student", sid=sid))
+            from_season, from_year = physdb.previous_term(to_season, to_year)
+        back = _safe_path(values.get("next")) or url_for("student", sid=sid)
+        who = f"{s['last_name']}, {s['first_name']}"
+        target, source = f"{to_season} {to_year}", f"{from_season} {from_year}"
+        same = (from_season, from_year) == (to_season, to_year)
+
+        if request.method == "POST":
+            if same:
+                flash("Choose a different term to copy from.", "error")
+            else:
+                n, replaced = physdb.copy_funding(db(), sid, from_year, from_season, to_year, to_season)
+                if n == 0:
+                    flash(f"{who} has no funding recorded for {source}, so nothing was copied.", "error")
+                else:
+                    flash(f"Copied {n} funding entr{'y' if n == 1 else 'ies'} from {source} to {target} for {who}"
+                          + (f" (replacing {replaced})." if replaced else "."), "ok")
+            return redirect(back)
+
+        def entries(year, season):
+            return [dict(r) for r in db().execute(
+                "SELECT * FROM funding WHERE student_id = ? AND term_year = ? AND term_season = ? ORDER BY id",
+                (sid, year, season))]
+
+        def step(season, year):
+            return (url_for("funding_copy", sid=sid, year=to_year, season=to_season, from_year=year,
+                            from_season=season, next=back) if year in source_years else None)
+
+        prev_season, prev_year = physdb.previous_term(from_season, from_year)
+        next_season, next_year = physdb.next_term(from_season, from_year)
+        page = render_template(
+            "_funding_copy_body.html" if request.args.get("fragment") else "funding_copy.html",
+            s=s, who=who, target=target, source=source, same=same, back=back,
+            to_year=to_year, to_season=to_season, from_year=from_year, from_season=from_season,
+            source_entries=entries(from_year, from_season), target_entries=entries(to_year, to_season),
+            prev_url=step(prev_season, prev_year), next_url=step(next_season, next_year))
+        return page
 
     @app.route("/reports/funding.csv")
     def funding_report_csv():

@@ -1,0 +1,40 @@
+{# Body of the "copy funding from another term" dialog (also shown as a plain page without JavaScript). #}
+{% macro term_table(entries, empty_text) %}
+  {% if entries %}
+  <table class="mini"><tr><th>Type</th><th>Source</th><th>POETAF/COA</th><th>Amount</th><th>Notes</th></tr>
+  {% for e in entries %}<tr><td>{{ e.kind|label }}</td><td>{{ e.source or '' }}</td><td style="white-space:nowrap">{{ e.poetaf_coa or '' }}</td>
+    <td>{% if e.amount is not none %}${{ '{:,.0f}'.format(e.amount) }}{% endif %}</td>
+    <td style="white-space:pre-wrap">{{ e.notes or '' }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p class="muted">{{ empty_text }}</p>{% endif %}
+{% endmacro %}
+<div class="copy-body">
+  <h2>Copy funding into {{ target }}</h2>
+  <p class="muted">{{ who }}</p>
+  <div class="copy-stepper">
+    {% if prev_url %}<a class="btn secondary small" data-step href="{{ prev_url }}" title="Show the term before {{ source }}">&lsaquo; Prev</a>
+    {% else %}<span class="btn secondary small disabled">&lsaquo; Prev</span>{% endif %}
+    <strong class="copy-source">{{ source }}</strong>
+    {% if next_url %}<a class="btn secondary small" data-step href="{{ next_url }}" title="Show the term after {{ source }}">Next &rsaquo;</a>
+    {% else %}<span class="btn secondary small disabled">Next &rsaquo;</span>{% endif %}
+  </div>
+  {% if same %}
+    <p class="flash error">That is the term you are copying <em>into</em>. Use Prev / Next to pick a different term.</p>
+  {% else %}
+    {{ term_table(source_entries, "No funding is recorded for " ~ source ~ ".") }}
+  {% endif %}
+  <h3>Now recorded for {{ target }}</h3>
+  {{ term_table(target_entries, "Nothing is recorded yet.") }}
+  {% if target_entries and source_entries and not same %}
+    <p class="flash error">Copying will <strong>replace</strong> the {{ target_entries|length }} entr{{ 'y' if target_entries|length == 1 else 'ies' }} above
+      with the {{ source_entries|length }} from {{ source }}.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('funding_copy', sid=s.id) }}" class="copy-actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="year" value="{{ to_year }}"><input type="hidden" name="season" value="{{ to_season }}">
+    <input type="hidden" name="from_year" value="{{ from_year }}"><input type="hidden" name="from_season" value="{{ from_season }}">
+    <input type="hidden" name="next" value="{{ back }}">
+    <button class="btn" {{ 'disabled' if same or not source_entries }}>Copy {{ source }} to {{ target }}</button>
+    <a class="btn secondary" data-close href="{{ back }}">Cancel</a>
+  </form>
+</div>

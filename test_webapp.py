@@ -414,7 +414,7 @@ class WebTests(unittest.TestCase):
         c = self.client("ed"); t = self.token(c); self.add_student(c)
         html = c.get("/reports/funding").get_data(as_text=True)
         self.assertIn(".source{min-width:20ch}", html)                       # room for ~20 characters
-        self.assertIn(".wide td.actions{white-space:nowrap", html)           # Edit / Copy Prev / Clear never wrap
+        self.assertIn(".wide td.actions{white-space:nowrap", html)           # Edit / Clear / Copy / + never wrap
         self.assertRegex(html, r'<th class="source"[^>]*>\s*<a [^>]*>Source')   # header and cells share the class
         c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn",
                source="Department of Energy", csrf_token=t))
@@ -532,27 +532,30 @@ class WebTests(unittest.TestCase):
     def test_funding_report_row_buttons(self):
         c, t = self._funding_setup()
         html, rows = self._report_forms(c, "/reports/funding?season=Autumn&year=2026")
-        labels = lambda row: re.findall(r">(Edit|\+|Copy Prev|Clear)</(?:a|button)>", row)
+        labels = lambda row: re.findall(r">(Edit|\+|Copy|Clear)</(?:a|button)>", row)
         self.assertEqual([labels(r) for r in rows["1"]],                                         # funded rows; the student's
-                         [["Edit", "Clear", "Copy Prev"], ["Edit", "Clear", "Copy Prev", "+"]])    # last row also offers +
-        self.assertEqual(labels(rows["2"][0]), ["Copy Prev", "+"])                               # empty rows: the "+" is
-        self.assertEqual(labels(rows["3"][0]), ["Copy Prev", "+"])                               # last, as on funded rows
-        # every button's own form carries a real CSRF token
+                         [["Edit", "Clear", "Copy"], ["Edit", "Clear", "Copy", "+"]])              # last row also offers +
+        self.assertEqual(labels(rows["2"][0]), ["Copy", "+"])                                    # empty rows: the "+" is
+        self.assertEqual(labels(rows["3"][0]), ["Copy", "+"])                                    # last, as on funded rows
+        # every form button (Clear) carries a real CSRF token; Copy and + are links, not forms
         for rws in rows.values():
             for row in rws:
                 tokens = re.findall(r'name="csrf_token" value="([^"]*)"', row)
-                self.assertTrue(tokens and all(tokens), row)
-        # confirmations: destructive actions warn; Copy Prev on an empty row doesn't
+                self.assertEqual(len(tokens), row.count("<form"), row)
+                self.assertTrue(all(tokens), row)
+        # Clear warns before deleting; Copy opens the chooser window instead of asking up front
         text = html.replace("&#34;", '"').replace("&#39;", "'")
         self.assertIn("Delete this funding entry (RA, $100) for Aa, Stu in Autumn 2026? This cannot be undone.", text)
-        self.assertIn("Replace the 2 funding entries for Aa, Stu in Autumn 2026 with a copy of 1 from Summer 2026?", text)
-        self.assertNotIn("onsubmit", rows["3"][0])                                               # nothing to lose
-        self.assertNotIn("onsubmit", rows["2"][0])
+        self.assertNotIn("Replace the", text)
+        for rws in rows.values():
+            for row in rws:
+                self.assertRegex(row, r'<a class="btn secondary small" data-copy href="/students/\d+/funding/copy\?[^"]*"')
+        self.assertIn('<dialog id="copy-dialog"', html)
 
     def test_copy_prev_on_an_empty_row_creates_matching_entries(self):
         c, t = self._funding_setup()
         report = "/reports/funding?season=Autumn&year=2026&sort=amount&dir=desc"
-        r = c.post("/students/3/funding/copy-prev", data=dict(year=2026, season="Autumn", next=report, csrf_token=t))
+        r = c.post("/students/3/funding/copy", data=dict(year=2026, season="Autumn", next=report, csrf_token=t))
         self.assertEqual((r.status_code, r.headers["Location"]), (302, report))                 # back to the same view
         conn = physdb.connect(self.app.config["DB_PATH"])
         got = [tuple(x) for x in conn.execute("SELECT kind, source, poetaf_coa, amount, notes, term_year, term_season "
@@ -566,7 +569,7 @@ class WebTests(unittest.TestCase):
 
     def test_copy_prev_on_a_funded_row_replaces_this_terms_entries(self):
         c, t = self._funding_setup()
-        r = c.post("/students/1/funding/copy-prev", data=dict(year=2026, season="Autumn", csrf_token=t))
+        r = c.post("/students/1/funding/copy", data=dict(year=2026, season="Autumn", csrf_token=t))
         self.assertEqual(r.headers["Location"], "/students/1")                                  # no next -> student page
         conn = physdb.connect(self.app.config["DB_PATH"])
         got = [tuple(x) for x in conn.execute("SELECT kind, source, poetaf_coa, amount, notes FROM funding "
@@ -577,7 +580,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(summer, 1)
         # a student whose previous term is empty: friendly message, and nothing is lost
         c.post("/students/2/funding/new", data=dict(kind="TA", term_year=2026, term_season="Autumn", amount="1", csrf_token=t))
-        r = c.post("/students/2/funding/copy-prev", data=dict(year=2026, season="Autumn", next="/reports/funding", csrf_token=t),
+        r = c.post("/students/2/funding/copy", data=dict(year=2026, season="Autumn", next="/reports/funding", csrf_token=t),
                    follow_redirects=True)
         self.assertIn("no funding recorded for Summer 2026, so nothing was copied", r.get_data(as_text=True))
         conn = physdb.connect(self.app.config["DB_PATH"])
@@ -598,27 +601,162 @@ class WebTests(unittest.TestCase):
         html, rows = self._report_forms(c, report)
         self.assertEqual(len(rows["1"]), 1)                                                     # the supplement is still there
         self.assertIn("Supplement", rows["1"][0]); self.assertNotIn(">Now<", html)
-        # clearing the last one leaves an empty row offering Add / Copy Prev again
+        # clearing the last one leaves an empty row offering Copy / + again
         second = re.search(r'action="([^"]+/delete[^"]*)"', rows["1"][0]).group(1).replace("&amp;", "&")
         c.post(second, data={"csrf_token": t})
         html, rows = self._report_forms(c, report)
-        self.assertEqual(re.findall(r">(Edit|\+|Copy Prev|Clear)</(?:a|button)>", rows["1"][0]), ["Copy Prev", "+"])
+        self.assertEqual(re.findall(r">(Edit|\+|Copy|Clear)</(?:a|button)>", rows["1"][0]), ["Copy", "+"])
         # other terms are untouched
         self.assertIn("OLD-1", c.get("/reports/funding?season=Summer&year=2026").get_data(as_text=True))
+
+    def _copy_dialog(self, c, sid=1, to="year=2026&season=Autumn", frm="", nxt="/reports/funding", fragment=True):
+        from urllib.parse import quote
+        qs = f"/students/{sid}/funding/copy?{to}" + (f"&{frm}" if frm else "") \
+             + (f"&next={quote(nxt, safe='')}" if nxt else "") + ("&fragment=1" if fragment else "")
+        return c.get(qs)
+
+    @staticmethod
+    def _steps(html):
+        """(label, href) for the dialog's Prev / Next links, hrefs exactly as a browser would follow them."""
+        return {m.group(2).strip(): m.group(1).replace("&amp;", "&") for m in re.finditer(
+            r'<a class="btn secondary small" data-step href="([^"]+)"[^>]*>(&lsaquo; Prev|Next &rsaquo;)</a>', html)}
+
+    def test_copy_dialog_starts_on_the_previous_term_and_shows_its_funding(self):
+        c, t = self._funding_setup()
+        r = self._copy_dialog(c)
+        self.assertEqual(r.status_code, 200)
+        html = r.get_data(as_text=True)
+        self.assertNotIn("<html", html)                                      # just the dialog body, for the pop-up
+        self.assertIn("Copy funding into Autumn 2026", html); self.assertIn("Aa, Stu", html)
+        self.assertIn('<strong class="copy-source">Summer 2026</strong>', html)       # default: the previous term
+        for needle in ("Before", "OLD-1", "$300", "from summer"):                       # the source term's parameters
+            self.assertIn(needle, html)
+        self.assertIn("Now recorded for Autumn 2026", html)                             # and what is there now
+        for needle in ("Now", "$100", "Supplement", "$5"):
+            self.assertIn(needle, html)
+        self.assertIn("will <strong>replace</strong> the 2 entries above with the 1 from Summer 2026", " ".join(html.split()))
+        self.assertIn("Copy Summer 2026 to Autumn 2026</button>", html)
+        self.assertNotRegex(html, r"<button class=\"btn\" disabled")
+        # the same address without ?fragment=1 is a normal page (works without JavaScript)
+        page = self._copy_dialog(c, fragment=False).get_data(as_text=True)
+        self.assertIn("<html", page); self.assertIn("Copy funding into Autumn 2026", page)
+        # a student with nothing in the target term: no replace warning
+        html3 = self._copy_dialog(c, sid=3).get_data(as_text=True)
+        self.assertIn("RA", html3); self.assertIn("COA-77", html3); self.assertIn("renewed", html3)
+        self.assertIn("Nothing is recorded yet.", html3); self.assertNotIn("will <strong>replace</strong>", html3)
+        # a student whose previous term is empty: copy is disabled and says why
+        html2 = self._copy_dialog(c, sid=2).get_data(as_text=True)
+        self.assertIn("No funding is recorded for Summer 2026.", html2)
+        self.assertRegex(html2, r'<button class="btn" disabled>Copy Summer 2026 to Autumn 2026')
+
+    def test_copy_dialog_steps_through_terms(self):
+        from urllib.parse import urlparse, parse_qs
+        c, t = self._funding_setup()
+        c.post("/students/3/funding/new", data=dict(kind="TA", term_year=2026, term_season="Spring", source="Older",
+               notes="<b>older</b>", amount="111", csrf_token=t))
+        base = "year=2026&season=Autumn"
+        html = self._copy_dialog(c, sid=3, nxt="/reports/funding?season=Autumn&year=2026").get_data(as_text=True)
+        steps = self._steps(html)
+        self.assertEqual(set(steps), {"&lsaquo; Prev", "Next &rsaquo;"})
+        q = parse_qs(urlparse(steps["&lsaquo; Prev"]).query)
+        self.assertEqual((q["from_season"], q["from_year"]), (["Spring"], ["2026"]))                 # Summer -> Spring
+        self.assertEqual((q["season"], q["year"]), (["Autumn"], ["2026"]))                           # target unchanged
+        self.assertEqual(q["next"], ["/reports/funding?season=Autumn&year=2026"])                    # return address kept
+        q = parse_qs(urlparse(steps["Next &rsaquo;"]).query)
+        self.assertEqual((q["from_season"], q["from_year"]), (["Autumn"], ["2026"]))                 # Summer -> Autumn
+        # follow Prev: the dialog now shows Spring 2026's parameters (escaped), still copying into Autumn 2026
+        html = c.get(steps["&lsaquo; Prev"] + "&fragment=1").get_data(as_text=True)
+        self.assertIn('<strong class="copy-source">Spring 2026</strong>', html)
+        self.assertIn("Older", html); self.assertIn("$111", html); self.assertIn("&lt;b&gt;older&lt;/b&gt;", html)
+        self.assertNotIn("<b>older</b>", html); self.assertNotIn("COA-77", html)                    # not Summer's entry
+        self.assertIn("Copy Spring 2026 to Autumn 2026</button>", html)
+        self.assertIn("Now recorded for Autumn 2026", html)
+        # stepping again, to a term with nothing: says so, and the copy button is disabled
+        winter = self._steps(html)["&lsaquo; Prev"]
+        html = c.get(winter + "&fragment=1").get_data(as_text=True)
+        self.assertIn("Winter 2026", html); self.assertIn("No funding is recorded for Winter 2026.", html)
+        self.assertRegex(html, r'<button class="btn" disabled>Copy Winter 2026')
+        # stepping onto the target term itself: copying is disabled with an explanation
+        onto = self._copy_dialog(c, sid=3, frm="from_year=2026&from_season=Autumn").get_data(as_text=True)
+        self.assertIn("That is the term you are copying <em>into</em>", onto)
+        self.assertRegex(onto, r'<button class="btn" disabled>Copy Autumn 2026')
+        # the ends of the range: no Prev before the earliest term offered, no Next after the latest
+        import datetime
+        early = self._copy_dialog(c, sid=3, to="year=2000&season=Winter", frm="from_year=1999&from_season=Winter")   # nothing earlier is offered
+        self.assertEqual(early.status_code, 200)
+        self.assertNotIn("&lsaquo; Prev</a>", early.get_data(as_text=True))
+        self.assertIn('<span class="btn secondary small disabled">&lsaquo; Prev</span>', early.get_data(as_text=True))
+        last = datetime.date.today().year + 6
+        late = self._copy_dialog(c, sid=3, to=f"year={last}&season=Summer", frm=f"from_year={last}&from_season=Autumn")
+        self.assertIn('<span class="btn secondary small disabled">Next &rsaquo;</span>', late.get_data(as_text=True))
+
+    def test_copy_from_the_chosen_term(self):
+        c, t = self._funding_setup()
+        c.post("/students/3/funding/new", data=dict(kind="TA", term_year=2026, term_season="Spring", source="Older",
+               poetaf_coa="OLD-9", amount="111", notes="two terms back", csrf_token=t))
+        c.post("/students/3/funding/new", data=dict(kind="fellowship", term_year=2026, term_season="Autumn",
+               source="Existing", amount="9", csrf_token=t))
+        report = "/reports/funding?season=Autumn&year=2026"
+        r = c.post("/students/3/funding/copy", data=dict(year=2026, season="Autumn", from_year=2026, from_season="Spring",
+                   next=report, csrf_token=t))
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        rows = lambda y, s: [tuple(x) for x in conn.execute(
+            "SELECT kind, source, poetaf_coa, amount, notes FROM funding WHERE student_id = 3 AND term_year = ? "
+            "AND term_season = ?", (y, s))]
+        self.assertEqual(rows(2026, "Autumn"), [("TA", "Older", "OLD-9", 111.0, "two terms back")])   # Spring, not Summer
+        self.assertEqual(len(rows(2026, "Spring")), 1); self.assertEqual(len(rows(2026, "Summer")), 1)  # sources kept
+        conn.close()
+        html = c.get(report).get_data(as_text=True).replace("&#39;", "'")
+        self.assertIn("Copied 1 funding entry from Spring 2026 to Autumn 2026 for Cc, Stu (replacing 1).", html)
+        # copying from a term with nothing: friendly message, nothing lost
+        r = c.post("/students/3/funding/copy", data=dict(year=2026, season="Autumn", from_year=2024, from_season="Winter",
+                   next=report, csrf_token=t), follow_redirects=True)
+        self.assertIn("has no funding recorded for Winter 2024, so nothing was copied", r.get_data(as_text=True))
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(len(rows(2026, "Autumn")), 1); conn.close()
+        # copying a term onto itself is refused
+        r = c.post("/students/3/funding/copy", data=dict(year=2026, season="Autumn", from_year=2026, from_season="Autumn",
+                   next=report, csrf_token=t), follow_redirects=True)
+        self.assertIn("Choose a different term to copy from.", r.get_data(as_text=True))
+        # omitting the source still means "the previous term" (what the old Copy Prev did)
+        r = c.post("/students/3/funding/copy", data=dict(year=2026, season="Autumn", next=report, csrf_token=t))
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(rows(2026, "Autumn"), [("RA", "NSF", "COA-77", 2500.0, "renewed")]); conn.close()
+
+    def test_copy_dialog_access_and_bad_input(self):
+        c, t = self._funding_setup()
+        good = "year=2026&season=Autumn"
+        for bad in ("year=abc&season=Autumn", "year=1800&season=Autumn", "year=2026&season=Fall", "season=Autumn", "",
+                    good + "&from_year=1900&from_season=Autumn", good + "&from_year=2026&from_season=Fall",
+                    good + "&from_year=x&from_season=Autumn"):
+            self.assertEqual(c.get(f"/students/1/funding/copy?{bad}").status_code, 400, bad)
+            self.assertEqual(c.post(f"/students/1/funding/copy?{bad}", data={"csrf_token": t}).status_code, 400, bad)
+        self.assertEqual(c.get(f"/students/99/funding/copy?{good}").status_code, 404)
+        # not logged in -> login; view-only -> forbidden (both for the dialog and for doing the copy)
+        self.assertEqual(self.app.test_client().get(f"/students/1/funding/copy?{good}").status_code, 302)
+        vw = self.client("vw"); tv = self.token(vw)
+        self.assertEqual(vw.get(f"/students/1/funding/copy?{good}&fragment=1").status_code, 403)
+        self.assertEqual(vw.post("/students/3/funding/copy", data=dict(year=2026, season="Autumn", csrf_token=tv)).status_code, 403)
+        # a hostile ?next= never leaves the site, in the dialog's Cancel link or after copying
+        html = c.get(f"/students/1/funding/copy?{good}&next=//evil.com&fragment=1").get_data(as_text=True)
+        self.assertNotIn("evil.com", html)
+        r = c.post("/students/3/funding/copy", data=dict(year=2026, season="Autumn", next="https://evil.com", csrf_token=t))
+        self.assertEqual(r.headers["Location"], "/students/3")
 
     def test_copy_prev_and_clear_are_protected(self):
         c, t = self._funding_setup()
         good = dict(year=2026, season="Autumn", csrf_token=t)
-        self.assertEqual(c.post("/students/1/funding/copy-prev", data={**good, "csrf_token": "bad"}).status_code, 400)
+        self.assertEqual(c.post("/students/1/funding/copy", data={**good, "csrf_token": "bad"}).status_code, 400)
         for bad in (dict(year="abc"), dict(year=1800), dict(season="Fall"), dict(season="")):
-            self.assertEqual(c.post("/students/1/funding/copy-prev", data={**good, **bad}).status_code, 400, bad)
-        self.assertEqual(c.post("/students/99/funding/copy-prev", data=good).status_code, 404)
+            self.assertEqual(c.post("/students/1/funding/copy", data={**good, **bad}).status_code, 400, bad)
+        self.assertEqual(c.post("/students/99/funding/copy", data=good).status_code, 404)
         for evil in ("//evil.com", "https://evil.com", "\\\\evil.com"):
-            r = c.post("/students/3/funding/copy-prev", data={**good, "next": evil})
+            r = c.post("/students/3/funding/copy", data={**good, "next": evil})
             self.assertEqual(r.headers["Location"], "/students/3", evil)
         # view-only accounts can do neither
         vw = self.client("vw"); tv = self.token(vw)
-        self.assertEqual(vw.post("/students/3/funding/copy-prev", data=dict(year=2026, season="Autumn", csrf_token=tv)).status_code, 403)
+        self.assertEqual(vw.post("/students/3/funding/copy", data=dict(year=2026, season="Autumn", csrf_token=tv)).status_code, 403)
         self.assertEqual(vw.post("/students/1/funding/1/delete", data={"csrf_token": tv}).status_code, 403)
         # a funding entry can't be deleted through another student's URL
         self.assertEqual(c.post("/students/2/funding/1/delete", data={"csrf_token": t}).status_code, 404)
@@ -684,7 +822,7 @@ class WebTests(unittest.TestCase):
             self.assertEqual([len(add_links(r)) for r in rows], [0] * (len(rows) - 1) + [1], qs)
         last = rows_of("")[-1]
         self.assertLess(last.index(">Clear<"), last.index(">+<"))                        # at the END of the button list
-        # students with no funding still have the single Add (plus Copy Prev); no stray extras
+        # students with no funding still have the single "+" (plus Copy); no stray extras
         self.assertEqual([len(add_links(r)) for r in rows_of("", "2")], [1])
         # following it opens a new form for that term; saving adds a THIRD entry and returns to the report
         href = add_links(last)[0].replace("&amp;", "&")
@@ -714,7 +852,7 @@ class WebTests(unittest.TestCase):
             html = vw.get("/reports/funding").get_data(as_text=True)
         self.assertIn("Lovelace", html)
         self.assertNotIn(">Edit<", html); self.assertNotIn(">+<", html)
-        self.assertNotIn("Copy Prev", html); self.assertNotIn(">Clear<", html)
+        self.assertNotIn(">Copy<", html); self.assertNotIn(">Clear<", html); self.assertNotIn("copy-dialog", html)
         self.assertEqual(vw.get("/students/1/funding/1/edit?next=/reports/funding").status_code, 403)   # and no way in
 
     def test_funding_report_access_and_undated_warning(self):

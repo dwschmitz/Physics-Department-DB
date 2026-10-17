@@ -39,3 +39,9 @@ th a.sortlink.active span{color:#800000}
 .tabs a:hover{color:#800000}
 .tabs a.on{color:#800000;font-weight:600;background:#fff;border-color:#d5d9e0;border-bottom-color:#fff}
 .btn.disabled{opacity:.4;cursor:not-allowed}
+dialog{border:1px solid #aab2bd;border-radius:8px;padding:1.2rem 1.4rem;width:min(46rem,92vw);box-shadow:0 8px 30px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+.copy-body h2{margin:0 0 .1rem}.copy-body h3{margin:1.1rem 0 .3rem;font-size:1rem}
+.copy-stepper{display:flex;align-items:center;gap:.8rem;margin:.6rem 0 .8rem}.copy-source{min-width:8rem;text-align:center;font-size:1.1rem}
+.copy-actions{display:flex;gap:.6rem;margin-top:1rem}.copy-actions .btn[disabled]{opacity:.4;cursor:not-allowed}
+table.mini{font-size:.9rem}table.mini th,table.mini td{padding:.3rem .5rem}
