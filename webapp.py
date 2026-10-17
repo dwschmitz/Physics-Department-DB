@@ -647,11 +647,13 @@ def create_app(db_path=None):
         season = request.args.get("season", now_season)
         if season not in physdb.SEASONS:
             season = now_season
-        rows = physdb.funding_report(db(), year, season)
+        now = physdb.current_term()
+        rows = [{**r, "clock": physdb.clock_label(r, now), "clock_terms": physdb.clock_terms(r, now)}
+                for r in physdb.funding_report(db(), year, season)]
         name = lambda r: (_text(r["last_name"]), _text(r["first_name"]), r["student_id"])
         rows, sort, sdir = sort_rows(rows, {
             "name": name,
-            "cnet": lambda r: _text(r["cnet"]),
+            "clock": lambda r: r["clock_terms"],
             "advisor": lambda r: _text(r["advisors"]),
             "type": lambda r: _text(label(r["kind"]) if r["kind"] else None),
             "source": lambda r: _text(r["source"]),

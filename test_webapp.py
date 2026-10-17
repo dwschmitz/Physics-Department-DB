@@ -293,14 +293,15 @@ class WebTests(unittest.TestCase):
         self.assertEqual(who(html), [("1", "Aa"), ("1", "Aa"), ("2", "Bb"), ("3", "Cc")])   # 2 rows for Aa; unfunded kept
         self.assertIn("3 active students", html); self.assertIn("1 with funding recorded", html)
         self.assertIn("2 without", html); self.assertIn("total $3,500", html)
-        for needle in ("NSF", "COA-9", "$3,000", "Supplement", "$500", "cnet1", "&lt;b&gt;hi&lt;/b&gt;"):
+        for needle in ("NSF", "COA-9", "$3,000", "Supplement", "$500", "&lt;b&gt;hi&lt;/b&gt;"):
             self.assertIn(needle, html)
         self.assertNotIn("$999", html); self.assertNotIn("Dd", html)                          # on leave excluded
+        self.assertNotIn("cnet1", html)                                                       # CNET is not on screen
         self.assertNotIn("<b>hi</b>", html)
         row_cc = re.search(r"/students/3\">Cc.*?</tr>", html, re.S).group(0)
         cells = re.findall(r"<td[^>]*>([^<]*)</td>", row_cc)      # the name cell holds a link, so: CNET, advisor,
         self.assertEqual(len(cells), 7)                           # then type, source, POETAF/COA, amount, notes
-        self.assertEqual(cells[0], "cnet3")                       # (University ID is no longer shown on screen)
+        self.assertEqual(cells[0], "4.0")                         # Clock (matriculated Autumn 2022, now Autumn 2026)
         self.assertEqual([x for x in cells[2:] if x], [])         # every funding field is empty
         # other terms, sorting, and bad input
         self.assertEqual(who(page("season=Winter&year=2026")), [("1", "Aa"), ("2", "Bb"), ("3", "Cc")])
@@ -438,6 +439,31 @@ class WebTests(unittest.TestCase):
         # spreadsheet formulas in any column are neutralized
         self.assertEqual(row["Research area"], "'=SUM(1)"); self.assertEqual(row["Student notes"], "'@cmd")
         self.assertEqual(c.get("/reports/funding?sort=university_id").status_code, 200)  # old bookmark still works
+
+    def test_funding_report_shows_clock_instead_of_cnet(self):
+        from unittest import mock
+        c = self.client("ed")
+        for uid, last, term, year in (("U1", "Aa", "Autumn", "2022"), ("U2", "Bb", "Spring", "2025"),
+                                      ("U3", "Cc", "Winter", "2027"), ("U4", "Dd", "Autumn", "2026")):
+            self.add_student(c, university_id=uid, email=f"{uid}@u.edu", last_name=f"Rep_{last}", cnet=f"net{last}",
+                             matriculation_term=term, matriculation_year=year)
+        def get(qs=""):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return c.get("/reports/funding?" + qs).get_data(as_text=True)
+        html = get()
+        self.assertIn("sort=clock", html); self.assertNotIn("sort=cnet", html)
+        self.assertNotIn(">CNET", html); self.assertNotIn("netaa", html)         # CNET is off the screen
+        names = lambda h: re.findall(r"Rep_\w+(?=,)", h)
+        clocks = lambda h: re.findall(r"Rep_\w+, Ada</a></td>\s*<td>([^<]*)</td>", h)
+        self.assertEqual(names(html), ["Rep_Aa", "Rep_Bb", "Rep_Cc", "Rep_Dd"])
+        self.assertEqual(clocks(html), ["4.0", "1.5", "—", "0.0"])                  # Cc hasn't matriculated yet
+        self.assertEqual(names(get("sort=clock")), ["Rep_Dd", "Rep_Bb", "Rep_Aa", "Rep_Cc"])             # blank last
+        self.assertEqual(names(get("sort=clock&dir=desc")), ["Rep_Aa", "Rep_Bb", "Rep_Dd", "Rep_Cc"])
+        self.assertEqual(c.get("/reports/funding?sort=cnet").status_code, 200)    # an old bookmark still works
+        # ...but the CSV keeps the CNET (and the Clock) alongside everything else
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            data = c.get("/reports/funding.csv").get_data(as_text=True)
+        self.assertIn("CNET", data.splitlines()[0]); self.assertIn("netaa", data); self.assertIn("Clock (years)", data)
 
     def test_funding_report_has_no_buttons_for_viewers(self):
         ed = self.client("ed"); t = self.token(ed); self.add_student(ed)
