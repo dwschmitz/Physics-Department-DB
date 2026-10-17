@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS students (
     first_name          TEXT NOT NULL,
     last_name           TEXT NOT NULL,
     email               TEXT UNIQUE NOT NULL,
+    -- citizen / permanent_resident / international. Deliberately no CHECK here: the students table
+    -- is referenced by other tables, so SQLite can't rebuild it later to change a CHECK. The
+    -- web form and CLI only offer the allowed values.
+    citizenship         TEXT,
     status              TEXT NOT NULL DEFAULT 'active'
                         CHECK (status IN ('active', 'on_leave', 'graduated', 'withdrawn')),
     start_year          INTEGER NOT NULL,

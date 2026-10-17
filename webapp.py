@@ -29,7 +29,8 @@ ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
 MILESTONE_KINDS = ["qualifying_exam", "candidacy", "thesis_proposal", "thesis_defense", "other"]
 OUTCOMES = ["pending", "passed", "conditional", "failed"]
 FUNDING_KINDS = ["TA", "RA", "fellowship", "stipend_supplement", "other"]
-DISPLAY_NAMES = {"stipend_supplement": "Stipend Supplement"}
+DISPLAY_NAMES = {"stipend_supplement": "Stipend Supplement", "citizen": "Citizen",
+                 "permanent_resident": "Permanent Resident", "international": "International"}
 
 CHILD_TABLES = {
     "advising": "Advisor / committee member",
@@ -75,6 +76,7 @@ def fields_for(table, conn):
             F("last_name", "Last name", required=True),
             F("university_id", "University ID", required=True),
             F("email", "Email", "email", True),
+            F("citizenship", "Citizenship", "select", True, enum(physdb.CITIZENSHIP), placeholder=True),
             F("status", "Status", "select", True, enum(STATUSES)),
             F("start_year", "Start year", "year", True),
             F("expected_grad_year", "Expected graduation year", "year"),

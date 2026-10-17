@@ -62,6 +62,17 @@ class PhysDBTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("UPDATE students SET status='bogus'")
 
+    def test_citizenship(self):
+        sid = physdb.add_student(self.conn, university_id="U9", first_name="N", last_name="M",
+                                 email="n@m.o", start_year=2023, expected_grad_year=None,
+                                 research_area=None, notes=None, citizenship="permanent_resident")
+        self.assertIn("Citizenship: permanent resident", physdb.show_student(self.conn, sid))
+        self.assertIn("Citizenship: -", physdb.show_student(self.conn, "U1001"))
+        with self.assertRaises(ValueError):
+            physdb.add_student(self.conn, university_id="U10", first_name="N", last_name="M",
+                               email="x@m.o", start_year=2023, expected_grad_year=None,
+                               research_area=None, notes=None, citizenship="alien")
+
     def test_funding_and_term_parsing(self):
         physdb.add_funding(self.conn, "U1001", "TA", 2026, "Autumn", "Dept", 12000, "ACCT-1")
         physdb.add_funding(self.conn, "U1001", "RA", 2026, "Winter", notes="Pending approval")
@@ -99,6 +110,8 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual((rows[2]["term_year"], rows[2]["legacy_term"]), (None, "AY 25-26"))
         self.assertEqual(physdb.term_label(rows[2]), "AY 25-26")
         self.assertIsNone(rows[1]["poetaf_coa"])
+        self.assertIn("citizenship", {r[1] for r in conn.execute("PRAGMA table_info(students)")})   # added to old DBs
+        self.assertIsNone(conn.execute("SELECT citizenship FROM students").fetchone()[0])
         self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name='funding_old'").fetchone()[0], 0)
         cols = {r[1] for r in conn.execute("PRAGMA table_info(students)")}
         if sqlite3.sqlite_version_info >= (3, 35):      # DROP COLUMN needs SQLite 3.35+

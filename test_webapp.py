@@ -33,7 +33,8 @@ class WebTests(unittest.TestCase):
 
     def add_student(self, c, **over):
         data = dict(first_name="Ada", last_name="Lovelace", university_id="U1", email="ada@u.edu",
-                    status="active", start_year="2022", csrf_token=self.token(c))
+                    status="active", start_year="2022", citizenship="citizen",
+                    csrf_token=self.token(c))
         data.update(over)
         return c.post("/students/new", data=data)
 
@@ -174,7 +175,7 @@ class WebTests(unittest.TestCase):
         # edit
         t = self.token(c, "/students/1/edit")
         r = c.post("/students/1/edit", data=dict(first_name="Ada", last_name="King", university_id="U1",
-                   email="ada@u.edu", status="on_leave", start_year="2022", csrf_token=t))
+                   email="ada@u.edu", status="on_leave", start_year="2022", citizenship="international", csrf_token=t))
         self.assertEqual(r.status_code, 302)
         self.assertIn("King", c.get("/students").get_data(as_text=True))
         # children
@@ -249,6 +250,27 @@ class WebTests(unittest.TestCase):
         self.assertEqual(who("role=advisor"), ["Stu1", "Stu3", "Stu4"])        # anyone with a current advisor
         self.assertEqual(who("faculty=1&role=bogus"), ["Stu1", "Stu2", "Stu3", "Stu4"])
         self.assertEqual(who("faculty=abc"), ["Stu1", "Stu2", "Stu3", "Stu4", "Stu5"])
+
+    def test_citizenship_field(self):
+        c = self.client("ed")
+        form = c.get("/students/new").get_data(as_text=True)
+        self.assertIn("Citizenship", form)
+        self.assertIn("&mdash; choose &mdash;", form)
+        for value, text in (("citizen", "Citizen"), ("permanent_resident", "Permanent Resident"),
+                            ("international", "International")):
+            self.assertIn(f'<option value="{value}" >{text}</option>', form)
+        for bad in ("", "alien", "Citizen"):   # required, and only the listed values
+            r = self.add_student(c, citizenship=bad)
+            self.assertEqual(r.status_code, 200, bad)
+            self.assertIn("Please fix", r.get_data(as_text=True))
+        self.assertEqual(self.add_student(c, citizenship="permanent_resident").status_code, 302)
+        self.assertIn("Permanent Resident", c.get("/students/1").get_data(as_text=True))
+        self.assertIn("permanent_resident", c.get("/export.csv").get_data(as_text=True))
+        # an existing student with no value is shown as blank and must be filled in on edit
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        conn.execute("UPDATE students SET citizenship = NULL"); conn.commit(); conn.close()
+        self.assertIn("<dd>—</dd>", c.get("/students/1").get_data(as_text=True))
+        self.assertIn("&mdash; choose &mdash;", c.get("/students/1/edit").get_data(as_text=True))
 
     def test_advisors_listed_in_role_order(self):
         c = self.client("ed"); t = self.token(c); self.add_student(c)

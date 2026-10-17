@@ -14,6 +14,7 @@ SCHEMA = Path(__file__).with_name("schema.sql")
 
 
 # Terms in calendar order within a year (the university year runs Autumn, Winter, Spring, Summer).
+CITIZENSHIP = ["citizen", "permanent_resident", "international"]
 SEASONS = ["Autumn", "Winter", "Spring", "Summer"]
 # SQL expression giving chronological position of a season within its calendar year.
 SEASON_RANK_SQL = ("CASE term_season WHEN 'Winter' THEN 1 WHEN 'Spring' THEN 2 "
@@ -41,7 +42,14 @@ def connect(path=DB_PATH):
     _migrate_users(conn)
     _drop_program_column(conn)
     _add_funding_notes(conn)
+    _add_student_citizenship(conn)
     return conn
+
+
+def _add_student_citizenship(conn):
+    if "citizenship" not in {r[1] for r in conn.execute("PRAGMA table_info(students)")}:
+        conn.execute("ALTER TABLE students ADD COLUMN citizenship TEXT")
+        conn.commit()
 
 
 def _add_funding_notes(conn):
@@ -154,10 +162,13 @@ def _find(conn, table, key):
 
 
 def add_student(conn, **f):
+    f.setdefault("citizenship", None)
+    if f["citizenship"] is not None and f["citizenship"] not in CITIZENSHIP:
+        raise ValueError(f"citizenship must be one of {', '.join(CITIZENSHIP)}")
     cur = conn.execute(
-        """INSERT INTO students (university_id, first_name, last_name, email,
+        """INSERT INTO students (university_id, first_name, last_name, email, citizenship,
                start_year, expected_grad_year, research_area, notes)
-           VALUES (:university_id, :first_name, :last_name, :email,
+           VALUES (:university_id, :first_name, :last_name, :email, :citizenship,
                :start_year, :expected_grad_year, :research_area, :notes)""", f)
     conn.commit()
     return cur.lastrowid
@@ -254,6 +265,7 @@ def show_student(conn, key):
     out = [f"{s['first_name']} {s['last_name']}  <{s['email']}>",
            f"  ID {s['university_id']} | {s['status']} | "
            f"started {s['start_year']}, expected {s['expected_grad_year'] or '?'}",
+           f"  Citizenship: {s['citizenship'].replace('_', ' ') if s['citizenship'] else '-'}",
            f"  Research: {s['research_area'] or '-'}"]
     if s["notes"]:
         out.append(f"  Notes: {s['notes']}")
@@ -305,6 +317,7 @@ def build_parser():
     a = sub.add_parser("add-student")
     a.add_argument("university_id"); a.add_argument("first_name"); a.add_argument("last_name")
     a.add_argument("email")
+    a.add_argument("--citizenship", choices=CITIZENSHIP)
     a.add_argument("--start-year", type=int, default=datetime.date.today().year)
     a.add_argument("--expected-grad-year", type=int)
     a.add_argument("--research-area"); a.add_argument("--notes")
