@@ -7,7 +7,7 @@ main{max-width:70rem;margin:1.5rem auto;padding:0 1rem}
 h1{margin-top:0}h2{margin:1.8rem 0 .5rem;display:flex;align-items:center;gap:1rem}
 table{border-collapse:collapse;width:100%;background:#fff;border:1px solid #d5d9e0}
 th,td{text-align:left;padding:.45rem .7rem;border-bottom:1px solid #e6e9ee;vertical-align:top}
-th{background:#eceff3;font-size:.85rem;text-transform:uppercase;letter-spacing:.03em}
+th{background:#eceff3;font-size:.85rem;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}  /* a heading never wraps onto two lines */
 td.actions{white-space:nowrap;text-align:right}
 .btn,button.btn{display:inline-block;background:#800000;color:#fff;border:0;border-radius:4px;padding:.4rem .9rem;
  text-decoration:none;font-size:.95rem;cursor:pointer}

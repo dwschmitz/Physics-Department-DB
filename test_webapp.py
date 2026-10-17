@@ -656,6 +656,18 @@ class WebTests(unittest.TestCase):
             h = vw.get("/reports/funding").get_data(as_text=True)
         self.assertIn("&lsaquo; Prev", h); self.assertIn("Next &rsaquo;", h)
 
+    def test_column_headings_never_wrap(self):
+        """House rule: a column heading is always on one line, so columns widen rather than wrap a heading."""
+        from pathlib import Path
+        root = Path(webapp.__file__).parent
+        css = (root / "static" / "style.css").read_text()
+        self.assertRegex(css, r"(?m)^th\{[^}]*white-space:nowrap")
+        for path in [root / "static" / "style.css", *sorted((root / "templates").glob("*.html"))]:
+            text = path.read_text()
+            # no rule aimed at a heading may switch wrapping back on
+            self.assertNotRegex(text, r"th[^{};]*\{[^}]*white-space:\s*(normal|pre-wrap|pre-line)", path.name)
+        self.assertNotRegex(css, r"th a\.sortlink\{[^}]*white-space:\s*normal")
+
     def test_funding_report_has_no_buttons_for_viewers(self):
         ed = self.client("ed"); t = self.token(ed); self.add_student(ed)
         ed.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", csrf_token=t))
