@@ -260,14 +260,117 @@ class WebTests(unittest.TestCase):
                              matriculation_term=term, matriculation_year=year, status=status)
         with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
             html = c.get("/students").get_data(as_text=True)
-        self.assertIn("<th title=", html); self.assertIn(">Clock</th>", html)
-        self.assertLess(html.index("Matriculation</th>"), html.index(">Clock</th>"))
-        self.assertLess(html.index(">Clock</th>"), html.index("Advisor</th>"))
+        self.assertLess(html.index("sort=matriculation"), html.index("sort=clock"))
+        self.assertLess(html.index("sort=clock"), html.index("sort=advisor"))
         self.assertIn("current term: Autumn 2026", html)
         import re
         cells = {m.group(1): m.group(2) for m in re.finditer(
             r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
         self.assertEqual(cells, {"StuU1": "0.0", "StuU2": "1.0", "StuU3": "2.5", "StuU4": "—"})
+
+    def names(self, html):
+        return re.findall(r"Stu_\w+(?=,)", html)
+
+    def test_student_columns_sort_both_ways(self):
+        from unittest import mock
+        c = self.client("ed")
+        for last, uid, status, term, year, area in [   # clock at Autumn 2026: C=2.5, B=1.0, A and D blank
+                ("Stu_C", "U3", "active", "Spring", "2024", "optics"),
+                ("Stu_A", "U1", "graduated", "Autumn", "2020", ""),
+                ("Stu_B", "U2", "on_leave", "Autumn", "2025", "Atomic"),
+                ("Stu_D", "U4", "active", "Winter", "2027", "cosmology")]:   # not yet matriculated
+            self.add_student(c, last_name=last, university_id=uid, email=f"{uid}@u.edu", status=status,
+                             matriculation_term=term, matriculation_year=year, research_area=area)
+        def page(qs=""):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return c.get("/students?" + qs).get_data(as_text=True)
+        order = lambda qs="": self.names(page(qs))
+        A, B, C, D = "Stu_A", "Stu_B", "Stu_C", "Stu_D"
+        self.assertEqual(order(), [A, B, C, D])                                   # default: by name
+        self.assertEqual(order("sort=name&dir=desc"), [D, C, B, A])
+        self.assertEqual(order("sort=university_id&dir=desc"), [D, C, B, A])
+        self.assertEqual(order("sort=status"), [C, D, B, A])                       # active, on leave, graduated
+        self.assertEqual(order("sort=status&dir=desc"), [A, B, C, D])
+        self.assertEqual(order("sort=matriculation"), [A, C, B, D])                # oldest first
+        self.assertEqual(order("sort=matriculation&dir=desc"), [D, B, C, A])
+        self.assertEqual(order("sort=clock"), [B, C, A, D])                        # blanks last either way
+        self.assertEqual(order("sort=clock&dir=desc"), [C, B, A, D])
+        self.assertEqual(order("sort=research_area"), [B, D, C, A])                # case-insensitive, blank last
+        self.assertEqual(order("sort=research_area&dir=desc"), [C, D, B, A])
+        self.assertEqual(order("sort=bogus&dir=sideways"), [A, B, C, D])           # bad input falls back to default
+        # links: clicking the active column flips direction; filters are kept; the arrow marks the column
+        html = page("status=active&sort=clock&dir=asc")
+        self.assertEqual(self.names(html), [C, D])
+        self.assertIn('href="/students?status=active&amp;sort=clock&amp;dir=desc"', html)
+        self.assertIn('href="/students?status=active&amp;sort=name&amp;dir=asc"', html)
+        self.assertIn('aria-sort="ascending"', html)
+        self.assertIn('name="sort" value="clock"', html)                           # a new search keeps the sort
+        self.assertIn("▲", page("sort=name&dir=asc")); self.assertIn("▼", page("sort=name&dir=desc"))
+
+    def test_faculty_reports_and_accounts_sort(self):
+        c = self.client("ad"); t = self.token(c)
+        for last, area in (("Cc", "optics"), ("Aa", ""), ("Bb", "atomic")):
+            c.post("/faculty/new", data=dict(first_name="P", last_name=last, email=f"{last}@u.edu",
+                                             research_area=area, csrf_token=t))
+        for i in (1, 2, 3):
+            self.add_student(c, last_name=f"Stu_{i}", university_id=f"U{i}", email=f"s{i}@u.edu",
+                             matriculation_year=str(2014 + i))
+        def assign(sid, fid, role):
+            c.post(f"/students/{sid}/advising/new", data=dict(faculty_id=fid, role=role,
+                   start_date="2024-01-01", csrf_token=t))
+        # Cc (id 1): advises student 1 and sits on student 2's committee -> 1 advisee, 2 committees
+        # Bb (id 3): advises student 3 -> 1 advisee, 1 committee; Aa (id 2): none
+        assign(1, 1, "advisor"); assign(2, 1, "committee"); assign(3, 3, "advisor")
+        fac = lambda qs="": re.findall(r"/faculty/\d+\">(\w+),", c.get("/faculty?" + qs).get_data(as_text=True))
+        self.assertEqual(fac(), ["Aa", "Bb", "Cc"])
+        self.assertEqual(fac("sort=name&dir=desc"), ["Cc", "Bb", "Aa"])
+        self.assertEqual(fac("sort=research_area"), ["Bb", "Cc", "Aa"])               # blank last
+        self.assertEqual(fac("sort=committees&dir=desc"), ["Cc", "Bb", "Aa"])
+        self.assertEqual(fac("sort=advisees"), ["Aa", "Bb", "Cc"])
+        self.assertEqual(fac("sort=advisees&dir=desc"), ["Bb", "Cc", "Aa"])           # tie keeps name order
+        rep = lambda qs="": self.names2(c.get("/reports?kind=qualifying_exam&years=0&" + qs).get_data(as_text=True))
+        self.assertEqual(rep(), ["Stu_1", "Stu_2", "Stu_3"])                           # default: oldest matriculation first
+        self.assertEqual(rep("sort=matriculation&dir=desc"), ["Stu_3", "Stu_2", "Stu_1"])
+        self.assertEqual(rep("sort=name&dir=desc"), ["Stu_3", "Stu_2", "Stu_1"])
+        html = c.get("/reports?kind=candidacy&years=1&sort=name&dir=asc").get_data(as_text=True)
+        self.assertIn("kind=candidacy&amp;years=1&amp;sort=name&amp;dir=desc", html)      # report filters kept
+        users = lambda qs="": re.findall(r"<tr><td>(\w+)", c.get("/users?" + qs).get_data(as_text=True))
+        self.assertEqual(users(), ["ad", "ed", "vw"])
+        self.assertEqual(users("sort=role&dir=desc"), ["ad", "ed", "vw"])             # admin, editor, viewer
+        self.assertEqual(users("sort=role"), ["vw", "ed", "ad"])
+        self.assertEqual(users("sort=username&dir=desc"), ["vw", "ed", "ad"])
+
+    def names2(self, html):
+        return re.findall(r"Stu_\d(?=,)", html)
+
+    def test_delete_buttons_carry_a_working_csrf_token(self):
+        """Regression: the buttons used to render an empty token, so deleting from the browser failed."""
+        c = self.client("ad"); t = self.token(c)
+        self.add_student(c)
+        c.post("/faculty/new", data=dict(first_name="N", last_name="Bohr", email="b@u.edu", csrf_token=t))
+        c.post("/students/1/milestones/new", data=dict(kind="other", date="2024-01-01", outcome="pending", csrf_token=t))
+        c.post("/users/new", data=dict(username="tempuser", role="viewer", password="temp-password-1", csrf_token=t))
+        def delete_forms(url):
+            html = c.get(url).get_data(as_text=True)
+            return re.findall(r'<form class="inline" method="post" action="([^"]+/delete)"[^>]*>\s*'
+                              r'<input type="hidden" name="csrf_token" value="([^"]*)"', html)
+        for url in ("/students/1", "/faculty/1", "/users"):
+            forms = delete_forms(url)
+            self.assertTrue(forms, url)
+            for action, token in forms:
+                self.assertTrue(token, f"empty CSRF token on a Delete button at {url}")
+        (m_action, m_token), = [f for f in delete_forms("/students/1") if "/milestones/" in f[0]]
+        self.assertEqual(c.post(m_action, data={"csrf_token": m_token}).status_code, 302)
+        self.assertNotIn("2024-01-01", c.get("/students/1").get_data(as_text=True))     # the milestone is gone
+        (u_action, u_token), = [f for f in delete_forms("/users") if f[0].endswith(f"/users/{self.user_row('tempuser')['id']}/delete")]
+        self.assertEqual(c.post(u_action, data={"csrf_token": u_token}).status_code, 302)
+        self.assertIsNone(self.user_row("tempuser"))
+        (f_action, f_token), = delete_forms("/faculty/1")
+        self.assertEqual(c.post(f_action, data={"csrf_token": f_token}).status_code, 302)
+        self.assertEqual(c.get("/faculty/1").status_code, 404)
+        (s_action, s_token), = [f for f in delete_forms("/students/1") if f[0] == "/students/1/delete"]
+        self.assertEqual(c.post(s_action, data={"csrf_token": s_token}).status_code, 302)
+        self.assertEqual(c.get("/students/1").status_code, 404)
 
     def test_matriculation_year_and_term(self):
         c = self.client("ed")

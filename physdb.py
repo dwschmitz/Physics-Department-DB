@@ -50,17 +50,23 @@ def term_index(season, year):
     return year * len(TERM_STARTS) + _TERM_POSITION[season]
 
 
+def clock_terms(student, now=None):
+    """Whole terms from matriculation to the current term, or None (graduated/withdrawn/not yet started)."""
+    if student["status"] in ("graduated", "withdrawn"):
+        return None
+    now = now or current_term()
+    terms = term_index(*now) - term_index(student["matriculation_term"], student["matriculation_year"])
+    return terms if terms >= 0 else None
+
+
 def clock_label(student, now=None):
     """Years since matriculation counted in whole terms (0.25 per term), up to the current term.
 
     Shown as '0.0', '0.25', '0.5', '1.0', ... Blank ('—') for students who have graduated or
     withdrawn (no end term is recorded) and for students whose matriculation is still in the future.
     """
-    if student["status"] in ("graduated", "withdrawn"):
-        return "—"
-    now = now or current_term()
-    terms = term_index(*now) - term_index(student["matriculation_term"], student["matriculation_year"])
-    if terms < 0:
+    terms = clock_terms(student, now)
+    if terms is None:
         return "—"
     text = f"{terms / len(TERM_STARTS):.2f}"
     return text[:-1] if text.endswith("0") else text

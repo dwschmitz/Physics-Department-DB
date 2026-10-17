@@ -1,6 +1,6 @@
-{% extends "base.html" %}{% from "_macros.html" import delete_button %}{% block body %}
+{% extends "base.html" %}{% from "_macros.html" import delete_button, sort_th with context %}{% block body %}
 <h1>Accounts <a class="btn small" href="{{ url_for('user_new') }}">+ Add account</a></h1>
-<table><tr><th>Username</th><th>Role</th><th>Status</th><th></th></tr>
+<table><tr>{{ sort_th("Username", "username", sort, sdir) }}{{ sort_th("Role", "role", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}<th></th></tr>
 {% for r in rows %}<tr><td>{{ r.username }}{% if r.id == user.id %} <span class="muted">(you)</span>{% endif %}</td>
 <td>{{ r.role|label }}</td>
 <td>{% if r.must_change %}<span class="badge on_leave">Must choose new password</span>{% else %}<span class="badge active">OK</span>{% endif %}</td>

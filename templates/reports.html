@@ -1,13 +1,14 @@
-{% extends "base.html" %}{% block body %}
+{% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
 <h1>Students who may be behind schedule</h1>
 <form class="filters" method="get">
+  <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ sdir }}">
   <label>Active students without a passed or conditional<select name="kind">
     {% for k in kinds %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ k|label }}</option>{% endfor %}</select></label>
   <label>who matriculated at least (years ago)<input type="number" name="years" min="0" max="15" value="{{ years }}"></label>
   <button class="btn">Show</button>
 </form>
 <p class="muted">{{ rows|length }} student{{ '' if rows|length == 1 else 's' }}</p>
-<table><tr><th>Name</th><th>Matriculation</th><th>Research area</th></tr>
+<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Matriculation", "matriculation", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}</tr>
 {% for r in rows %}<tr><td><a href="{{ url_for('student', sid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
 <td>{{ r|matric }}</td><td>{{ r.research_area or '' }}</td></tr>
 {% else %}<tr><td colspan="3" class="muted">Nobody — everyone is on track.</td></tr>{% endfor %}</table>{% endblock %}

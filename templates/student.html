@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% from "_macros.html" import delete_button %}{% block body %}
+{% extends "base.html" %}{% from "_macros.html" import delete_button with context %}{% block body %}
 <h1>{{ s.first_name }} {{ s.last_name }} <span class="badge {{ s.status }}">{{ s.status|label }}</span></h1>
 <p class="toolbar"><a href="{{ url_for('students') }}">&larr; All students</a>
 {% if can_edit %} <a class="btn small" href="{{ url_for('student_edit', sid=s.id) }}">Edit details</a>

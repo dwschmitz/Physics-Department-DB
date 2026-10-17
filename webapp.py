@@ -13,6 +13,7 @@ import threading
 import urllib.request
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlencode
 
 from flask import (Flask, Response, abort, flash, g, redirect, render_template,
                    request, session, url_for)
@@ -159,6 +160,27 @@ def parse_form(fields, form):
     return values, errors
 
 
+def _text(value):
+    """Case-insensitive sort key; blank values sort last."""
+    value = (value or "").strip().lower()
+    return value or None
+
+
+def sort_rows(rows, keys, sort, sdir, default, tiebreak=None):
+    """Sort dict-like rows by one of `keys` (name -> function). Unknown names fall back to `default`.
+
+    Rows whose key is None (blank / not applicable) always go last, whichever way you sort.
+    Returns (rows, sort, sdir) so the page can show which column is active.
+    """
+    sort = sort if sort in keys else default
+    reverse = sdir == "desc"
+    rows = sorted(rows, key=tiebreak or keys[default])               # stable base order: by name
+    present = [r for r in rows if keys[sort](r) is not None]
+    blank = [r for r in rows if keys[sort](r) is None]
+    present.sort(key=keys[sort], reverse=reverse)
+    return present + blank, sort, "desc" if reverse else "asc"
+
+
 def create_app(db_path=None):
     app = Flask(__name__)
     app.config["DB_PATH"] = db_path or physdb.DB_PATH
@@ -203,6 +225,15 @@ def create_app(db_path=None):
                 abort(403, "Your account is view-only.")
         if g.user["must_change"] and request.endpoint not in ("account", "logout"):
             return redirect(url_for("account"))
+
+    @app.context_processor
+    def sort_helpers():
+        def sort_url(key, cur_sort, cur_dir):
+            """Link for a column header: keeps the current filters, toggles direction on the active column."""
+            args = request.args.to_dict(flat=True)
+            args.update(sort=key, dir="desc" if (cur_sort == key and cur_dir == "asc") else "asc")
+            return request.path + "?" + urlencode(args)
+        return dict(sort_url=sort_url)
 
     @app.context_processor
     def inject():
@@ -276,8 +307,13 @@ def create_app(db_path=None):
     @app.route("/users")
     def users():
         require_admin()
-        rows = db().execute("SELECT * FROM users ORDER BY username").fetchall()
-        return render_template("users.html", rows=rows)
+        rows = [dict(r) for r in db().execute("SELECT * FROM users").fetchall()]
+        rows, sort, sdir = sort_rows(rows, {
+            "username": lambda r: _text(r["username"]),
+            "role": lambda r: ACCOUNT_ROLES.index(r["role"]),
+            "status": lambda r: r["must_change"],
+        }, request.args.get("sort"), request.args.get("dir"), "username")
+        return render_template("users.html", rows=rows, sort=sort, sdir=sdir)
 
     @app.route("/users/new", methods=["GET", "POST"])
     def user_new():
@@ -432,12 +468,22 @@ def create_app(db_path=None):
             clause, p = physdb.faculty_role_clause(role, int(faculty_id) if faculty_id.isdigit() else None)
             sql += f" AND {clause}"; params += p
         now = physdb.current_term()
-        rows = [{**dict(r), "clock": physdb.clock_label(r, now)}
-                for r in db().execute(sql + " ORDER BY s.last_name, s.first_name", params).fetchall()]
+        rows = [{**dict(r), "clock": physdb.clock_label(r, now), "clock_terms": physdb.clock_terms(r, now)}
+                for r in db().execute(sql, params).fetchall()]
+        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
+        rows, sort, sdir = sort_rows(rows, {
+            "name": name,
+            "university_id": lambda r: _text(r["university_id"]),
+            "status": lambda r: STATUSES.index(r["status"]),
+            "matriculation": lambda r: physdb.term_index(r["matriculation_term"], r["matriculation_year"]),
+            "clock": lambda r: r["clock_terms"],
+            "advisor": lambda r: _text(r["advisors"]),
+            "research_area": lambda r: _text(r["research_area"]),
+        }, request.args.get("sort"), request.args.get("dir"), "name")
         faculty = db().execute("SELECT id, last_name, first_name FROM faculty ORDER BY last_name").fetchall()
         return render_template("students.html", rows=rows, faculty=faculty, q=q, status=status,
                                faculty_id=faculty_id, role=role, role_filters=FACULTY_ROLE_FILTERS,
-                               statuses=STATUSES, now=f"{now[0]} {now[1]}")
+                               statuses=STATUSES, now=f"{now[0]} {now[1]}", sort=sort, sdir=sdir)
 
     @app.route("/students/new", methods=["GET", "POST"])
     def student_new():
@@ -507,8 +553,14 @@ def create_app(db_path=None):
                   AND a.end_date IS NULL AND a.role IN ('advisor','co-advisor')) AS n_advisees,
                   (SELECT count(DISTINCT a.student_id) FROM advising a WHERE a.faculty_id = f.id
                   AND a.end_date IS NULL) AS n_committees
-                  FROM faculty f ORDER BY f.last_name, f.first_name""").fetchall()
-        return render_template("faculty.html", rows=rows)
+                  FROM faculty f""").fetchall()
+        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
+        rows, sort, sdir = sort_rows([dict(r) for r in rows], {
+            "name": name, "email": lambda r: _text(r["email"]),
+            "research_area": lambda r: _text(r["research_area"]),
+            "advisees": lambda r: r["n_advisees"], "committees": lambda r: r["n_committees"],
+        }, request.args.get("sort"), request.args.get("dir"), "name")
+        return render_template("faculty.html", rows=rows, sort=sort, sdir=sdir)
 
     @app.route("/faculty/new", methods=["GET", "POST"])
     def faculty_new():
@@ -554,8 +606,14 @@ def create_app(db_path=None):
             years = max(0, min(15, int(request.args.get("years", 2))))
         except ValueError:
             years = 2
-        rows = physdb.missing_milestone(db(), kind, years)
-        return render_template("reports.html", rows=rows, kind=kind, years=years, kinds=MILESTONE_KINDS)
+        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
+        rows, sort, sdir = sort_rows([dict(r) for r in physdb.missing_milestone(db(), kind, years)], {
+            "name": name,
+            "matriculation": lambda r: physdb.term_index(r["matriculation_term"], r["matriculation_year"]),
+            "research_area": lambda r: _text(r["research_area"]),
+        }, request.args.get("sort"), request.args.get("dir"), "matriculation", tiebreak=name)
+        return render_template("reports.html", rows=rows, kind=kind, years=years, kinds=MILESTONE_KINDS,
+                               sort=sort, sdir=sdir)
 
     @app.route("/export.csv")
     def export():
