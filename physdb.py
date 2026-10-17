@@ -43,7 +43,23 @@ def connect(path=DB_PATH):
     _drop_program_column(conn)
     _add_funding_notes(conn)
     _add_student_citizenship(conn)
+    _migrate_matriculation(conn)
     return conn
+
+
+def _migrate_matriculation(conn):
+    """'Started' became 'Matriculation' (year + term). Existing students are given Autumn."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(students)")}
+    if "start_year" in cols:
+        conn.execute("ALTER TABLE students RENAME COLUMN start_year TO matriculation_year")
+    if "matriculation_term" not in cols:
+        conn.execute("ALTER TABLE students ADD COLUMN matriculation_term TEXT NOT NULL DEFAULT 'Autumn'")
+    conn.commit()
+
+
+def matriculation_label(row):
+    """e.g. 'Autumn 2022'."""
+    return f"{row['matriculation_term']} {row['matriculation_year']}"
 
 
 def _add_student_citizenship(conn):
@@ -163,13 +179,16 @@ def _find(conn, table, key):
 
 def add_student(conn, **f):
     f.setdefault("citizenship", None)
+    f.setdefault("matriculation_term", "Autumn")
+    if f["matriculation_term"] not in SEASONS:
+        raise ValueError(f"matriculation term must be one of {', '.join(SEASONS)}")
     if f["citizenship"] is not None and f["citizenship"] not in CITIZENSHIP:
         raise ValueError(f"citizenship must be one of {', '.join(CITIZENSHIP)}")
     cur = conn.execute(
         """INSERT INTO students (university_id, first_name, last_name, email, citizenship,
-               start_year, expected_grad_year, research_area, notes)
+               matriculation_year, matriculation_term, expected_grad_year, research_area, notes)
            VALUES (:university_id, :first_name, :last_name, :email, :citizenship,
-               :start_year, :expected_grad_year, :research_area, :notes)""", f)
+               :matriculation_year, :matriculation_term, :expected_grad_year, :research_area, :notes)""", f)
     conn.commit()
     return cur.lastrowid
 
@@ -242,7 +261,7 @@ def list_students(conn, status=None, advisor=None, year=None, committee=None):
     if status:
         sql += " AND s.status = ?"; params.append(status)
     if year:
-        sql += " AND s.start_year = ?"; params.append(year)
+        sql += " AND s.matriculation_year = ?"; params.append(year)
     for who, role in ((advisor, "advisor"), (committee, "committee")):
         if who:
             clause, p = faculty_role_clause(role, _find(conn, "faculty", who)["id"])
@@ -251,20 +270,20 @@ def list_students(conn, status=None, advisor=None, year=None, committee=None):
 
 
 def missing_milestone(conn, kind, min_years=2):
-    """Active students who started >= min_years ago and have no passed `kind`."""
+    """Active students who matriculated >= min_years ago and have no passed `kind`."""
     cutoff = datetime.date.today().year - min_years
     return conn.execute(
-        """SELECT * FROM students s WHERE s.status = 'active' AND s.start_year <= ?
+        """SELECT * FROM students s WHERE s.status = 'active' AND s.matriculation_year <= ?
            AND NOT EXISTS (SELECT 1 FROM milestones m WHERE m.student_id = s.id
                            AND m.kind = ? AND m.outcome IN ('passed','conditional'))
-           ORDER BY s.start_year, s.last_name""", (cutoff, kind)).fetchall()
+           ORDER BY s.matriculation_year, CASE s.matriculation_term WHEN 'Winter' THEN 1 WHEN 'Spring' THEN 2 WHEN 'Summer' THEN 3 ELSE 4 END, s.last_name""", (cutoff, kind)).fetchall()
 
 
 def show_student(conn, key):
     s = _find(conn, "students", key)
     out = [f"{s['first_name']} {s['last_name']}  <{s['email']}>",
            f"  ID {s['university_id']} | {s['status']} | "
-           f"started {s['start_year']}, expected {s['expected_grad_year'] or '?'}",
+           f"matriculated {matriculation_label(s)}, expected {s['expected_grad_year'] or '?'}",
            f"  Citizenship: {s['citizenship'].replace('_', ' ') if s['citizenship'] else '-'}",
            f"  Research: {s['research_area'] or '-'}"]
     if s["notes"]:
@@ -307,7 +326,7 @@ def export_csv(conn, fh):
 
 def _row_line(r):
     return (f"{r['id']:>4}  {r['last_name']}, {r['first_name']:<14} {r['university_id']:<10} "
-            f"{r['status']:<9} {r['start_year']}  {r['research_area'] or ''}")
+            f"{r['status']:<9} {matriculation_label(r)}  {r['research_area'] or ''}")
 
 
 def build_parser():
@@ -318,7 +337,8 @@ def build_parser():
     a.add_argument("university_id"); a.add_argument("first_name"); a.add_argument("last_name")
     a.add_argument("email")
     a.add_argument("--citizenship", choices=CITIZENSHIP)
-    a.add_argument("--start-year", type=int, default=datetime.date.today().year)
+    a.add_argument("--matriculation-year", type=int, default=datetime.date.today().year)
+    a.add_argument("--matriculation-term", choices=SEASONS, type=str.capitalize, default="Autumn")
     a.add_argument("--expected-grad-year", type=int)
     a.add_argument("--research-area"); a.add_argument("--notes")
 

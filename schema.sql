@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS students (
     citizenship         TEXT,
     status              TEXT NOT NULL DEFAULT 'active'
                         CHECK (status IN ('active', 'on_leave', 'graduated', 'withdrawn')),
-    start_year          INTEGER NOT NULL,
+    matriculation_year  INTEGER NOT NULL,
+    matriculation_term  TEXT NOT NULL DEFAULT 'Autumn',  -- Autumn/Winter/Spring/Summer (checked by the app)
     expected_grad_year  INTEGER,
     research_area       TEXT,
     notes               TEXT

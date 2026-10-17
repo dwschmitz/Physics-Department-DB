@@ -78,7 +78,8 @@ def fields_for(table, conn):
             F("email", "Email", "email", True),
             F("citizenship", "Citizenship", "select", True, enum(physdb.CITIZENSHIP), placeholder=True),
             F("status", "Status", "select", True, enum(STATUSES)),
-            F("start_year", "Start year", "year", True),
+            F("matriculation_year", "Matriculation year", "year", True),
+            F("matriculation_term", "Matriculation term", "select", True, [(s, s) for s in physdb.SEASONS]),
             F("expected_grad_year", "Expected graduation year", "year"),
             F("research_area", "Research area"),
             F("notes", "Notes", "textarea"),
@@ -166,6 +167,7 @@ def create_app(db_path=None):
     app.config["SECRET_KEY"] = os.environ.get("PHYSDB_SECRET") or _persistent_secret()
     app.jinja_env.filters["label"] = label
     app.jinja_env.filters["term"] = physdb.term_label
+    app.jinja_env.filters["matric"] = physdb.matriculation_label
 
     def db():
         if "db" not in g:
@@ -385,7 +387,8 @@ def create_app(db_path=None):
             current = request.form
         else:
             errors, current = {}, (row or {"status": "active",
-                                   "start_year": datetime.date.today().year,
+                                   "matriculation_year": datetime.date.today().year,
+                                   "matriculation_term": "Autumn",
                                    "start_date": datetime.date.today().isoformat(),
                                    "outcome": "pending", "role": "advisor",
                                    "term_year": datetime.date.today().year})

@@ -5,7 +5,7 @@ SQLite database plus a command-line tool (Python 3, standard library only).
 ## Usage
 ```
 python3 physdb.py add-faculty Niels Bohr bohr@uni.edu --research-area Atomic
-python3 physdb.py add-student U1001 Ada Lovelace ada@uni.edu --start-year 2022 --research-area "Quantum optics"
+python3 physdb.py add-student U1001 Ada Lovelace ada@uni.edu --matriculation-year 2022 --matriculation-term Autumn --research-area "Quantum optics"
 python3 physdb.py assign-advisor U1001 bohr@uni.edu            # --role co-advisor|committee|committee_chair
 python3 physdb.py add-milestone U1001 qualifying_exam 2024-05-01 --outcome passed
 python3 physdb.py add-funding U1001 TA 2026 Autumn --source Dept --amount 12000 --poetaf-coa 1234567

@@ -33,7 +33,7 @@ class WebTests(unittest.TestCase):
 
     def add_student(self, c, **over):
         data = dict(first_name="Ada", last_name="Lovelace", university_id="U1", email="ada@u.edu",
-                    status="active", start_year="2022", citizenship="citizen",
+                    status="active", matriculation_year="2022", matriculation_term="Autumn", citizenship="citizen",
                     csrf_token=self.token(c))
         data.update(over)
         return c.post("/students/new", data=data)
@@ -175,7 +175,7 @@ class WebTests(unittest.TestCase):
         # edit
         t = self.token(c, "/students/1/edit")
         r = c.post("/students/1/edit", data=dict(first_name="Ada", last_name="King", university_id="U1",
-                   email="ada@u.edu", status="on_leave", start_year="2022", citizenship="international", csrf_token=t))
+                   email="ada@u.edu", status="on_leave", matriculation_year="2022", matriculation_term="Winter", citizenship="international", csrf_token=t))
         self.assertEqual(r.status_code, 302)
         self.assertIn("King", c.get("/students").get_data(as_text=True))
         # children
@@ -250,6 +250,25 @@ class WebTests(unittest.TestCase):
         self.assertEqual(who("role=advisor"), ["Stu1", "Stu3", "Stu4"])        # anyone with a current advisor
         self.assertEqual(who("faculty=1&role=bogus"), ["Stu1", "Stu2", "Stu3", "Stu4"])
         self.assertEqual(who("faculty=abc"), ["Stu1", "Stu2", "Stu3", "Stu4", "Stu5"])
+
+    def test_matriculation_year_and_term(self):
+        c = self.client("ed")
+        form = c.get("/students/new").get_data(as_text=True)
+        self.assertIn("Matriculation year", form); self.assertIn("Matriculation term", form)
+        self.assertNotIn("Start year", form)
+        # Autumn is preselected; the other terms are offered
+        self.assertIn('<option value="Autumn" selected>Autumn</option>', form)
+        for season in ("Winter", "Spring", "Summer"):
+            self.assertIn(f'<option value="{season}" >{season}</option>', form)
+        for bad in ("", "Fall", "autumn"):
+            r = self.add_student(c, matriculation_term=bad)
+            self.assertEqual(r.status_code, 200, bad)
+        self.assertEqual(self.add_student(c, matriculation_term="Spring", matriculation_year="2021").status_code, 302)
+        page = c.get("/students/1").get_data(as_text=True)
+        self.assertIn("<dt>Matriculation</dt><dd>Spring 2021</dd>", page)
+        self.assertIn("Spring 2021", c.get("/students").get_data(as_text=True))
+        self.assertIn("matriculation_term", c.get("/export.csv").get_data(as_text=True))
+        self.assertNotIn("Started", page)
 
     def test_citizenship_field(self):
         c = self.client("ed")
@@ -345,7 +364,7 @@ class WebTests(unittest.TestCase):
     def test_csv_formula_injection_and_reports(self):
         c = self.client("vw")
         ed = self.client("ed")
-        self.add_student(ed, first_name="=HYPERLINK(1)", start_year="2015")
+        self.add_student(ed, first_name="=HYPERLINK(1)", matriculation_year="2015")
         self.assertIn("'=HYPERLINK", c.get("/export.csv").get_data(as_text=True))
         self.assertIn("1 student", c.get("/reports").get_data(as_text=True))
         self.assertEqual(c.get("/reports?kind=zzz&years=abc").status_code, 200)
