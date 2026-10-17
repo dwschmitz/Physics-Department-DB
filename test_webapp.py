@@ -359,9 +359,9 @@ class WebTests(unittest.TestCase):
                amount="50", csrf_token=t))                        # id 2: another term, must not be edited
         report = "/reports/funding?season=Autumn&year=2026&sort=amount&dir=desc"
         html = c.get(report).get_data(as_text=True)
-        buttons = re.findall(r'class="btn[^"]*" href="([^"]+)"[^>]*>(Edit|Add)</a>', html)
+        buttons = re.findall(r'class="btn[^"]*" href="([^"]+)"[^>]*>(Edit|\+)</a>', html)
         # Aa has one entry (Edit, plus an Add for a second one); Bb has none (Add)
-        self.assertEqual([b for _, b in buttons], ["Edit", "Add", "Add"])
+        self.assertEqual([b for _, b in buttons], ["Edit", "+", "+"])
         edit_href, aa_add_href, add_href = (h.replace("&amp;", "&") for h, _ in buttons)   # what a browser would follow
         self.assertTrue(aa_add_href.startswith("/students/1/funding/new?"))
         self.assertEqual(parse_qs(urlparse(aa_add_href).query)["term_season"], ["Autumn"])
@@ -381,8 +381,8 @@ class WebTests(unittest.TestCase):
                    amount="25", csrf_token=t))
         self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
         page = c.get(report).get_data(as_text=True)
-        self.assertEqual([b for _, b in re.findall(r'class="btn[^"]*" href="([^"]+)"[^>]*>(Edit|Add)</a>', page)],
-                         ["Edit", "Add", "Edit", "Add"])                          # both students: Edit + Add for another
+        self.assertEqual([b for _, b in re.findall(r'class="btn[^"]*" href="([^"]+)"[^>]*>(Edit|\+)</a>', page)],
+                         ["Edit", "+", "Edit", "+"])                              # both students: Edit + a "+" for another
         self.assertIn("$25", page)
         # Edit: opens the entry, saves, and returns to the report
         self.assertIn('value="100.0"', c.get(edit_href).get_data(as_text=True))
@@ -457,7 +457,7 @@ class WebTests(unittest.TestCase):
         html = get()
         self.assertIn("sort=clock", html); self.assertNotIn("sort=cnet", html)
         self.assertNotIn(">CNET", html); self.assertNotIn("netaa", html)         # CNET is off the screen
-        names = lambda h: re.findall(r"Rep_\w+(?=,)", h)
+        names = lambda h: re.findall(r">(Rep_\w+), \w+</a>", h)
         clocks = lambda h: re.findall(r"Rep_\w+, Ada</a></td>\s*<td>([^<]*)</td>", h)
         self.assertEqual(names(html), ["Rep_Aa", "Rep_Bb", "Rep_Cc", "Rep_Dd"])
         self.assertEqual(clocks(html), ["4.0", "1.5", "—", "0.0"])                  # Cc hasn't matriculated yet
@@ -532,11 +532,11 @@ class WebTests(unittest.TestCase):
     def test_funding_report_row_buttons(self):
         c, t = self._funding_setup()
         html, rows = self._report_forms(c, "/reports/funding?season=Autumn&year=2026")
-        labels = lambda row: re.findall(r">(Edit|Add|Copy Prev|Clear)</(?:a|button)>", row)
+        labels = lambda row: re.findall(r">(Edit|\+|Copy Prev|Clear)</(?:a|button)>", row)
         self.assertEqual([labels(r) for r in rows["1"]],                                         # funded rows; the student's
-                         [["Edit", "Copy Prev", "Clear"], ["Edit", "Copy Prev", "Clear", "Add"]])  # last row also offers Add
-        self.assertEqual(labels(rows["2"][0]), ["Add", "Copy Prev"])                             # empty rows
-        self.assertEqual(labels(rows["3"][0]), ["Add", "Copy Prev"])
+                         [["Edit", "Copy Prev", "Clear"], ["Edit", "Copy Prev", "Clear", "+"]])    # last row also offers +
+        self.assertEqual(labels(rows["2"][0]), ["Copy Prev", "+"])                               # empty rows: the "+" is
+        self.assertEqual(labels(rows["3"][0]), ["Copy Prev", "+"])                               # last, as on funded rows
         # every button's own form carries a real CSRF token
         for rws in rows.values():
             for row in rws:
@@ -602,7 +602,7 @@ class WebTests(unittest.TestCase):
         second = re.search(r'action="([^"]+/delete[^"]*)"', rows["1"][0]).group(1).replace("&amp;", "&")
         c.post(second, data={"csrf_token": t})
         html, rows = self._report_forms(c, report)
-        self.assertEqual(re.findall(r">(Edit|Add|Copy Prev|Clear)</(?:a|button)>", rows["1"][0]), ["Add", "Copy Prev"])
+        self.assertEqual(re.findall(r">(Edit|\+|Copy Prev|Clear)</(?:a|button)>", rows["1"][0]), ["Copy Prev", "+"])
         # other terms are untouched
         self.assertIn("OLD-1", c.get("/reports/funding?season=Summer&year=2026").get_data(as_text=True))
 
@@ -677,13 +677,13 @@ class WebTests(unittest.TestCase):
         c, t = self._funding_setup()          # Aa has two entries in Autumn 2026; Cc and Bb have none
         def rows_of(qs, sid="1"):
             return self._report_forms(c, "/reports/funding?season=Autumn&year=2026" + qs)[1][sid]
-        add_links = lambda row: re.findall(r'<a class="btn small" href="([^"]+)"[^>]*>Add</a>', row)
+        add_links = lambda row: re.findall(r'<a class="btn small plus" href="([^"]+)"[^>]*>\+</a>', row)
         # exactly one Add among a student's rows, and it sits on the last row shown, whatever the sort
         for qs in ("", "&sort=amount&dir=asc", "&sort=amount&dir=desc", "&sort=type&dir=desc"):
             rows = rows_of(qs)
             self.assertEqual([len(add_links(r)) for r in rows], [0] * (len(rows) - 1) + [1], qs)
         last = rows_of("")[-1]
-        self.assertLess(last.index(">Clear<"), last.index(">Add<"))                      # at the END of the button list
+        self.assertLess(last.index(">Clear<"), last.index(">+<"))                        # at the END of the button list
         # students with no funding still have the single Add (plus Copy Prev); no stray extras
         self.assertEqual([len(add_links(r)) for r in rows_of("", "2")], [1])
         # following it opens a new form for that term; saving adds a THIRD entry and returns to the report
@@ -703,7 +703,7 @@ class WebTests(unittest.TestCase):
         from unittest import mock
         with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
             html = self.client("vw").get("/reports/funding").get_data(as_text=True)
-        self.assertNotIn(">Add<", html)
+        self.assertNotIn(">+<", html)
 
     def test_funding_report_has_no_buttons_for_viewers(self):
         ed = self.client("ed"); t = self.token(ed); self.add_student(ed)
@@ -713,7 +713,7 @@ class WebTests(unittest.TestCase):
         with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
             html = vw.get("/reports/funding").get_data(as_text=True)
         self.assertIn("Lovelace", html)
-        self.assertNotIn(">Edit<", html); self.assertNotIn(">Add<", html)
+        self.assertNotIn(">Edit<", html); self.assertNotIn(">+<", html)
         self.assertNotIn("Copy Prev", html); self.assertNotIn(">Clear<", html)
         self.assertEqual(vw.get("/students/1/funding/1/edit?next=/reports/funding").status_code, 403)   # and no way in
 
