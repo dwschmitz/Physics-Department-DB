@@ -2,36 +2,35 @@
 <h1>My students</h1>
 <p class="muted">{{ fac.first_name }} {{ fac.last_name }}{% if fac.cnet %} ({{ fac.cnet }}){% endif %}</p>
 
-<h2>Students I advise <span class="muted">({{ advisees|length }})</span></h2>
+<h2>Students I advise <span class="muted">({{ n_active_advisees }} active)</span></h2>
 <div class="copy-stepper">
   {% if prev_url %}<a class="btn secondary small" href="{{ prev_url }}" title="{{ prev_label }}">&lsaquo; Prev</a>{% else %}<span class="btn secondary small disabled">&lsaquo; Prev</span>{% endif %}
   <strong class="copy-source">Funding for {{ season }} {{ year }}</strong>
   {% if next_url %}<a class="btn secondary small" href="{{ next_url }}" title="{{ next_label }}">Next &rsaquo;</a>{% else %}<span class="btn secondary small disabled">Next &rsaquo;</span>{% endif %}
   {% if advisees %}<span class="muted">total ${{ '{:,.0f}'.format(total) }}</span>{% endif %}
 </div>
-<table><tr><th>Name</th><th>CNET</th><th>Status</th><th>Matriculation</th><th>Clock</th><th>Expected graduation</th><th>Research area</th><th>Funding, {{ season }} {{ year }}</th></tr>
+<table><tr><th>Name</th><th>Status</th><th>Clock</th><th>Expected graduation</th><th>Research area</th><th>Funding, {{ season }} {{ year }}</th></tr>
 {% for s in advisees %}
 <tr><td style="white-space:nowrap"><a href="{{ url_for('faculty_student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a></td>
-<td>{{ s.cnet or '' }}</td>
 <td><span class="badge {{ s.status }}">{{ s.status|label }}</span></td>
-<td>{{ s|matric }}</td><td>{{ s.clock }}</td><td>{{ s.expected_grad_year or '' }}</td><td>{{ s.research_area or '' }}</td>
+<td>{{ s.clock }}</td><td>{{ s.expected_grad_year or '' }}</td><td>{{ s.research_area or '' }}</td>
 <td>{% for e in s.funding %}
   {% set parts = [e.kind|label] %}{% if e.source %}{% set parts = parts + [e.source] %}{% endif %}
   {% if e.poetaf_coa %}{% set parts = parts + [e.poetaf_coa] %}{% endif %}
   {% if e.amount is not none %}{% set parts = parts + ['$' ~ '{:,.0f}'.format(e.amount)] %}{% endif %}
   <div>{{ parts|join(' · ') }}</div>
 {% else %}<span class="muted">none recorded</span>{% endfor %}</td></tr>
-{% else %}<tr><td colspan="8" class="muted">No students are listed with you as advisor.</td></tr>{% endfor %}
+{% else %}<tr><td colspan="6" class="muted">No students are listed with you as advisor.</td></tr>{% endfor %}
 </table>
 
-<h2>Students whose committee I am on <span class="muted">({{ committee|length }})</span></h2>
-<table><tr><th>Name</th><th>CNET</th><th>My role</th><th>Status</th><th>Matriculation</th><th>Clock</th><th>Research area</th><th>Advisor</th></tr>
+<h2>Students whose committee I am on <span class="muted">({{ n_active_committee }} active)</span></h2>
+<table><tr><th>Name</th><th>My role</th><th>Status</th><th>Clock</th><th>Research area</th><th>Advisor</th></tr>
 {% for s in committee %}
-<tr><td style="white-space:nowrap">{{ s.last_name }}, {{ s.first_name }}</td><td>{{ s.cnet or '' }}</td>
+<tr><td style="white-space:nowrap">{{ s.last_name }}, {{ s.first_name }}</td>
 <td>{{ 'Committee chair' if s.committee_role == 'committee_chair' else 'Committee member' }}</td>
 <td><span class="badge {{ s.status }}">{{ s.status|label }}</span></td>
-<td>{{ s|matric }}</td><td>{{ s.clock }}</td><td>{{ s.research_area or '' }}</td><td>{{ s.advisors or '' }}</td></tr>
-{% else %}<tr><td colspan="8" class="muted">You are not listed on any other committees.</td></tr>{% endfor %}
+<td>{{ s.clock }}</td><td>{{ s.research_area or '' }}</td><td>{{ s.advisors or '' }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">You are not listed on any other committees.</td></tr>{% endfor %}
 </table>
 <p class="muted">This page is read-only. If something looks wrong, contact the department office.</p>
 {% endblock %}

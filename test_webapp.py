@@ -1044,7 +1044,9 @@ class WebTests(unittest.TestCase):
         # never the University ID or the internal notes
         for secret in ("UID1", "UID2", "UID3", "SECRET"):
             self.assertNotIn(secret, page)
-        self.assertIn("area-Aa", page); self.assertIn("stuaa", page)
+        self.assertIn("area-Aa", page)
+        self.assertNotIn("stuaa", page)                                                           # no CNET on the summary page...
+        self.assertIn("stuaa", f.get("/my/students/1").get_data(as_text=True))                    # ...it's on each student's page
         # stepping to another term
         winter = f.get("/my?year=2026&season=Winter").get_data(as_text=True)
         self.assertIn("Funding for Winter 2026", winter); self.assertIn("TA · Dept · $500", winter)
@@ -1052,6 +1054,45 @@ class WebTests(unittest.TestCase):
         self.assertIn("year=2027&amp;season=Winter", page)                                         # Next from Autumn 2026
         fallback = f.get("/my?year=abc&season=Fall")                                              # bad input falls back
         self.assertEqual(fallback.status_code, 200); self.assertIn("Funding for", fallback.get_data(as_text=True))
+
+    def test_faculty_summary_columns_and_active_counts(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        f = self._faculty_client()
+        from unittest import mock
+        def page():
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return f.get("/my").get_data(as_text=True)
+        html = page()
+        adv, com = html.split("Students whose committee I am on")
+        headers = lambda h: re.findall(r"<th>([^<]*)</th>", h.split("</tr>")[0].split("<table>")[-1])
+        self.assertEqual(headers(adv), ["Name", "Status", "Clock", "Expected graduation", "Research area",
+                                        "Funding, Autumn 2026"])                                  # no CNET, no Matriculation
+        self.assertEqual(headers(com), ["Name", "My role", "Status", "Clock", "Research area", "Advisor"])
+        for gone in ("CNET", "Matriculation"):
+            self.assertNotIn(gone, html)
+        self.assertNotIn("Autumn 2022", html)                                                     # their matriculation term
+        self.assertRegex(adv, r"<td>4\.0</td>")                                                   # the clock is still there
+        # counts say how many are ACTIVE
+        self.assertIn("Students I advise <span class=\"muted\">(2 active)</span>", html)
+        self.assertIn("Students whose committee I am on <span class=\"muted\">(2 active)</span>", html)
+        # a graduated advisee and a graduated committee student are still listed, but not counted
+        for sid, last in ((2, "Bb"), (4, "Dd")):
+            r = c.post(f"/students/{sid}/edit", data=dict(first_name="Stu", last_name=last, university_id=f"UID{sid}",
+                       cnet=f"stu{last.lower()}", email=f"s{sid}@u.edu", citizenship="citizen", status="graduated",
+                       matriculation_year="2022", matriculation_term="Autumn", csrf_token=t))
+            self.assertEqual(r.status_code, 302)
+        html = page()
+        adv, com = html.split("Students whose committee I am on")
+        self.assertIn("(1 active)", adv); self.assertIn("(1 active)", com)
+        self.assertEqual(re.findall(r'/my/students/(\d+)">', adv), ["1", "2"])                    # Bb is still listed
+        self.assertIn("Dd, Stu", com); self.assertIn("Graduated", adv); self.assertIn("Graduated", com)
+        for sid, last in ((1, "Aa"), (3, "Cc")):                                                  # nobody active left
+            c.post(f"/students/{sid}/edit", data=dict(first_name="Stu", last_name=last, university_id=f"UID{sid}",
+                   cnet=f"stu{last.lower()}", email=f"s{sid}@u.edu", citizenship="citizen", status="withdrawn",
+                   matriculation_year="2022", matriculation_term="Autumn", csrf_token=t))
+        html = page()
+        self.assertEqual(html.count("(0 active)"), 2)
+        self.assertEqual(f.get("/my/students/1").status_code, 200)                                # still reachable
 
     def test_faculty_student_detail_is_limited_to_their_own_advisees(self):
         c, t = self._faculty_world(); self._make_faculty_login(c, t)

@@ -65,8 +65,9 @@ person's password and role (for example, to regain admin access if no admin can 
 - **Faculty accounts:** give each faculty member a **CNET** (Faculty → add/edit; it is also a column on the
   list). Then, on the **Accounts** page, **+ Add faculty account** creates a login whose username is their CNET
   (pick the person and set a temporary password; they choose their own at first sign-in). After signing in a
-  faculty member lands on **My students**: the students they advise (name, CNET, status, matriculation, clock,
-  expected graduation, research area, and their funding for a term, with Prev / Next to change term), a read-only
+  faculty member lands on **My students**: the students they advise (name, status, clock, expected
+  graduation, research area, and their funding for a term, with Prev / Next to change term; the heading counts the
+  *active* ones), a read-only
   page for each advisee (milestones, advisors and committee, funding for every term), and the list of students
   whose committee they are on. They cannot see anything else: every other page is refused, and they cannot change
   anything. They never see University IDs or the internal student/milestone notes. Changing a faculty member's

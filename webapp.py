@@ -486,7 +486,9 @@ def create_app(db_path=None):
             "faculty_home.html", fac=fac, advisees=advisees, committee=committee, year=year, season=season,
             prev_url=step(prev_season, prev_year), next_url=step(next_season, next_year),
             prev_label=f"{prev_season} {prev_year}", next_label=f"{next_season} {next_year}",
-            total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]), current=f"{now[0]} {now[1]}")
+            total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]), current=f"{now[0]} {now[1]}",
+            n_active_advisees=sum(a["status"] == "active" for a in advisees),        # the headings count active students
+            n_active_committee=sum(c["status"] == "active" for c in committee))
 
     @app.route("/my/students/<int:sid>")
     def faculty_student(sid):
