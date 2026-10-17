@@ -466,9 +466,13 @@ def create_app(db_path=None):
         if q:
             sql += """ AND (s.first_name || ' ' || s.last_name LIKE ? ESCAPE '\\' OR s.email LIKE ? ESCAPE '\\'
                        OR s.university_id LIKE ? ESCAPE '\\' OR s.cnet LIKE ? ESCAPE '\\'
-                       OR s.research_area LIKE ? ESCAPE '\\')"""
+                       OR s.research_area LIKE ? ESCAPE '\\'
+                       OR EXISTS (SELECT 1 FROM advising a JOIN faculty f ON f.id = a.faculty_id
+                                  WHERE a.student_id = s.id AND a.end_date IS NULL
+                                  AND a.role IN ('advisor', 'co-advisor')
+                                  AND f.first_name || ' ' || f.last_name LIKE ? ESCAPE '\\'))"""
             pat = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            params += [pat] * 5
+            params += [pat] * 6
         if status in STATUSES:
             sql += " AND s.status = ?"; params.append(status)
         if faculty_id.isdigit() or role != "any":

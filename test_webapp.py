@@ -268,6 +268,32 @@ class WebTests(unittest.TestCase):
             r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
         self.assertEqual(cells, {"StuU1": "0.0", "StuU2": "1.0", "StuU3": "2.5", "StuU4": "—"})
 
+    def test_search_matches_advisor(self):
+        c = self.client("ed"); t = self.token(c)
+        for i, last in enumerate(("Aa", "Bb", "Cc", "Dd", "Ee"), 1):
+            self.add_student(c, university_id=f"U{i}", email=f"s{i}@u.edu", first_name="Stu", last_name=last)
+        for first, last in (("Niels", "Bohr"), ("Marie", "Curie")):
+            c.post("/faculty/new", data=dict(first_name=first, last_name=last, email=f"{last}@u.edu", csrf_token=t))
+        def assign(sid, fid, role, end=""):
+            c.post(f"/students/{sid}/advising/new", data=dict(faculty_id=fid, role=role, start_date="2024-01-01",
+                   end_date=end, csrf_token=t))
+        assign(1, 1, "advisor")                       # Aa: advised by Bohr
+        assign(2, 1, "committee")                     # Bb: Bohr only on committee -> not an advisor match
+        assign(3, 2, "co-advisor")                    # Cc: co-advised by Curie
+        assign(4, 1, "advisor", end="2025-01-01")     # Dd: Bohr was advisor, ended -> not shown, not matched
+        assign(5, 2, "advisor"); assign(5, 1, "committee_chair")   # Ee: Curie advises, Bohr chairs
+        found = lambda q: sorted(re.findall(r"<td>(U\d)</td>", c.get("/students?" + q).get_data(as_text=True)))
+        self.assertEqual(found("q=bohr"), ["U1"])                 # last name, case-insensitive
+        self.assertEqual(found("q=NIELS"), ["U1"])                # first name
+        self.assertEqual(found("q=niels+bohr"), ["U1"])           # full name
+        self.assertEqual(found("q=curie"), ["U3", "U5"])          # co-advisors count as advisors
+        self.assertEqual(found("q=ohr"), ["U1"])                  # partial
+        self.assertEqual(found("q=stu"), ["U1", "U2", "U3", "U4", "U5"])      # student names still match
+        self.assertEqual(found("q=bohr&faculty=2"), [])           # combines with the other filters
+        self.assertEqual(found("q=curie&status=active&sort=name&dir=desc"), ["U3", "U5"])
+        self.assertEqual(found("q=%25"), [])                      # wildcard characters are literal
+        self.assertIn("advisor", c.get("/students").get_data(as_text=True).split('name="q"')[1][:200])
+
     def test_cnet_field(self):
         c = self.client("ed")
         form = c.get("/students/new").get_data(as_text=True)
