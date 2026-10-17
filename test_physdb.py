@@ -98,6 +98,22 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(clock("Autumn", 2020, "withdrawn"), "—")
         self.assertEqual(clock("Autumn", 2024, "on_leave"), "2.0")
 
+    def test_cnet(self):
+        sid = physdb.add_student(self.conn, university_id="U20", first_name="N", last_name="M", email="n@m.o",
+                                 matriculation_year=2023, expected_grad_year=None, research_area=None,
+                                 notes=None, cnet="  NMarie ")
+        self.assertEqual(physdb._find(self.conn, "students", "nmarie")["id"], sid)     # look up by CNET
+        self.assertIn("CNET nmarie", physdb.show_student(self.conn, sid))
+        self.assertIn("CNET -", physdb.show_student(self.conn, "U1001"))
+        for kwargs, exc in (({"cnet": "NMARIE", "email": "x@m.o", "university_id": "U21"}, sqlite3.IntegrityError),
+                            ({"cnet": "bad name", "email": "y@m.o", "university_id": "U22"}, ValueError)):
+            with self.assertRaises(exc):
+                physdb.add_student(self.conn, first_name="N", last_name="M", matriculation_year=2023,
+                                   expected_grad_year=None, research_area=None, notes=None, **kwargs)
+        for i in (30, 31):   # blank CNETs may repeat
+            physdb.add_student(self.conn, university_id=f"U{i}", first_name="N", last_name="M", email=f"{i}@m.o",
+                               matriculation_year=2023, expected_grad_year=None, research_area=None, notes=None)
+
     def test_citizenship(self):
         sid = physdb.add_student(self.conn, university_id="U9", first_name="N", last_name="M",
                                  email="n@m.o", matriculation_year=2023, expected_grad_year=None,
@@ -146,6 +162,8 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual((rows[2]["term_year"], rows[2]["legacy_term"]), (None, "AY 25-26"))
         self.assertEqual(physdb.term_label(rows[2]), "AY 25-26")
         self.assertIsNone(rows[1]["poetaf_coa"])
+        self.assertIn("cnet", {r[1] for r in conn.execute("PRAGMA table_info(students)")})   # added to old DBs
+        self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name='idx_students_cnet'").fetchone()[0], 1)
         self.assertIn("citizenship", {r[1] for r in conn.execute("PRAGMA table_info(students)")})   # added to old DBs
         self.assertIsNone(conn.execute("SELECT citizenship FROM students").fetchone()[0])
         scols = {r[1] for r in conn.execute("PRAGMA table_info(students)")}

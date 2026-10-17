@@ -5,6 +5,7 @@
  {{ delete_button(url_for('student_delete', sid=s.id), 'Permanently delete ' ~ s.first_name ~ ' ' ~ s.last_name ~ ' and all of their records?') }}{% endif %}</p>
 <dl>
   <dt>University ID</dt><dd>{{ s.university_id }}</dd>
+  <dt>CNET</dt><dd>{{ s.cnet or '—' }}</dd>
   <dt>Email</dt><dd>{{ s.email }}</dd>
   <dt>Citizenship</dt><dd>{{ s.citizenship|label if s.citizenship else '—' }}</dd>
   <dt>Matriculation</dt><dd>{{ s|matric }}</dd>

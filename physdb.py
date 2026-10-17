@@ -85,6 +85,7 @@ def connect(path=DB_PATH):
     _add_funding_notes(conn)
     _add_student_citizenship(conn)
     _migrate_matriculation(conn)
+    _add_student_cnet(conn)
     return conn
 
 
@@ -101,6 +102,18 @@ def _migrate_matriculation(conn):
 def matriculation_label(row):
     """e.g. 'Autumn 2022'."""
     return f"{row['matriculation_term']} {row['matriculation_year']}"
+
+
+CNET_PATTERN = r"[A-Za-z0-9._-]{2,40}"
+
+
+def _add_student_cnet(conn):
+    """CNET column plus a unique index (blank values may repeat). Done here rather than in schema.sql
+    because the index can only be created once the column exists in older databases."""
+    if "cnet" not in {r[1] for r in conn.execute("PRAGMA table_info(students)")}:
+        conn.execute("ALTER TABLE students ADD COLUMN cnet TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_students_cnet ON students(cnet) WHERE cnet IS NOT NULL")
+    conn.commit()
 
 
 def _add_student_citizenship(conn):
@@ -205,7 +218,7 @@ def _migrate_users(conn):
 
 def _find(conn, table, key):
     """Resolve a student/faculty by numeric id, university id, or email."""
-    cols = ["email"] + (["university_id"] if table == "students" else [])
+    cols = ["email"] + (["university_id", "cnet"] if table == "students" else [])
     clause = " OR ".join(f"{c} = ?" for c in cols)
     if str(key).isdigit():
         clause = "id = ? OR " + clause
@@ -220,15 +233,18 @@ def _find(conn, table, key):
 
 def add_student(conn, **f):
     f.setdefault("citizenship", None)
+    f["cnet"] = (f.get("cnet") or "").strip().lower() or None
+    if f["cnet"] and not re.fullmatch(CNET_PATTERN, f["cnet"]):
+        raise ValueError("CNET must be 2-40 letters, digits, or . _ -")
     f.setdefault("matriculation_term", "Autumn")
     if f["matriculation_term"] not in SEASONS:
         raise ValueError(f"matriculation term must be one of {', '.join(SEASONS)}")
     if f["citizenship"] is not None and f["citizenship"] not in CITIZENSHIP:
         raise ValueError(f"citizenship must be one of {', '.join(CITIZENSHIP)}")
     cur = conn.execute(
-        """INSERT INTO students (university_id, first_name, last_name, email, citizenship,
+        """INSERT INTO students (university_id, cnet, first_name, last_name, email, citizenship,
                matriculation_year, matriculation_term, expected_grad_year, research_area, notes)
-           VALUES (:university_id, :first_name, :last_name, :email, :citizenship,
+           VALUES (:university_id, :cnet, :first_name, :last_name, :email, :citizenship,
                :matriculation_year, :matriculation_term, :expected_grad_year, :research_area, :notes)""", f)
     conn.commit()
     return cur.lastrowid
@@ -323,7 +339,7 @@ def missing_milestone(conn, kind, min_years=2):
 def show_student(conn, key):
     s = _find(conn, "students", key)
     out = [f"{s['first_name']} {s['last_name']}  <{s['email']}>",
-           f"  ID {s['university_id']} | {s['status']} | "
+           f"  ID {s['university_id']} | CNET {s['cnet'] or '-'} | {s['status']} | "
            f"matriculated {matriculation_label(s)}, expected {s['expected_grad_year'] or '?'}",
            f"  Citizenship: {s['citizenship'].replace('_', ' ') if s['citizenship'] else '-'}",
            f"  Research: {s['research_area'] or '-'}"]
@@ -376,7 +392,7 @@ def build_parser():
 
     a = sub.add_parser("add-student")
     a.add_argument("university_id"); a.add_argument("first_name"); a.add_argument("last_name")
-    a.add_argument("email")
+    a.add_argument("email"); a.add_argument("--cnet")
     a.add_argument("--citizenship", choices=CITIZENSHIP)
     a.add_argument("--matriculation-year", type=int, default=datetime.date.today().year)
     a.add_argument("--matriculation-term", choices=SEASONS, type=str.capitalize, default="Autumn")

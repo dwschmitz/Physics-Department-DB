@@ -76,6 +76,7 @@ def fields_for(table, conn):
             F("first_name", "First name", required=True),
             F("last_name", "Last name", required=True),
             F("university_id", "University ID", required=True),
+            F("cnet", "CNET", "cnet"),
             F("email", "Email", "email", True),
             F("citizenship", "Citizenship", "select", True, enum(physdb.CITIZENSHIP), placeholder=True),
             F("status", "Status", "select", True, enum(STATUSES)),
@@ -149,6 +150,10 @@ def parse_form(fields, form):
                     raise ValueError("Enter a non-negative number.")
             elif kind == "username" and not re.fullmatch(r"[A-Za-z0-9._@-]{3,60}", raw):
                 raise ValueError("Enter 3-60 letters, digits, or . _ @ - (no spaces).")
+            elif kind == "cnet":
+                if not re.fullmatch(physdb.CNET_PATTERN, raw):
+                    raise ValueError("Enter 2-40 letters, digits, or . _ - (no spaces).")
+                raw = raw.lower()
             elif kind == "password" and len(raw) < MIN_PASSWORD:
                 raise ValueError(f"Enter at least {MIN_PASSWORD} characters.")
             elif kind == "email" and ("@" not in raw or " " in raw):
@@ -402,7 +407,8 @@ def create_app(db_path=None):
             if "UNIQUE" in msg:
                 col = msg.rsplit(".", 1)[-1]
                 return {"email": "Someone else already has this email address.",
-                        "university_id": "Another student already has this university ID."
+                        "university_id": "Another student already has this university ID.",
+                        "cnet": "Another student already has this CNET."
                         }.get(col, "That entry already exists.")
             return "Could not save: the data conflicts with existing records."
         return None
@@ -459,9 +465,10 @@ def create_app(db_path=None):
         params = []
         if q:
             sql += """ AND (s.first_name || ' ' || s.last_name LIKE ? ESCAPE '\\' OR s.email LIKE ? ESCAPE '\\'
-                       OR s.university_id LIKE ? ESCAPE '\\' OR s.research_area LIKE ? ESCAPE '\\')"""
+                       OR s.university_id LIKE ? ESCAPE '\\' OR s.cnet LIKE ? ESCAPE '\\'
+                       OR s.research_area LIKE ? ESCAPE '\\')"""
             pat = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            params += [pat] * 4
+            params += [pat] * 5
         if status in STATUSES:
             sql += " AND s.status = ?"; params.append(status)
         if faculty_id.isdigit() or role != "any":

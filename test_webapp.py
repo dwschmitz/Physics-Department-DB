@@ -268,6 +268,39 @@ class WebTests(unittest.TestCase):
             r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
         self.assertEqual(cells, {"StuU1": "0.0", "StuU2": "1.0", "StuU3": "2.5", "StuU4": "—"})
 
+    def test_cnet_field(self):
+        c = self.client("ed")
+        form = c.get("/students/new").get_data(as_text=True)
+        self.assertLess(form.index("University ID"), form.index(">CNET<"))        # right after University ID
+        self.assertLess(form.index(">CNET<"), form.index("Email"))
+        self.assertNotIn(">CNET <span", form)                                      # optional
+        # optional: students without one are fine, and several may be blank
+        self.assertEqual(self.add_student(c, university_id="U1", email="a1@u.edu").status_code, 302)
+        self.assertEqual(self.add_student(c, university_id="U2", email="a2@u.edu", cnet="").status_code, 302)
+        # saved lowercase and trimmed, shown on the student's page
+        self.assertEqual(self.add_student(c, university_id="U3", email="a3@u.edu", cnet="  AdaL ").status_code, 302)
+        self.assertIn("<dt>CNET</dt><dd>adal</dd>", c.get("/students/3").get_data(as_text=True))
+        self.assertIn("<dt>CNET</dt><dd>—</dd>", c.get("/students/1").get_data(as_text=True))
+        # unique, case-insensitively, with a friendly message
+        r = self.add_student(c, university_id="U4", email="a4@u.edu", cnet="ADAL")
+        self.assertIn("Another student already has this CNET", r.get_data(as_text=True))
+        # bad characters / length rejected
+        for bad in ("a", "has space", "semi;colon", "x" * 41, "<b>"):
+            r = self.add_student(c, university_id="U5", email="a5@u.edu", cnet=bad)
+            self.assertEqual(r.status_code, 200, bad)
+            self.assertIn("Please fix", r.get_data(as_text=True))
+        # searchable, and editing a student keeps its own CNET without a false duplicate error
+        self.assertEqual(self.names3(c.get("/students?q=adal").get_data(as_text=True)), ["U3"])
+        t = self.token(c, "/students/3/edit")
+        r = c.post("/students/3/edit", data=dict(first_name="Ada", last_name="Lovelace", university_id="U3",
+                   cnet="adal", email="a3@u.edu", citizenship="citizen", status="active",
+                   matriculation_year="2022", matriculation_term="Autumn", csrf_token=t))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("adal", c.get("/export.csv").get_data(as_text=True))
+
+    def names3(self, html):
+        return re.findall(r"<td>(U\d+)</td>", html)
+
     def names(self, html):
         return re.findall(r"Stu_\w+(?=,)", html)
 

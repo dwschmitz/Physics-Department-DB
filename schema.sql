@@ -3,6 +3,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS students (
     id                  INTEGER PRIMARY KEY,
     university_id       TEXT UNIQUE NOT NULL,
+    cnet                TEXT,   -- CNET ID, lowercase; unique when present (index made in physdb.connect)
     first_name          TEXT NOT NULL,
     last_name           TEXT NOT NULL,
     email               TEXT UNIQUE NOT NULL,
