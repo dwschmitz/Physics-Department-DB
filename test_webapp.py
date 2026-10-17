@@ -224,6 +224,26 @@ class WebTests(unittest.TestCase):
         self.assertEqual(order, sorted(order))   # newest first, chronological within a year
         self.assertIn("&lt;b&gt;9", page)        # account number is escaped
 
+    def test_faculty_committee_count(self):
+        c = self.client("ed"); t = self.token(c)
+        for i in (1, 2, 3):
+            self.add_student(c, university_id=f"U{i}", email=f"s{i}@u.edu")
+        for name in ("Bohr", "Curie"):
+            c.post("/faculty/new", data=dict(first_name="X", last_name=name, email=f"{name}@u.edu", csrf_token=t))
+        def assign(sid, fid, role, end=""):
+            c.post(f"/students/{sid}/advising/new", data=dict(faculty_id=fid, role=role,
+                   start_date="2024-01-01", end_date=end, csrf_token=t))
+        assign(1, 1, "advisor"); assign(1, 1, "committee")            # same student twice: counts once
+        assign(2, 1, "committee_chair"); assign(3, 1, "committee", end="2025-01-01")  # ended: not counted
+        assign(2, 2, "committee")
+        html = c.get("/faculty").get_data(as_text=True)
+        import re
+        rows = {m.group(1): re.findall(r"<td>(\d+)</td>", m.group(2)) for m in
+                re.finditer(r"<tr><td><a [^>]*>([^<,]+),[^<]*</a></td>(.*?)</tr>", html, re.S)}
+        self.assertEqual(rows["Bohr"], ["1", "2"])    # 1 advisee; 2 distinct students on committees
+        self.assertEqual(rows["Curie"], ["0", "1"])
+        self.assertIn("Committees", html)
+
     def test_other_students_records_not_reachable(self):
         c = self.client("ed")
         self.add_student(c)

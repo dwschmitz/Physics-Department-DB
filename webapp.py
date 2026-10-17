@@ -493,7 +493,9 @@ def create_app(db_path=None):
     @app.route("/faculty")
     def faculty_list():
         rows = db().execute("""SELECT f.*, (SELECT count(*) FROM advising a WHERE a.faculty_id = f.id
-                  AND a.end_date IS NULL AND a.role IN ('advisor','co-advisor')) AS n_advisees
+                  AND a.end_date IS NULL AND a.role IN ('advisor','co-advisor')) AS n_advisees,
+                  (SELECT count(DISTINCT a.student_id) FROM advising a WHERE a.faculty_id = f.id
+                  AND a.end_date IS NULL) AS n_committees
                   FROM faculty f ORDER BY f.last_name, f.first_name""").fetchall()
         return render_template("faculty.html", rows=rows)
 
