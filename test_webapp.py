@@ -323,6 +323,77 @@ class WebTests(unittest.TestCase):
         self.assertTrue(any("Aa,Stu,U1,cnet1,,Autumn 2026,RA,NSF,COA-9,3000.0" in l for l in lines))
         self.assertTrue(any(l.startswith("Cc,Stu,U3,cnet3,,Autumn 2026,,,,,") for l in lines))   # unfunded: blanks
 
+    def test_funding_report_edit_and_add_buttons(self):
+        from urllib.parse import urlparse, parse_qs, unquote
+        from unittest import mock
+        c = self.client("ed"); t = self.token(c)
+        for i, last in enumerate(("Aa", "Bb"), 1):
+            self.add_student(c, university_id=f"U{i}", email=f"s{i}@u.edu", first_name="Stu", last_name=last)
+        c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn",
+               amount="100", csrf_token=t))                       # funding id 1 (Aa, Autumn 2026)
+        c.post("/students/1/funding/new", data=dict(kind="TA", term_year=2026, term_season="Winter",
+               amount="50", csrf_token=t))                        # id 2: another term, must not be edited
+        report = "/reports/funding?season=Autumn&year=2026&sort=amount&dir=desc"
+        html = c.get(report).get_data(as_text=True)
+        buttons = re.findall(r'class="btn[^"]*" href="([^"]+)">(Edit|Add)</a>', html)
+        self.assertEqual([b for _, b in buttons], ["Edit", "Add"])               # Aa has an entry, Bb has none
+        edit_href, add_href = (h.replace("&amp;", "&") for h, _ in buttons)      # exactly what a browser would follow
+        self.assertTrue(edit_href.startswith("/students/1/funding/1/edit?"))      # the Autumn entry, not Winter's
+        self.assertTrue(add_href.startswith("/students/2/funding/new?"))
+        self.assertEqual(parse_qs(urlparse(add_href).query)["term_year"], ["2026"])
+        self.assertEqual(parse_qs(urlparse(add_href).query)["term_season"], ["Autumn"])
+        for href in (edit_href, add_href):                                       # both remember the report
+            self.assertEqual(parse_qs(urlparse(href).query)["next"], [report])
+        # Add: the form opens with the report's term filled in, and Cancel goes back to the report
+        form = c.get(add_href).get_data(as_text=True)
+        self.assertIn('<option value="2026" selected>2026</option>', form)
+        self.assertIn('<option value="Autumn" selected>Autumn</option>', form)
+        self.assertIn(f'href="{report.replace("&", "&amp;")}">Cancel', form)
+        # saving returns to the same report (same term and sort) and the entry is now there
+        r = c.post(add_href, data=dict(kind="supplement", term_year=2026, term_season="Autumn",
+                   amount="25", csrf_token=t))
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
+        page = c.get(report).get_data(as_text=True)
+        self.assertEqual([b for _, b in re.findall(r'class="btn[^"]*" href="([^"]+)">(Edit|Add)</a>', page)],
+                         ["Edit", "Edit"])
+        self.assertIn("$25", page)
+        # Edit: opens the entry, saves, and returns to the report
+        self.assertIn('value="100.0"', c.get(edit_href).get_data(as_text=True))
+        r = c.post(edit_href, data=dict(kind="RA", term_year=2026, term_season="Autumn", amount="150",
+                   notes="raised", csrf_token=t))
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
+        self.assertIn("$150", c.get(report).get_data(as_text=True))
+        # a validation error keeps you on the form, still pointing back at the report
+        bad = c.post(edit_href, data=dict(kind="RA", term_year=2026, term_season="", csrf_token=t))
+        self.assertEqual(bad.status_code, 200)
+        self.assertIn("Cancel", bad.get_data(as_text=True))
+        self.assertEqual(c.post(edit_href, data=dict(kind="RA", term_year=2026, term_season="Autumn",
+                         csrf_token=t)).headers["Location"], report)
+        # no ?next= -> behaves as before (back to the student page)
+        r = c.post("/students/2/funding/new", data=dict(kind="TA", term_year=2026, term_season="Spring", csrf_token=t))
+        self.assertEqual(r.headers["Location"], "/students/2")
+
+    def test_next_parameter_cannot_redirect_off_site(self):
+        c = self.client("ed"); t = self.token(c); self.add_student(c)
+        for evil in ("//evil.com/x", "http://evil.com", "https://evil.com/x", "\\\\evil.com", "evil.com", "/ok\\evil"):
+            r = c.post("/students/1/funding/new", data=dict(kind="TA", term_year=2026, term_season="Autumn",
+                       csrf_token=t), query_string={"next": evil})
+            self.assertEqual((r.status_code, r.headers["Location"]), (302, "/students/1"), evil)
+        r = c.post("/students/1/funding/new", data=dict(kind="TA", term_year=2026, term_season="Winter", csrf_token=t),
+                   query_string={"next": "/reports/funding?year=2026&season=Winter"})
+        self.assertEqual(r.headers["Location"], "/reports/funding?year=2026&season=Winter")
+
+    def test_funding_report_has_no_buttons_for_viewers(self):
+        ed = self.client("ed"); t = self.token(ed); self.add_student(ed)
+        ed.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", csrf_token=t))
+        vw = self.client("vw")
+        from unittest import mock
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            html = vw.get("/reports/funding").get_data(as_text=True)
+        self.assertIn("Lovelace", html)
+        self.assertNotIn(">Edit<", html); self.assertNotIn(">Add<", html)
+        self.assertEqual(vw.get("/students/1/funding/1/edit?next=/reports/funding").status_code, 403)   # and no way in
+
     def test_funding_report_access_and_undated_warning(self):
         anon = self.app.test_client()
         self.assertEqual(anon.get("/reports/funding").status_code, 302)

@@ -55,6 +55,8 @@ person's password and role (for example, to regain admin access if no admin can 
   their funding for that term (type, source, POETAF/COA, amount, notes). Active students with nothing
   recorded still appear, with empty fields; a student with several entries gets one row per entry.
   Students on leave, graduated or withdrawn are not included. Download it as CSV for a spreadsheet.
+  Editors get an **Edit** button on each funding entry and an **Add** button (term pre-filled) for students
+  with nothing that term; saving or cancelling returns to the same report.
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.

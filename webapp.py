@@ -165,6 +165,14 @@ def parse_form(fields, form):
     return values, errors
 
 
+def _safe_path(value):
+    """A same-site path ('/students?x=1') that is safe to redirect to, else None (no open redirects)."""
+    if value and value.startswith("/") and not value.startswith("//") and "\\" not in value \
+            and len(value) < 500 and "\n" not in value and "\r" not in value:
+        return value
+    return None
+
+
 def _text(value):
     """Case-insensitive sort key; blank values sort last."""
     value = (value or "").strip().lower()
@@ -259,10 +267,7 @@ def create_app(db_path=None):
                 session["user_id"] = row["id"]
                 session["pwf"] = pw_fingerprint(row["password_hash"])
                 session["csrf"] = secrets.token_urlsafe(32)
-                nxt = request.args.get("next", "")
-                if not nxt.startswith("/") or nxt.startswith("//") or "\\" in nxt:
-                    nxt = url_for("students")
-                return redirect(nxt)
+                return redirect(_safe_path(request.args.get("next")) or url_for("students"))
             flash("Incorrect username or password.", "error")
         return render_template("login.html")
 
@@ -414,6 +419,7 @@ def create_app(db_path=None):
         return None
 
     def form_page(table, title, row, back, post_extra=None, extra=None, rid=None):
+        back = _safe_path(request.args.get("next")) or back     # ?next=... returns the user to where they came from
         fields = fields_for(table, db())
         if request.method == "POST":
             values, errors = parse_form(fields, request.form)
@@ -434,6 +440,9 @@ def create_app(db_path=None):
                                    "start_date": datetime.date.today().isoformat(),
                                    "outcome": "pending", "role": "advisor",
                                    "term_year": datetime.date.today().year})
+            if row is None:   # links can pre-fill a new form, e.g. ?term_year=2026&term_season=Autumn
+                current = {**current, **{f["name"]: request.args[f["name"]]
+                                         for f in fields if f["name"] in request.args}}
         return render_template("form.html", title=title, fields=fields, values=current,
                                errors=errors, back=back)
 
@@ -660,7 +669,8 @@ def create_app(db_path=None):
         return render_template(
             "funding_report.html", rows=rows, year=year, season=season, sort=sort, sdir=sdir,
             years=term_years(), seasons=physdb.SEASONS, n_students=len(students), n_funded=len(funded),
-            total=sum(r["amount"] or 0 for r in rows), undated=physdb.undated_funding_count(db()))
+            total=sum(r["amount"] or 0 for r in rows), undated=physdb.undated_funding_count(db()),
+            here=request.full_path.rstrip("?"))
 
     @app.route("/reports/funding.csv")
     def funding_report_csv():
