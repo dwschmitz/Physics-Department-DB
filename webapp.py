@@ -21,7 +21,6 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import physdb
 
 STATUSES = ["active", "on_leave", "graduated", "withdrawn"]
-PROGRAMS = ["PhD", "MS"]
 FACULTY_ROLE_FILTERS = {"any": "Any role", "advisor": "Advisor",
                         "committee": "Committee member only"}
 ACCOUNT_ROLES = ["viewer", "editor", "admin"]
@@ -49,7 +48,7 @@ def pw_fingerprint(password_hash):
 
 
 def label(value):
-    return str(value).replace("_", " ").capitalize() if value not in ("PhD", "MS", "TA", "RA") else value
+    return str(value).replace("_", " ").capitalize() if value not in ("TA", "RA") else value
 
 
 def F(name, text, kind="text", required=False, choices=None, help=None, placeholder=False, maxlen=None):
@@ -73,7 +72,6 @@ def fields_for(table, conn):
             F("last_name", "Last name", required=True),
             F("university_id", "University ID", required=True),
             F("email", "Email", "email", True),
-            F("program", "Program", "select", True, enum(PROGRAMS)),
             F("status", "Status", "select", True, enum(STATUSES)),
             F("start_year", "Start year", "year", True),
             F("expected_grad_year", "Expected graduation year", "year"),
@@ -380,7 +378,7 @@ def create_app(db_path=None):
                 errors["_form"] = problem
             current = request.form
         else:
-            errors, current = {}, (row or {"status": "active", "program": "PhD",
+            errors, current = {}, (row or {"status": "active",
                                    "start_year": datetime.date.today().year,
                                    "start_date": datetime.date.today().isoformat(),
                                    "outcome": "pending", "role": "advisor",
@@ -405,7 +403,6 @@ def create_app(db_path=None):
     def students():
         q = request.args.get("q", "").strip()
         status = request.args.get("status", "")
-        program = request.args.get("program", "")
         faculty_id = request.args.get("faculty", "")
         role = request.args.get("role", "any")
         if role not in FACULTY_ROLE_FILTERS:
@@ -422,16 +419,14 @@ def create_app(db_path=None):
             params += [pat] * 4
         if status in STATUSES:
             sql += " AND s.status = ?"; params.append(status)
-        if program in PROGRAMS:
-            sql += " AND s.program = ?"; params.append(program)
         if faculty_id.isdigit() or role != "any":
             clause, p = physdb.faculty_role_clause(role, int(faculty_id) if faculty_id.isdigit() else None)
             sql += f" AND {clause}"; params += p
         rows = db().execute(sql + " ORDER BY s.last_name, s.first_name", params).fetchall()
         faculty = db().execute("SELECT id, last_name, first_name FROM faculty ORDER BY last_name").fetchall()
         return render_template("students.html", rows=rows, faculty=faculty, q=q, status=status,
-                               program=program, faculty_id=faculty_id, role=role, role_filters=FACULTY_ROLE_FILTERS,
-                               statuses=STATUSES, programs=PROGRAMS)
+                               faculty_id=faculty_id, role=role, role_filters=FACULTY_ROLE_FILTERS,
+                               statuses=STATUSES)
 
     @app.route("/students/new", methods=["GET", "POST"])
     def student_new():

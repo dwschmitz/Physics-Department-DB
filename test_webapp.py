@@ -33,7 +33,7 @@ class WebTests(unittest.TestCase):
 
     def add_student(self, c, **over):
         data = dict(first_name="Ada", last_name="Lovelace", university_id="U1", email="ada@u.edu",
-                    program="PhD", status="active", start_year="2022", csrf_token=self.token(c))
+                    status="active", start_year="2022", csrf_token=self.token(c))
         data.update(over)
         return c.post("/students/new", data=data)
 
@@ -174,7 +174,7 @@ class WebTests(unittest.TestCase):
         # edit
         t = self.token(c, "/students/1/edit")
         r = c.post("/students/1/edit", data=dict(first_name="Ada", last_name="King", university_id="U1",
-                   email="ada@u.edu", program="MS", status="on_leave", start_year="2022", csrf_token=t))
+                   email="ada@u.edu", status="on_leave", start_year="2022", csrf_token=t))
         self.assertEqual(r.status_code, 302)
         self.assertIn("King", c.get("/students").get_data(as_text=True))
         # children

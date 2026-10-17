@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS students (
     first_name          TEXT NOT NULL,
     last_name           TEXT NOT NULL,
     email               TEXT UNIQUE NOT NULL,
-    program             TEXT NOT NULL DEFAULT 'PhD' CHECK (program IN ('PhD', 'MS')),
     status              TEXT NOT NULL DEFAULT 'active'
                         CHECK (status IN ('active', 'on_leave', 'graduated', 'withdrawn')),
     start_year          INTEGER NOT NULL,

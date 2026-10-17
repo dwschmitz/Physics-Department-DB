@@ -7,7 +7,7 @@
   <button class="btn">Show</button>
 </form>
 <p class="muted">{{ rows|length }} student{{ '' if rows|length == 1 else 's' }}</p>
-<table><tr><th>Name</th><th>Started</th><th>Program</th><th>Research area</th></tr>
+<table><tr><th>Name</th><th>Started</th><th>Research area</th></tr>
 {% for r in rows %}<tr><td><a href="{{ url_for('student', sid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
-<td>{{ r.start_year }}</td><td>{{ r.program }}</td><td>{{ r.research_area or '' }}</td></tr>
-{% else %}<tr><td colspan="4" class="muted">Nobody — everyone is on track.</td></tr>{% endfor %}</table>{% endblock %}
+<td>{{ r.start_year }}</td><td>{{ r.research_area or '' }}</td></tr>
+{% else %}<tr><td colspan="3" class="muted">Nobody — everyone is on track.</td></tr>{% endfor %}</table>{% endblock %}

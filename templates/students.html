@@ -4,8 +4,6 @@
   <label>Search<input name="q" value="{{ q }}" placeholder="Name, email, ID, research area"></label>
   <label>Status<select name="status"><option value="">Any</option>
     {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status }}>{{ s|label }}</option>{% endfor %}</select></label>
-  <label>Program<select name="program"><option value="">Any</option>
-    {% for p in programs %}<option {{ 'selected' if p == program }}>{{ p }}</option>{% endfor %}</select></label>
   <label>Faculty member<select name="faculty"><option value="">Any</option>
     {% for f in faculty %}<option value="{{ f.id }}" {{ 'selected' if faculty_id == f.id|string }}>{{ f.last_name }}, {{ f.first_name }}</option>{% endfor %}</select></label>
   <label title="Advisor includes co-advisors. Committee member only leaves out students this person also advises.">Their role<select name="role">
@@ -15,11 +13,11 @@
   <a class="btn secondary" href="{{ url_for('export') }}">Download CSV</a>
 </form>
 <p class="muted">{{ rows|length }} student{{ '' if rows|length == 1 else 's' }}</p>
-<table><tr><th>Name</th><th>University ID</th><th>Program</th><th>Status</th><th>Started</th><th>Advisor</th><th>Research area</th></tr>
+<table><tr><th>Name</th><th>University ID</th><th>Status</th><th>Started</th><th>Advisor</th><th>Research area</th></tr>
 {% for r in rows %}
 <tr><td><a href="{{ url_for('student', sid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
-<td>{{ r.university_id }}</td><td>{{ r.program }}</td>
+<td>{{ r.university_id }}</td>
 <td><span class="badge {{ r.status }}">{{ r.status|label }}</span></td>
 <td>{{ r.start_year }}</td><td>{{ r.advisors or '—' }}</td><td>{{ r.research_area or '' }}</td></tr>
-{% else %}<tr><td colspan="7" class="muted">No students match.</td></tr>{% endfor %}
+{% else %}<tr><td colspan="6" class="muted">No students match.</td></tr>{% endfor %}
 </table>{% endblock %}

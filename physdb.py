@@ -31,7 +31,18 @@ def connect(path=DB_PATH):
     if legacy:
         _restore_old_funding(conn)
     _migrate_users(conn)
+    _drop_program_column(conn)
     return conn
+
+
+def _drop_program_column(conn):
+    """The department has no master's students, so the old PhD/MS `program` column is gone."""
+    if "program" in {r[1] for r in conn.execute("PRAGMA table_info(students)")}:
+        try:
+            conn.execute("ALTER TABLE students DROP COLUMN program")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass   # very old SQLite: leave the unused column (it has a default, so inserts still work)
 
 
 def parse_term(text):
@@ -109,9 +120,9 @@ def _find(conn, table, key):
 
 def add_student(conn, **f):
     cur = conn.execute(
-        """INSERT INTO students (university_id, first_name, last_name, email, program,
+        """INSERT INTO students (university_id, first_name, last_name, email,
                start_year, expected_grad_year, research_area, notes)
-           VALUES (:university_id, :first_name, :last_name, :email, :program,
+           VALUES (:university_id, :first_name, :last_name, :email,
                :start_year, :expected_grad_year, :research_area, :notes)""", f)
     conn.commit()
     return cur.lastrowid
@@ -205,7 +216,7 @@ def missing_milestone(conn, kind, min_years=2):
 def show_student(conn, key):
     s = _find(conn, "students", key)
     out = [f"{s['first_name']} {s['last_name']}  <{s['email']}>",
-           f"  ID {s['university_id']} | {s['program']} | {s['status']} | "
+           f"  ID {s['university_id']} | {s['status']} | "
            f"started {s['start_year']}, expected {s['expected_grad_year'] or '?'}",
            f"  Research: {s['research_area'] or '-'}"]
     if s["notes"]:
@@ -246,7 +257,7 @@ def export_csv(conn, fh):
 
 def _row_line(r):
     return (f"{r['id']:>4}  {r['last_name']}, {r['first_name']:<14} {r['university_id']:<10} "
-            f"{r['program']:<4} {r['status']:<9} {r['start_year']}  {r['research_area'] or ''}")
+            f"{r['status']:<9} {r['start_year']}  {r['research_area'] or ''}")
 
 
 def build_parser():
@@ -255,7 +266,7 @@ def build_parser():
 
     a = sub.add_parser("add-student")
     a.add_argument("university_id"); a.add_argument("first_name"); a.add_argument("last_name")
-    a.add_argument("email"); a.add_argument("--program", default="PhD", choices=["PhD", "MS"])
+    a.add_argument("email")
     a.add_argument("--start-year", type=int, default=datetime.date.today().year)
     a.add_argument("--expected-grad-year", type=int)
     a.add_argument("--research-area"); a.add_argument("--notes")
