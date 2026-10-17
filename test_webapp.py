@@ -534,7 +534,7 @@ class WebTests(unittest.TestCase):
         html, rows = self._report_forms(c, "/reports/funding?season=Autumn&year=2026")
         labels = lambda row: re.findall(r">(Edit|\+|Copy|Clear)</(?:a|button)>", row)
         self.assertEqual([labels(r) for r in rows["1"]],                                         # funded rows; the student's
-                         [["Edit", "Clear", "Copy"], ["Edit", "Clear", "Copy", "+"]])              # last row also offers +
+                         [["Edit", "Clear", "Copy", "+"]] * 2)                                     # every row ends with +
         self.assertEqual(labels(rows["2"][0]), ["Copy", "+"])                                    # empty rows: the "+" is
         self.assertEqual(labels(rows["3"][0]), ["Copy", "+"])                                    # last, as on funded rows
         # every form button (Clear) carries a real CSRF token; Copy and + are links, not forms
@@ -816,27 +816,32 @@ class WebTests(unittest.TestCase):
         def rows_of(qs, sid="1"):
             return self._report_forms(c, "/reports/funding?season=Autumn&year=2026" + qs)[1][sid]
         add_links = lambda row: re.findall(r'<a class="btn small plus" href="([^"]+)"[^>]*>\+</a>', row)
-        # exactly one Add among a student's rows, and it sits on the last row shown, whatever the sort
-        for qs in ("", "&sort=amount&dir=asc", "&sort=amount&dir=desc", "&sort=type&dir=desc"):
+        # every row ends with exactly one "+", whatever the sort order (so sorting by amount etc. keeps it handy)
+        for qs in ("", "&sort=amount&dir=asc", "&sort=amount&dir=desc", "&sort=type&dir=desc", "&sort=clock"):
             rows = rows_of(qs)
-            self.assertEqual([len(add_links(r)) for r in rows], [0] * (len(rows) - 1) + [1], qs)
-        last = rows_of("")[-1]
-        self.assertLess(last.index(">Clear<"), last.index(">+<"))                        # at the END of the button list
+            self.assertEqual(len(rows), 2, qs)                                            # Aa has two entries
+            self.assertEqual([len(add_links(r)) for r in rows], [1, 1], qs)
+            for r in rows:
+                self.assertLess(r.index(">Clear<"), r.index(">Copy<")); self.assertLess(r.index(">Copy<"), r.index(">+<"))
+        rows = rows_of("")
+        first, second = (add_links(r)[0] for r in rows)
+        self.assertEqual(first, second)                                                   # same target: this student + term
         # students with no funding still have the single "+" (plus Copy); no stray extras
         self.assertEqual([len(add_links(r)) for r in rows_of("", "2")], [1])
-        # following it opens a new form for that term; saving adds a THIRD entry and returns to the report
-        href = add_links(last)[0].replace("&amp;", "&")
-        q = parse_qs(urlparse(href).query)
-        self.assertEqual((q["term_year"], q["term_season"]), (["2026"], ["Autumn"]))
-        report = "/reports/funding?season=Autumn&year=2026"
-        self.assertEqual(q["next"], [report])
-        self.assertIn('<option value="Autumn" selected>Autumn</option>', c.get(href).get_data(as_text=True))
-        r = c.post(href, data=dict(kind="TA", term_year=2026, term_season="Autumn", source="Third", amount="7", csrf_token=t))
-        self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
-        rows = rows_of("")
-        self.assertEqual(len(rows), 3)                                                    # nothing was replaced
-        self.assertIn("Now", rows[0]); self.assertIn("Third", rows[2])
-        self.assertEqual([len(add_links(r)) for r in rows], [0, 0, 1])                    # Add moved to the new last row
+        # either row's "+" opens a new form for that term; saving adds a THIRD entry and returns to the report
+        for which, source in ((0, "Third"), (1, "Fourth")):
+            href = add_links(rows_of("")[which])[0].replace("&amp;", "&")
+            q = parse_qs(urlparse(href).query)
+            self.assertEqual((q["term_year"], q["term_season"]), (["2026"], ["Autumn"]))
+            report = "/reports/funding?season=Autumn&year=2026"
+            self.assertEqual(q["next"], [report])
+            self.assertIn('<option value="Autumn" selected>Autumn</option>', c.get(href).get_data(as_text=True))
+            r = c.post(href, data=dict(kind="TA", term_year=2026, term_season="Autumn", source=source, amount="7", csrf_token=t))
+            self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
+            rows = rows_of("")
+            self.assertEqual(len(rows), 3 + which)                                        # nothing was replaced
+            self.assertEqual([len(add_links(r)) for r in rows], [1] * len(rows))          # and every row has its "+"
+        self.assertIn("Now", rows[0]); self.assertIn("Third", rows[2]); self.assertIn("Fourth", rows[3])
         # view-only accounts see none of this
         from unittest import mock
         with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):

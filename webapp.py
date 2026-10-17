@@ -665,10 +665,6 @@ def create_app(db_path=None):
     @app.route("/reports/funding")
     def funding_report():
         rows, year, season, sort, sdir = funding_report_data()
-        seen = set()
-        for r in reversed(rows):                      # the student's last row in the order shown gets the extra Add
-            r["last_of_student"] = r["student_id"] not in seen
-            seen.add(r["student_id"])
         students = {r["student_id"] for r in rows}
         funded = {r["student_id"] for r in rows if r["funding_id"] is not None}
         prev_season, prev_year = physdb.previous_term(season, year)

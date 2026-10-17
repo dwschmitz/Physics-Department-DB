@@ -42,8 +42,8 @@
          cls="btn danger small") }}
     <a class="btn secondary small" data-copy href="{{ url_for('funding_copy', sid=r.student_id, year=year, season=season, next=here) }}"
         title="Copy funding from another term into {{ term }}">Copy</a>
-    {% if r.last_of_student %}<a class="btn small plus" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}"
-        title="Add another funding entry for {{ who }} in {{ term }}" aria-label="Add another funding entry for {{ who }} in {{ term }}">+</a>{% endif %}
+    <a class="btn small plus" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}"
+        title="Add another funding entry for {{ who }} in {{ term }}" aria-label="Add another funding entry for {{ who }} in {{ term }}">+</a>
   {% else %}
     <a class="btn secondary small" data-copy href="{{ url_for('funding_copy', sid=r.student_id, year=year, season=season, next=here) }}"
         title="Copy funding from another term into {{ term }}">Copy</a>

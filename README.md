@@ -61,7 +61,7 @@ person's password and role (for example, to regain admin access if no admin can 
   on the previous term, **Prev / Next** step through other terms, and each term's entries (type, source,
   POETAF/COA, amount, notes) are shown so you can pick the one you want. The window also shows what is
   currently recorded and warns that copying replaces it. If the chosen term has nothing, nothing changes.
-  The **+** button, always last in the row, adds an entry for that student and term; it appears on a student's last row, so a second entry in the same term (e.g. an RA plus a supplement) is one click away.
+  The **+** button, last on every row, adds an entry for that student and term, so a second entry in the same term (e.g. an RA plus a supplement) is one click away from any of that student's rows.
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.
