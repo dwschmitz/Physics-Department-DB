@@ -56,6 +56,12 @@ def previous_term(season, year):
     return TERM_STARTS[n % len(TERM_STARTS)][0], n // len(TERM_STARTS)
 
 
+def next_term(season, year):
+    """The term just after this one: ('Autumn', 2026) -> ('Winter', 2027)."""
+    n = term_index(season, year) + 1
+    return TERM_STARTS[n % len(TERM_STARTS)][0], n // len(TERM_STARTS)
+
+
 def copy_previous_funding(conn, student_id, year, season):
     """Make a student's funding for (season, year) a copy of their funding the term before.
 

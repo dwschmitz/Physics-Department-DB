@@ -38,3 +38,4 @@ th a.sortlink.active span{color:#800000}
 .tabs a{padding:.4rem .9rem;text-decoration:none;color:#566;border-radius:4px 4px 0 0;margin-bottom:-2px;border:2px solid transparent}
 .tabs a:hover{color:#800000}
 .tabs a.on{color:#800000;font-weight:600;background:#fff;border-color:#d5d9e0;border-bottom-color:#fff}
+.btn.disabled{opacity:.4;cursor:not-allowed}

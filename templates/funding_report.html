@@ -13,6 +13,10 @@
   <label>Year<select name="year">
     {% for y, _ in years %}<option {{ 'selected' if y == year }}>{{ y }}</option>{% endfor %}</select></label>
   <button class="btn">Show report</button>
+  {% if prev_url %}<a class="btn secondary" href="{{ prev_url }}" title="{{ prev_label }}">&lsaquo; Prev</a>
+  {% else %}<span class="btn secondary disabled" title="No earlier term is available">&lsaquo; Prev</span>{% endif %}
+  {% if next_url %}<a class="btn secondary" href="{{ next_url }}" title="{{ next_label }}">Next &rsaquo;</a>
+  {% else %}<span class="btn secondary disabled" title="No later term is available">Next &rsaquo;</span>{% endif %}
   <a class="btn secondary" href="{{ url_for('funding_report_csv', year=year, season=season, sort=sort, dir=sdir) }}">Download CSV</a>
 </form>
 <p class="muted">{{ n_students }} active student{{ '' if n_students == 1 else 's' }}

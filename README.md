@@ -51,7 +51,7 @@ person's password and role (for example, to regain admin access if no admin can 
   copy. If something else is using port 8123 it picks the next free port and prints the address.
   To stop a stray copy: close the window it runs in, or on Mac/Linux use `pkill -f "webapp.py run"`,
   on Windows end "python" in Task Manager.
-- **Funding report** (Reports → *Funding by term*): pick a year and term to list every *active* student with
+- **Funding report** (Reports → *Funding by term*): pick a year and term (or step with **‹ Prev** / **Next ›**) to list every *active* student with
   their funding for that term (type, source, POETAF/COA, amount, notes). Active students with nothing
   recorded still appear, with empty fields; a student with several entries gets one row per entry.
   Students on leave, graduated or withdrawn are not included. Download it as CSV for a spreadsheet.

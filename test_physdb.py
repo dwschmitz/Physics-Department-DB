@@ -140,6 +140,16 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(pt("Spring", 2026), ("Winter", 2026))
         self.assertEqual(pt("Winter", 2000), ("Autumn", 1999))
 
+    def test_next_term(self):
+        nt, pt = physdb.next_term, physdb.previous_term
+        self.assertEqual(nt("Autumn", 2026), ("Winter", 2027))      # across the year boundary
+        self.assertEqual(nt("Winter", 2026), ("Spring", 2026))
+        self.assertEqual(nt("Spring", 2026), ("Summer", 2026))
+        self.assertEqual(nt("Summer", 2026), ("Autumn", 2026))
+        for season, year in (("Winter", 2000), ("Summer", 2026), ("Autumn", 2031)):    # they undo each other
+            self.assertEqual(pt(*nt(season, year)), (season, year))
+            self.assertEqual(nt(*pt(season, year)), (season, year))
+
     def test_copy_previous_funding(self):
         def add(uid):
             physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=uid, email=f"{uid}@m.o",

@@ -619,6 +619,43 @@ class WebTests(unittest.TestCase):
         # a funding entry can't be deleted through another student's URL
         self.assertEqual(c.post("/students/2/funding/1/delete", data={"csrf_token": t}).status_code, 404)
 
+    def test_funding_report_prev_and_next_term_buttons(self):
+        import datetime
+        from urllib.parse import urlparse, parse_qs
+        from unittest import mock
+        c = self.client("ed")
+        def page(qs):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return c.get("/reports/funding?" + qs).get_data(as_text=True)
+        def target(html, label):
+            m = re.search(rf'<a class="btn secondary" href="([^"]+)" title="[^"]*">{label}</a>', html)
+            if not m:
+                return None
+            q = parse_qs(urlparse(m.group(1).replace("&amp;", "&")).query)
+            return q["season"][0], int(q["year"][0]), q.get("sort", [None])[0], q.get("dir", [None])[0]
+        html = page("season=Autumn&year=2026&sort=amount&dir=desc")
+        self.assertEqual(target(html, "&lsaquo; Prev"), ("Summer", 2026, "amount", "desc"))   # sort is kept
+        self.assertEqual(target(html, "Next &rsaquo;"), ("Winter", 2027, "amount", "desc"))   # crosses the year
+        self.assertIn('title="Summer 2026"', html); self.assertIn('title="Winter 2027"', html)
+        self.assertEqual(target(page("season=Winter&year=2027"), "&lsaquo; Prev")[:2], ("Autumn", 2026))
+        self.assertEqual(target(page("season=Spring&year=2026"), "Next &rsaquo;")[:2], ("Summer", 2026))
+        # following a link shows that term
+        self.assertIn("Funding for Winter 2027", page("season=Winter&year=2027"))
+        # the menus and the buttons agree, and stepping stops at the ends of the Year menu
+        self.assertNotIn("disabled", page("season=Autumn&year=2026").split("<table")[0].split('class="filters"')[1])
+        first = page("season=Winter&year=2000")
+        self.assertIn('<span class="btn secondary disabled" title="No earlier term is available">&lsaquo; Prev</span>', first)
+        self.assertIsNone(target(first, "&lsaquo; Prev")); self.assertEqual(target(first, "Next &rsaquo;")[:2], ("Spring", 2000))
+        last_year = datetime.date.today().year + 6
+        last = page(f"season=Autumn&year={last_year}")
+        self.assertIn('disabled" title="No later term is available">Next &rsaquo;</span>', last)
+        self.assertIsNone(target(last, "Next &rsaquo;")); self.assertIsNotNone(target(last, "&lsaquo; Prev"))
+        # viewers get them too, and the CSV link follows the displayed term
+        vw = self.client("vw")
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            h = vw.get("/reports/funding").get_data(as_text=True)
+        self.assertIn("&lsaquo; Prev", h); self.assertIn("Next &rsaquo;", h)
+
     def test_funding_report_has_no_buttons_for_viewers(self):
         ed = self.client("ed"); t = self.token(ed); self.add_student(ed)
         ed.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", csrf_token=t))

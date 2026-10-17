@@ -668,6 +668,10 @@ def create_app(db_path=None):
         students = {r["student_id"] for r in rows}
         funded = {r["student_id"] for r in rows if r["funding_id"] is not None}
         prev_season, prev_year = physdb.previous_term(season, year)
+        next_season, next_year = physdb.next_term(season, year)
+        offered = {y for y, _ in term_years()}                 # the Year menu's range; stepping stops at its ends
+        step_url = lambda s, y: (url_for("funding_report", year=y, season=s, sort=sort, dir=sdir)
+                                 if y in offered else None)
         prev_counts = {r[0]: r[1] for r in db().execute(
             "SELECT student_id, count(*) FROM funding WHERE term_year = ? AND term_season = ? GROUP BY student_id",
             (prev_year, prev_season))}
@@ -680,7 +684,9 @@ def create_app(db_path=None):
             years=term_years(), seasons=physdb.SEASONS, n_students=len(students), n_funded=len(funded),
             total=sum(r["amount"] or 0 for r in rows), undated=physdb.undated_funding_count(db()),
             here=request.full_path.rstrip("?"), prev_label=f"{prev_season} {prev_year}",
-            prev_counts=prev_counts, this_counts=this_counts)
+            prev_counts=prev_counts, this_counts=this_counts,
+            prev_url=step_url(prev_season, prev_year), next_url=step_url(next_season, next_year),
+            next_label=f"{next_season} {next_year}")
 
     @app.post("/students/<int:sid>/funding/copy-prev")
     def funding_copy_prev(sid):
