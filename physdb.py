@@ -31,6 +31,41 @@ ADVISING_ORDER_SQL = ("a.end_date IS NOT NULL, "
                       "f.last_name, f.first_name, a.start_date")
 
 
+# Approximate first day (month, day) of each term, used to work out the current term from today's
+# date. Real term start dates move a little each year; edit this one table if you want them to match
+# the registrar's calendar more closely. Terms are listed in calendar order within a year.
+TERM_STARTS = [("Winter", (1, 1)), ("Spring", (3, 25)), ("Summer", (6, 15)), ("Autumn", (9, 25))]
+_TERM_POSITION = {name: i for i, (name, _) in enumerate(TERM_STARTS)}
+
+
+def current_term(today=None):
+    """(season, calendar year) for today's date, e.g. ('Autumn', 2026)."""
+    today = today or datetime.date.today()
+    season = [name for name, start in TERM_STARTS if start <= (today.month, today.day)][-1]
+    return season, today.year
+
+
+def term_index(season, year):
+    """Consecutive number for each term: Autumn 2025 -> n, Winter 2026 -> n+1, ..."""
+    return year * len(TERM_STARTS) + _TERM_POSITION[season]
+
+
+def clock_label(student, now=None):
+    """Years since matriculation counted in whole terms (0.25 per term), up to the current term.
+
+    Shown as '0.0', '0.25', '0.5', '1.0', ... Blank ('—') for students who have graduated or
+    withdrawn (no end term is recorded) and for students whose matriculation is still in the future.
+    """
+    if student["status"] in ("graduated", "withdrawn"):
+        return "—"
+    now = now or current_term()
+    terms = term_index(*now) - term_index(student["matriculation_term"], student["matriculation_year"])
+    if terms < 0:
+        return "—"
+    text = f"{terms / len(TERM_STARTS):.2f}"
+    return text[:-1] if text.endswith("0") else text
+
+
 def connect(path=DB_PATH):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row

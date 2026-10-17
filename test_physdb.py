@@ -1,3 +1,4 @@
+import datetime
 import io
 import sqlite3
 import unittest
@@ -69,6 +70,33 @@ class PhysDBTests(unittest.TestCase):
             physdb.add_student(self.conn, university_id="U11", first_name="N", last_name="M",
                                email="y@m.o", matriculation_year=2023, matriculation_term="Fall",
                                expected_grad_year=None, research_area=None, notes=None)
+
+    def test_current_term_boundaries(self):
+        d = datetime.date
+        for day, want in [(d(2026, 1, 1), "Winter"), (d(2026, 3, 24), "Winter"), (d(2026, 3, 25), "Spring"),
+                          (d(2026, 6, 14), "Spring"), (d(2026, 6, 15), "Summer"), (d(2026, 9, 24), "Summer"),
+                          (d(2026, 9, 25), "Autumn"), (d(2026, 10, 17), "Autumn"), (d(2026, 12, 31), "Autumn")]:
+            self.assertEqual(physdb.current_term(day), (want, 2026), day)
+        self.assertEqual(physdb.current_term(), physdb.current_term(datetime.date.today()))
+
+    def test_clock(self):
+        now = ("Autumn", 2026)
+        def clock(term, year, status="active", at=now):
+            return physdb.clock_label({"matriculation_term": term, "matriculation_year": year,
+                                       "status": status}, at)
+        self.assertEqual(clock("Autumn", 2026), "0.0")        # matriculated this term
+        self.assertEqual(clock("Autumn", 2025), "1.0")        # one year ago
+        self.assertEqual(clock("Summer", 2026), "0.25")
+        self.assertEqual(clock("Spring", 2026), "0.5")
+        self.assertEqual(clock("Winter", 2026), "0.75")
+        self.assertEqual(clock("Summer", 2025), "1.25")
+        self.assertEqual(clock("Spring", 2025), "1.5")
+        self.assertEqual(clock("Autumn", 2019), "7.0")
+        self.assertEqual(clock("Autumn", 2025, at=("Winter", 2027)), "1.25")   # moves with the term
+        self.assertEqual(clock("Winter", 2027), "—")           # hasn't matriculated yet
+        self.assertEqual(clock("Autumn", 2020, "graduated"), "—")
+        self.assertEqual(clock("Autumn", 2020, "withdrawn"), "—")
+        self.assertEqual(clock("Autumn", 2024, "on_leave"), "2.0")
 
     def test_citizenship(self):
         sid = physdb.add_student(self.conn, university_id="U9", first_name="N", last_name="M",

@@ -12,12 +12,12 @@
   {% if can_edit %}<a class="btn" href="{{ url_for('student_new') }}">+ Add student</a>{% endif %}
   <a class="btn secondary" href="{{ url_for('export') }}">Download CSV</a>
 </form>
-<p class="muted">{{ rows|length }} student{{ '' if rows|length == 1 else 's' }}</p>
-<table><tr><th>Name</th><th>University ID</th><th>Status</th><th>Matriculation</th><th>Advisor</th><th>Research area</th></tr>
+<p class="muted">{{ rows|length }} student{{ '' if rows|length == 1 else 's' }} &middot; current term: {{ now }}</p>
+<table><tr><th>Name</th><th>University ID</th><th>Status</th><th>Matriculation</th><th title="Years since matriculation, counted in terms (0.25 per term) up to the current term. Blank for graduated or withdrawn students.">Clock</th><th>Advisor</th><th>Research area</th></tr>
 {% for r in rows %}
 <tr><td><a href="{{ url_for('student', sid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
 <td>{{ r.university_id }}</td>
 <td><span class="badge {{ r.status }}">{{ r.status|label }}</span></td>
-<td>{{ r|matric }}</td><td>{{ r.advisors or '—' }}</td><td>{{ r.research_area or '' }}</td></tr>
-{% else %}<tr><td colspan="6" class="muted">No students match.</td></tr>{% endfor %}
+<td>{{ r|matric }}</td><td>{{ r.clock }}</td><td>{{ r.advisors or '—' }}</td><td>{{ r.research_area or '' }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">No students match.</td></tr>{% endfor %}
 </table>{% endblock %}

@@ -251,6 +251,24 @@ class WebTests(unittest.TestCase):
         self.assertEqual(who("faculty=1&role=bogus"), ["Stu1", "Stu2", "Stu3", "Stu4"])
         self.assertEqual(who("faculty=abc"), ["Stu1", "Stu2", "Stu3", "Stu4", "Stu5"])
 
+    def test_students_list_clock_column(self):
+        from unittest import mock
+        c = self.client("ed")
+        for uid, term, year, status in [("U1", "Autumn", "2026", "active"), ("U2", "Autumn", "2025", "active"),
+                                        ("U3", "Spring", "2024", "active"), ("U4", "Autumn", "2020", "graduated")]:
+            self.add_student(c, university_id=uid, email=f"{uid}@u.edu", last_name=f"Stu{uid}",
+                             matriculation_term=term, matriculation_year=year, status=status)
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            html = c.get("/students").get_data(as_text=True)
+        self.assertIn("<th title=", html); self.assertIn(">Clock</th>", html)
+        self.assertLess(html.index("Matriculation</th>"), html.index(">Clock</th>"))
+        self.assertLess(html.index(">Clock</th>"), html.index("Advisor</th>"))
+        self.assertIn("current term: Autumn 2026", html)
+        import re
+        cells = {m.group(1): m.group(2) for m in re.finditer(
+            r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
+        self.assertEqual(cells, {"StuU1": "0.0", "StuU2": "1.0", "StuU3": "2.5", "StuU4": "—"})
+
     def test_matriculation_year_and_term(self):
         c = self.client("ed")
         form = c.get("/students/new").get_data(as_text=True)

@@ -431,11 +431,13 @@ def create_app(db_path=None):
         if faculty_id.isdigit() or role != "any":
             clause, p = physdb.faculty_role_clause(role, int(faculty_id) if faculty_id.isdigit() else None)
             sql += f" AND {clause}"; params += p
-        rows = db().execute(sql + " ORDER BY s.last_name, s.first_name", params).fetchall()
+        now = physdb.current_term()
+        rows = [{**dict(r), "clock": physdb.clock_label(r, now)}
+                for r in db().execute(sql + " ORDER BY s.last_name, s.first_name", params).fetchall()]
         faculty = db().execute("SELECT id, last_name, first_name FROM faculty ORDER BY last_name").fetchall()
         return render_template("students.html", rows=rows, faculty=faculty, q=q, status=status,
                                faculty_id=faculty_id, role=role, role_filters=FACULTY_ROLE_FILTERS,
-                               statuses=STATUSES)
+                               statuses=STATUSES, now=f"{now[0]} {now[1]}")
 
     @app.route("/students/new", methods=["GET", "POST"])
     def student_new():
