@@ -411,6 +411,7 @@ class WebTests(unittest.TestCase):
         c = self.client("ed"); t = self.token(c); self.add_student(c)
         html = c.get("/reports/funding").get_data(as_text=True)
         self.assertIn(".source{min-width:20ch}", html)                       # room for ~20 characters
+        self.assertIn(".wide td.actions{white-space:nowrap", html)           # Edit / Copy Prev / Clear never wrap
         self.assertRegex(html, r'<th class="source"[^>]*>\s*<a [^>]*>Source')   # header and cells share the class
         c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn",
                source="Department of Energy", csrf_token=t))
