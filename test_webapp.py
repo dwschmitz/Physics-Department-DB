@@ -182,12 +182,14 @@ class WebTests(unittest.TestCase):
         for table, data in {
             "advising": dict(faculty_id="1", role="advisor", start_date="2023-01-01"),
             "milestones": dict(kind="qualifying_exam", date="2024-05-01", outcome="passed"),
-            "funding": dict(kind="TA", term_year="2026", term_season="Autumn", poetaf_coa="1234567-ABC", amount="12000"),
+            "funding": dict(kind="TA", term_year="2026", term_season="Autumn", poetaf_coa="1234567-ABC", amount="12000",
+                           notes="Covers <i>half</i> of the term\nrenewal pending"),
         }.items():
             r = c.post(f"/students/1/{table}/new", data={**data, "csrf_token": t})
             self.assertEqual(r.status_code, 302, table)
         page = c.get("/students/1").get_data(as_text=True)
-        for needle in ("Bohr", "Qualifying exam", "$12,000", "Autumn 2026", "1234567-ABC"):
+        for needle in ("Bohr", "Qualifying exam", "$12,000", "Autumn 2026", "1234567-ABC",
+                       "Covers &lt;i&gt;half&lt;/i&gt; of the term", "renewal pending"):
             self.assertIn(needle, page)
         r = c.post("/students/1/advising/1/edit", data=dict(faculty_id="1", role="advisor",
                    start_date="2023-01-01", end_date="2022-01-01", csrf_token=t))

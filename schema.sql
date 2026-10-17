@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS funding (
     term_season TEXT CHECK (term_season IN ('Winter', 'Spring', 'Summer', 'Autumn')),
     legacy_term TEXT,                   -- free-text term from before the fixed menu; re-enter it
     amount      REAL,
+    notes       TEXT,
     CHECK ((term_year IS NULL) = (term_season IS NULL))
 );
 

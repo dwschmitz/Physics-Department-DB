@@ -32,7 +32,14 @@ def connect(path=DB_PATH):
         _restore_old_funding(conn)
     _migrate_users(conn)
     _drop_program_column(conn)
+    _add_funding_notes(conn)
     return conn
+
+
+def _add_funding_notes(conn):
+    if "notes" not in {r[1] for r in conn.execute("PRAGMA table_info(funding)")}:
+        conn.execute("ALTER TABLE funding ADD COLUMN notes TEXT")
+        conn.commit()
 
 
 def _drop_program_column(conn):
@@ -152,12 +159,13 @@ def add_milestone(conn, student, kind, date, outcome="pending", notes=None):
     conn.commit()
 
 
-def add_funding(conn, student, kind, year, season, source=None, amount=None, poetaf_coa=None):
+def add_funding(conn, student, kind, year, season, source=None, amount=None, poetaf_coa=None,
+                notes=None):
     s = _find(conn, "students", student)
     conn.execute(
-        "INSERT INTO funding (student_id, kind, source, poetaf_coa, term_year, term_season, amount) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (s["id"], kind, source, poetaf_coa, year, season, amount))
+        "INSERT INTO funding (student_id, kind, source, poetaf_coa, term_year, term_season, amount, notes) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (s["id"], kind, source, poetaf_coa, year, season, amount, notes))
     conn.commit()
 
 
@@ -237,6 +245,8 @@ def show_student(conn, key):
         amt = f" ${r['amount']:,.0f}" if r["amount"] is not None else ""
         acct = f" [POETAF/COA {r['poetaf_coa']}]" if r["poetaf_coa"] else ""
         out.append(f"    {term_label(r)}: {r['kind']} ({r['source'] or '-'}){acct}{amt}")
+        if r["notes"]:
+            out.append(f"        Notes: {r['notes']}")
     return "\n".join(out)
 
 
@@ -294,7 +304,7 @@ def build_parser():
     a.add_argument("student"); a.add_argument("kind", choices=["TA", "RA", "fellowship", "other"])
     a.add_argument("year", type=int); a.add_argument("season", type=str.capitalize, choices=SEASONS)
     a.add_argument("--source"); a.add_argument("--amount", type=float)
-    a.add_argument("--poetaf-coa", help="POETAF/COA account number")
+    a.add_argument("--poetaf-coa", help="POETAF/COA account number"); a.add_argument("--notes")
 
     a = sub.add_parser("set-status")
     a.add_argument("student"); a.add_argument("status",
@@ -331,7 +341,7 @@ def main(argv=None):
             add_milestone(conn, args.student, args.kind, args.date, args.outcome, args.notes)
         elif c == "add-funding":
             add_funding(conn, args.student, args.kind, args.year, args.season, args.source, args.amount,
-                        args.poetaf_coa)
+                        args.poetaf_coa, args.notes)
         elif c == "set-status":
             set_status(conn, args.student, args.status)
         elif c == "list":

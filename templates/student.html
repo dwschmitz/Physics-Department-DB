@@ -28,11 +28,12 @@
 {% else %}<tr><td colspan="5" class="muted">None recorded.</td></tr>{% endfor %}</table>
 
 <h2>Funding {% if can_edit %}<a class="btn small" href="{{ url_for('child_new', sid=s.id, table='funding') }}">+ Add</a>{% endif %}</h2>
-<table><tr><th>Term</th><th>Type</th><th>Source</th><th>POETAF/COA</th><th>Amount</th><th></th></tr>
-{% for f in funding %}<tr><td>{{ f|term }}{% if f.term_year is none and f.legacy_term %} <span class="badge on_leave">please re-enter</span>{% endif %}</td><td>{{ f.kind|label }}</td><td>{{ f.source or '' }}</td>
+<table><tr><th>Term</th><th>Type</th><th>Source</th><th>POETAF/COA</th><th>Amount</th><th>Notes</th><th></th></tr>
+{% for f in funding %}<tr><td style="white-space:nowrap">{{ f|term }}{% if f.term_year is none and f.legacy_term %} <span class="badge on_leave">please re-enter</span>{% endif %}</td><td>{{ f.kind|label }}</td><td>{{ f.source or '' }}</td>
 <td>{{ f.poetaf_coa or '' }}</td>
 <td>{% if f.amount is not none %}${{ '{:,.0f}'.format(f.amount) }}{% endif %}</td>
+<td style="white-space:pre-wrap">{{ f.notes or '' }}</td>
 <td class="actions">{% if can_edit %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='funding', rid=f.id) }}">Edit</a>
 {{ delete_button(url_for('child_delete', sid=s.id, table='funding', rid=f.id), 'Delete this entry?') }}{% endif %}</td></tr>
-{% else %}<tr><td colspan="6" class="muted">None recorded.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="7" class="muted">None recorded.</td></tr>{% endfor %}</table>
 {% endblock %}

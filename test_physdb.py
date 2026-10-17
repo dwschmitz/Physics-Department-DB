@@ -64,9 +64,10 @@ class PhysDBTests(unittest.TestCase):
 
     def test_funding_and_term_parsing(self):
         physdb.add_funding(self.conn, "U1001", "TA", 2026, "Autumn", "Dept", 12000, "ACCT-1")
-        physdb.add_funding(self.conn, "U1001", "RA", 2026, "Winter")
+        physdb.add_funding(self.conn, "U1001", "RA", 2026, "Winter", notes="Pending approval")
         text = physdb.show_student(self.conn, "U1001")
         self.assertIn("Autumn 2026", text); self.assertIn("POETAF/COA ACCT-1", text)
+        self.assertIn("Notes: Pending approval", text)
         self.assertLess(text.index("Autumn 2026"), text.index("Winter 2026"))
         with self.assertRaises(sqlite3.IntegrityError):
             physdb.add_funding(self.conn, "U1001", "TA", 2026, "Fall")
@@ -107,6 +108,30 @@ class PhysDBTests(unittest.TestCase):
                            start_year=2021, expected_grad_year=None, research_area=None, notes=None)
         physdb.connect(path)   # re-running on a migrated DB is a no-op
         self.assertEqual(conn.execute("SELECT count(*) FROM funding").fetchone()[0], 2)
+
+    def test_funding_table_without_notes_gets_the_column(self):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "mid.db")
+        c = sqlite3.connect(path)
+        c.executescript("""
+            CREATE TABLE students (id INTEGER PRIMARY KEY, university_id TEXT UNIQUE NOT NULL,
+              first_name TEXT NOT NULL, last_name TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active', start_year INTEGER NOT NULL,
+              expected_grad_year INTEGER, research_area TEXT, notes TEXT);
+            CREATE TABLE funding (id INTEGER PRIMARY KEY,
+              student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+              kind TEXT NOT NULL, source TEXT, poetaf_coa TEXT, term_year INTEGER, term_season TEXT,
+              legacy_term TEXT, amount REAL);
+            INSERT INTO students VALUES (1,'U1','A','B','a@b.c','active',2020,NULL,NULL,NULL);
+            INSERT INTO funding VALUES (1,1,'TA','Dept','ACCT',2026,'Autumn',NULL,100);
+        """)
+        c.commit(); c.close()
+        conn = physdb.connect(path)
+        row = conn.execute("SELECT * FROM funding").fetchone()
+        self.assertEqual((row["poetaf_coa"], row["amount"], row["notes"]), ("ACCT", 100, None))
+        physdb.add_funding(conn, "U1", "RA", 2027, "Winter", notes="hello")
+        self.assertEqual(conn.execute("SELECT count(*) FROM funding WHERE notes = 'hello'").fetchone()[0], 1)
+        physdb.connect(path)   # idempotent
 
     def test_export(self):
         buf = io.StringIO()

@@ -104,7 +104,8 @@ def fields_for(table, conn):
                 F("term_season", "Term", "select", True, [(s, s) for s in physdb.SEASONS], placeholder=True),
                 F("source", "Source"),
                 F("poetaf_coa", "POETAF/COA", maxlen=60, help="Account number for this funding."),
-                F("amount", "Amount ($)", "number")]
+                F("amount", "Amount ($)", "number"),
+                F("notes", "Notes", "textarea")]
     raise KeyError(table)
 
 
