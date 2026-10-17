@@ -29,7 +29,7 @@ def connect(path=DB_PATH):
     legacy = _stash_old_funding(conn)
     conn.executescript(SCHEMA.read_text())
     if legacy:
-        _restore_old_funding(conn)
+        _restore_old_funding(conn, legacy)
     _migrate_users(conn)
     _drop_program_column(conn)
     _add_funding_notes(conn)
@@ -72,16 +72,36 @@ def term_label(row):
 
 
 def _stash_old_funding(conn):
-    """If funding still has the old free-text `term` column, set the table aside for conversion."""
+    """Set the funding table aside if it must be rebuilt; returns why ('text_term', 'check') or None.
+
+    text_term: it still has the old free-text `term` column.
+    check:     its CHECK rule predates a newly allowed funding type (SQLite can't alter a CHECK
+               in place), so it is recreated from schema.sql and the rows copied across.
+    """
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'funding'").fetchone()
+    if row is None:
+        return None
     cols = {r[1] for r in conn.execute("PRAGMA table_info(funding)")}
-    if not cols or "term_year" in cols:
-        return False
+    if "term_year" not in cols:
+        why = "text_term"
+    elif "stipend_supplement" not in row[0]:
+        why = "check"
+    else:
+        return None
     conn.executescript("DROP INDEX IF EXISTS idx_funding_student;"
                        "ALTER TABLE funding RENAME TO funding_old;")
-    return True
+    return why
 
 
-def _restore_old_funding(conn):
+def _restore_old_funding(conn, why="text_term"):
+    if why == "check":
+        old = {r[1] for r in conn.execute("PRAGMA table_info(funding_old)")}
+        new = {r[1] for r in conn.execute("PRAGMA table_info(funding)")}
+        cols = ", ".join(c for c in (r[1] for r in conn.execute("PRAGMA table_info(funding)")) if c in old and c in new)
+        conn.executescript(f"INSERT INTO funding ({cols}) SELECT {cols} FROM funding_old;"
+                           "DROP TABLE funding_old;")
+        conn.commit()
+        return
     for r in conn.execute("SELECT * FROM funding_old").fetchall():
         year, season = parse_term(r["term"])
         conn.execute(
@@ -301,7 +321,7 @@ def build_parser():
     a.add_argument("--notes")
 
     a = sub.add_parser("add-funding")
-    a.add_argument("student"); a.add_argument("kind", choices=["TA", "RA", "fellowship", "other"])
+    a.add_argument("student"); a.add_argument("kind", choices=["TA", "RA", "fellowship", "stipend_supplement", "other"])
     a.add_argument("year", type=int); a.add_argument("season", type=str.capitalize, choices=SEASONS)
     a.add_argument("--source"); a.add_argument("--amount", type=float)
     a.add_argument("--poetaf-coa", help="POETAF/COA account number"); a.add_argument("--notes")

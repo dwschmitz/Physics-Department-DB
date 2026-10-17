@@ -270,6 +270,20 @@ class WebTests(unittest.TestCase):
         self.assertEqual(rows["Curie"], ["0", "1"])
         self.assertIn("Committees", html)
 
+    def test_stipend_supplement_funding_type(self):
+        c = self.client("ed"); self.add_student(c); t = self.token(c)
+        form = c.get("/students/1/funding/new").get_data(as_text=True)
+        self.assertIn('<option value="stipend_supplement" >Stipend Supplement</option>', form)
+        self.assertLess(form.index(">Fellowship<"), form.index(">Stipend Supplement<"))
+        self.assertLess(form.index(">Stipend Supplement<"), form.index(">Other<"))
+        r = c.post("/students/1/funding/new", data=dict(kind="stipend_supplement", term_year="2026",
+                   term_season="Winter", csrf_token=t))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("Stipend Supplement", c.get("/students/1").get_data(as_text=True))
+        bad = c.post("/students/1/funding/new", data=dict(kind="bonus", term_year="2026",
+                     term_season="Winter", csrf_token=t))
+        self.assertEqual(bad.status_code, 200)
+
     def test_other_students_records_not_reachable(self):
         c = self.client("ed")
         self.add_student(c)

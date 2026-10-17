@@ -133,6 +133,43 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT count(*) FROM funding WHERE notes = 'hello'").fetchone()[0], 1)
         physdb.connect(path)   # idempotent
 
+    def test_funding_type_check_is_widened_keeping_rows(self):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "oldcheck.db")
+        c = sqlite3.connect(path)
+        c.executescript("""
+            CREATE TABLE students (id INTEGER PRIMARY KEY, university_id TEXT UNIQUE NOT NULL,
+              first_name TEXT NOT NULL, last_name TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active', start_year INTEGER NOT NULL,
+              expected_grad_year INTEGER, research_area TEXT, notes TEXT);
+            CREATE TABLE funding (id INTEGER PRIMARY KEY,
+              student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+              kind TEXT NOT NULL CHECK (kind IN ('TA', 'RA', 'fellowship', 'other')),
+              source TEXT, poetaf_coa TEXT,
+              term_year INTEGER CHECK (term_year BETWEEN 1950 AND 2100),
+              term_season TEXT CHECK (term_season IN ('Winter', 'Spring', 'Summer', 'Autumn')),
+              legacy_term TEXT, amount REAL, notes TEXT,
+              CHECK ((term_year IS NULL) = (term_season IS NULL)));
+            CREATE INDEX idx_funding_student ON funding(student_id);
+            INSERT INTO students VALUES (1,'U1','A','B','a@b.c','active',2020,NULL,NULL,NULL);
+            INSERT INTO funding VALUES (7,1,'TA','Dept','ACCT',2026,'Autumn',NULL,100,'keep me');
+            INSERT INTO funding VALUES (8,1,'other',NULL,NULL,NULL,NULL,'AY 25-26',NULL,NULL);
+        """)
+        c.commit(); c.close()
+        conn = physdb.connect(path)
+        rows = {r["id"]: tuple(r) for r in conn.execute("SELECT * FROM funding")}
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(conn.execute("SELECT notes, poetaf_coa, amount FROM funding WHERE id = 7").fetchone()[:], ("keep me", "ACCT", 100.0))
+        self.assertEqual(conn.execute("SELECT legacy_term FROM funding WHERE id = 8").fetchone()[0], "AY 25-26")
+        physdb.add_funding(conn, "U1", "stipend_supplement", 2027, "Spring")
+        self.assertEqual(conn.execute("SELECT count(*) FROM funding").fetchone()[0], 3)
+        self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name='funding_old'").fetchone()[0], 0)
+        self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name='idx_funding_student'").fetchone()[0], 1)
+        with self.assertRaises(sqlite3.IntegrityError):
+            physdb.add_funding(conn, "U1", "bonus", 2027, "Spring")
+        physdb.connect(path)   # second start is a no-op
+        self.assertEqual(conn.execute("SELECT count(*) FROM funding").fetchone()[0], 3)
+
     def test_export(self):
         buf = io.StringIO()
         physdb.export_csv(self.conn, buf)
