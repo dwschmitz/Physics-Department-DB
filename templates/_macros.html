@@ -1,5 +1,5 @@
 {% macro delete_button(action, prompt) %}
-<form class="inline" method="post" action="{{ action }}" onsubmit="return confirm({{ prompt|tojson }})">
+<form class="inline" method="post" action="{{ action }}" onsubmit='return confirm({{ prompt|tojson }})'>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn danger small">Delete</button>
 </form>
 {% endmacro %}
@@ -10,4 +10,13 @@
   <a class="sortlink{{ ' active' if sort == key }}" href="{{ sort_url(key, sort, sdir) }}">{{ label }}
     <span aria-hidden="true">{{ ('▲' if sdir == 'asc' else '▼') if sort == key else '↕' }}</span></a>
 </th>
+{% endmacro %}
+
+{# A small button that POSTs (with the CSRF token). Optional confirmation and extra hidden fields. #}
+{% macro post_button(action, label, prompt=None, cls="btn secondary small", fields=None) %}
+<form class="inline" method="post" action="{{ action }}"{% if prompt %} onsubmit='return confirm({{ prompt|tojson }})'{% endif %}>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for k, v in (fields or {}).items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <button class="{{ cls }}">{{ label }}</button>
+</form>
 {% endmacro %}

@@ -132,6 +132,52 @@ class PhysDBTests(unittest.TestCase):
         physdb.connect(path)                                # second start changes nothing
         self.assertEqual(conn.execute("SELECT count(*) FROM funding WHERE kind = 'supplement'").fetchone()[0], 1)
 
+    def test_previous_term(self):
+        pt = physdb.previous_term
+        self.assertEqual(pt("Winter", 2027), ("Autumn", 2026))      # across the year boundary
+        self.assertEqual(pt("Autumn", 2026), ("Summer", 2026))
+        self.assertEqual(pt("Summer", 2026), ("Spring", 2026))
+        self.assertEqual(pt("Spring", 2026), ("Winter", 2026))
+        self.assertEqual(pt("Winter", 2000), ("Autumn", 1999))
+
+    def test_copy_previous_funding(self):
+        def add(uid):
+            physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=uid, email=f"{uid}@m.o",
+                               matriculation_year=2022, expected_grad_year=None, research_area=None, notes=None)
+        add("S1"); add("S2")
+        sid = lambda u: physdb._find(self.conn, "students", u)["id"]
+        rows = lambda u, y, s: [tuple(r) for r in self.conn.execute(
+            "SELECT kind, source, poetaf_coa, amount, notes FROM funding WHERE student_id = ? AND term_year = ? "
+            "AND term_season = ? ORDER BY id", (sid(u), y, s))]
+        # nothing in the previous term: nothing changes, even if the displayed term already has entries
+        physdb.add_funding(self.conn, "S1", "TA", 2026, "Autumn", "Keep", 1, "KEEP", "keep me")
+        self.assertEqual(physdb.copy_previous_funding(self.conn, sid("S1"), 2026, "Autumn"), (0, ("Summer", 2026), 0))
+        self.assertEqual(rows("S1", 2026, "Autumn"), [("TA", "Keep", "KEEP", 1.0, "keep me")])
+        # previous term has two entries; the displayed term is empty -> both copied, every field
+        physdb.add_funding(self.conn, "S2", "RA", 2026, "Summer", "NSF", 3000, "COA-1", "note a")
+        physdb.add_funding(self.conn, "S2", "supplement", 2026, "Summer", None, 500, None, None)
+        physdb.add_funding(self.conn, "S2", "TA", 2026, "Winter", "Dept", 7)       # a different term: untouched
+        n, prev, replaced = physdb.copy_previous_funding(self.conn, sid("S2"), 2026, "Autumn")
+        self.assertEqual((n, prev, replaced), (2, ("Summer", 2026), 0))
+        want = [("RA", "NSF", "COA-1", 3000.0, "note a"), ("supplement", None, None, 500.0, None)]
+        self.assertEqual(rows("S2", 2026, "Autumn"), want)
+        self.assertEqual(rows("S2", 2026, "Summer"), want)                         # the original is left alone
+        self.assertEqual(len(rows("S2", 2026, "Winter")), 1)
+        # existing entries in the displayed term are REPLACED, not added to
+        physdb.add_funding(self.conn, "S2", "fellowship", 2027, "Winter", "Old", 1)
+        physdb.add_funding(self.conn, "S2", "other", 2027, "Winter", "Old2", 2)
+        self.assertEqual(rows("S2", 2026, "Autumn"), want)
+        physdb.add_funding(self.conn, "S2", "TA", 2026, "Autumn", "Extra", 9)       # now 3 entries in Autumn 2026
+        n, prev, replaced = physdb.copy_previous_funding(self.conn, sid("S2"), 2026, "Autumn")
+        self.assertEqual((n, replaced), (2, 3))
+        self.assertEqual(rows("S2", 2026, "Autumn"), want)
+        # other students are never affected
+        self.assertEqual(rows("S1", 2026, "Autumn"), [("TA", "Keep", "KEEP", 1.0, "keep me")])
+        # across a year boundary
+        n, prev, _ = physdb.copy_previous_funding(self.conn, sid("S2"), 2027, "Winter")
+        self.assertEqual((n, prev), (2, ("Autumn", 2026)))
+        self.assertEqual(rows("S2", 2027, "Winter"), want)                          # replaced Old / Old2
+
     def test_funding_report(self):
         def add(uid, last, status="active"):
             sid = physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=last,

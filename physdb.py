@@ -50,6 +50,34 @@ def term_index(season, year):
     return year * len(TERM_STARTS) + _TERM_POSITION[season]
 
 
+def previous_term(season, year):
+    """The term just before this one: ('Winter', 2027) -> ('Autumn', 2026)."""
+    n = term_index(season, year) - 1
+    return TERM_STARTS[n % len(TERM_STARTS)][0], n // len(TERM_STARTS)
+
+
+def copy_previous_funding(conn, student_id, year, season):
+    """Make a student's funding for (season, year) a copy of their funding the term before.
+
+    Every entry of the previous term (type, source, POETAF/COA, amount, notes) is copied. Any entries the
+    student already has for the displayed term are replaced. If the previous term has no entries nothing is
+    changed at all. Returns (entries copied, previous term as (season, year), entries replaced).
+    """
+    prev_season, prev_year = previous_term(season, year)
+    prev = conn.execute("SELECT * FROM funding WHERE student_id = ? AND term_year = ? AND term_season = ? "
+                        "ORDER BY id", (student_id, prev_year, prev_season)).fetchall()
+    if not prev:
+        return 0, (prev_season, prev_year), 0
+    with conn:   # all or nothing
+        replaced = conn.execute("DELETE FROM funding WHERE student_id = ? AND term_year = ? AND term_season = ?",
+                                (student_id, year, season)).rowcount
+        for r in prev:
+            conn.execute("INSERT INTO funding (student_id, kind, source, poetaf_coa, term_year, term_season, "
+                         "amount, notes) VALUES (?,?,?,?,?,?,?,?)",
+                         (student_id, r["kind"], r["source"], r["poetaf_coa"], year, season, r["amount"], r["notes"]))
+    return len(prev), (prev_season, prev_year), replaced
+
+
 def clock_terms(student, now=None):
     """Whole terms from matriculation to the current term, or None (graduated/withdrawn/not yet started)."""
     if student["status"] in ("graduated", "withdrawn"):

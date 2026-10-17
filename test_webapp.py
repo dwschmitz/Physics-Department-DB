@@ -465,6 +465,159 @@ class WebTests(unittest.TestCase):
             data = c.get("/reports/funding.csv").get_data(as_text=True)
         self.assertIn("CNET", data.splitlines()[0]); self.assertIn("netaa", data); self.assertIn("Clock (years)", data)
 
+    def _funding_setup(self):
+        """Students Aa (RA in Autumn 2026, supplement too), Bb (nothing), Cc (nothing now; RA in Summer 2026)."""
+        c = self.client("ed"); t = self.token(c)
+        for i, last in enumerate(("Aa", "Bb", "Cc"), 1):
+            self.add_student(c, university_id=f"U{i}", email=f"s{i}@u.edu", first_name="Stu", last_name=last)
+        def fund(sid, kind, year, season, **extra):
+            self.assertEqual(c.post(f"/students/{sid}/funding/new", data=dict(
+                kind=kind, term_year=year, term_season=season, csrf_token=t, **extra)).status_code, 302)
+        fund(1, "RA", 2026, "Autumn", source="Now", amount="100")                        # funding id 1
+        fund(1, "supplement", 2026, "Autumn", amount="5")                                # funding id 2
+        fund(1, "TA", 2026, "Summer", source="Before", poetaf_coa="OLD-1", amount="300", notes="from summer")
+        fund(3, "RA", 2026, "Summer", source="NSF", poetaf_coa="COA-77", amount="2500", notes="renewed")
+        return c, t
+
+    def _report_forms(self, c, report):
+        from unittest import mock
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            html = c.get(report).get_data(as_text=True)
+        out = {}
+        for m in re.finditer(r"<tr><td[^>]*><a href=\"/students/(\d+)\">.*?</tr>", html, re.S):
+            sid, row = m.group(1), m.group(0)
+            out.setdefault(sid, []).append(row)
+        return html, out
+
+    @staticmethod
+    def confirm_prompts(html):
+        """Every confirm() message a browser would actually run, decoded from the page's onsubmit attributes."""
+        import json
+        from html.parser import HTMLParser
+        found = []
+        class P(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                js = dict(attrs).get("onsubmit")
+                if tag == "form" and js is not None:
+                    assert js.startswith("return confirm(") and js.endswith(")"), f"broken onsubmit: {js!r}"
+                    found.append(json.loads(js[len("return confirm("):-1]))      # must be one complete JSON string
+        P().feed(html)
+        return found
+
+    def test_confirmation_prompts_are_intact_and_complete(self):
+        """Regression: the message used to be cut off by its own quotes, so no confirmation ever appeared."""
+        c = self.client("ad"); t = self.token(c)
+        self.add_student(c, first_name='Bob "Rob"', last_name="O'Brien <b>&</b>")
+        c.post("/faculty/new", data=dict(first_name="N", last_name="Bohr", email="b@u.edu", csrf_token=t))
+        c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
+        c.post("/students/1/milestones/new", data=dict(kind="other", date="2024-01-01", outcome="pending", csrf_token=t))
+        c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", amount="5", csrf_token=t))
+        student = self.confirm_prompts(c.get("/students/1").get_data(as_text=True))
+        self.assertEqual(len(student), 4)                                  # student, advisor, milestone, funding
+        self.assertIn('Permanently delete Bob "Rob" O\'Brien <b>&</b> and all of their records?', student)
+        self.assertEqual(student.count("Delete this entry?"), 3)
+        self.assertEqual(self.confirm_prompts(c.get("/faculty/1").get_data(as_text=True)), ["Delete this faculty member?"])
+        users = self.confirm_prompts(c.get("/users").get_data(as_text=True))
+        self.assertTrue(users and all(u.startswith("Delete the account ") for u in users))
+        from unittest import mock
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            report = self.confirm_prompts(c.get("/reports/funding").get_data(as_text=True))
+        self.assertEqual(report, ['Delete this funding entry (RA, $5) for O\'Brien <b>&</b>, Bob "Rob" in Autumn 2026? '
+                                  'This cannot be undone.'])
+
+    def test_funding_report_row_buttons(self):
+        c, t = self._funding_setup()
+        html, rows = self._report_forms(c, "/reports/funding?season=Autumn&year=2026")
+        labels = lambda row: re.findall(r">(Edit|Add|Copy Prev|Clear)</(?:a|button)>", row)
+        self.assertEqual([labels(r) for r in rows["1"]], [["Edit", "Copy Prev", "Clear"]] * 2)   # funded rows
+        self.assertEqual(labels(rows["2"][0]), ["Add", "Copy Prev"])                             # empty rows
+        self.assertEqual(labels(rows["3"][0]), ["Add", "Copy Prev"])
+        # every button's own form carries a real CSRF token
+        for rws in rows.values():
+            for row in rws:
+                tokens = re.findall(r'name="csrf_token" value="([^"]*)"', row)
+                self.assertTrue(tokens and all(tokens), row)
+        # confirmations: destructive actions warn; Copy Prev on an empty row doesn't
+        text = html.replace("&#34;", '"').replace("&#39;", "'")
+        self.assertIn("Delete this funding entry (RA, $100) for Aa, Stu in Autumn 2026? This cannot be undone.", text)
+        self.assertIn("Replace the 2 funding entries for Aa, Stu in Autumn 2026 with a copy of 1 from Summer 2026?", text)
+        self.assertNotIn("onsubmit", rows["3"][0])                                               # nothing to lose
+        self.assertNotIn("onsubmit", rows["2"][0])
+
+    def test_copy_prev_on_an_empty_row_creates_matching_entries(self):
+        c, t = self._funding_setup()
+        report = "/reports/funding?season=Autumn&year=2026&sort=amount&dir=desc"
+        r = c.post("/students/3/funding/copy-prev", data=dict(year=2026, season="Autumn", next=report, csrf_token=t))
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, report))                 # back to the same view
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        got = [tuple(x) for x in conn.execute("SELECT kind, source, poetaf_coa, amount, notes, term_year, term_season "
+                                              "FROM funding WHERE student_id = 3 ORDER BY id")]
+        conn.close()
+        self.assertEqual(got, [("RA", "NSF", "COA-77", 2500.0, "renewed", 2026, "Summer"),
+                               ("RA", "NSF", "COA-77", 2500.0, "renewed", 2026, "Autumn")])
+        html, rows = self._report_forms(c, report)
+        self.assertIn("Copied 1 funding entry from Summer 2026 to Autumn 2026 for Cc, Stu.", html.replace("&#39;", "'"))
+        self.assertIn("COA-77", rows["3"][0]); self.assertIn(">Edit<", rows["3"][0])            # row now has an entry
+
+    def test_copy_prev_on_a_funded_row_replaces_this_terms_entries(self):
+        c, t = self._funding_setup()
+        r = c.post("/students/1/funding/copy-prev", data=dict(year=2026, season="Autumn", csrf_token=t))
+        self.assertEqual(r.headers["Location"], "/students/1")                                  # no next -> student page
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        got = [tuple(x) for x in conn.execute("SELECT kind, source, poetaf_coa, amount, notes FROM funding "
+                                              "WHERE student_id = 1 AND term_year = 2026 AND term_season = 'Autumn'")]
+        summer = conn.execute("SELECT count(*) FROM funding WHERE student_id = 1 AND term_season = 'Summer'").fetchone()[0]
+        conn.close()
+        self.assertEqual(got, [("TA", "Before", "OLD-1", 300.0, "from summer")])               # RA + supplement are gone
+        self.assertEqual(summer, 1)
+        # a student whose previous term is empty: friendly message, and nothing is lost
+        c.post("/students/2/funding/new", data=dict(kind="TA", term_year=2026, term_season="Autumn", amount="1", csrf_token=t))
+        r = c.post("/students/2/funding/copy-prev", data=dict(year=2026, season="Autumn", next="/reports/funding", csrf_token=t),
+                   follow_redirects=True)
+        self.assertIn("no funding recorded for Summer 2026, so nothing was copied", r.get_data(as_text=True))
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT count(*) FROM funding WHERE student_id = 2 AND term_season = 'Autumn'").fetchone()[0], 1)
+        conn.close()
+
+    def test_clear_deletes_only_that_entry_and_returns_to_the_report(self):
+        c, t = self._funding_setup()
+        report = "/reports/funding?season=Autumn&year=2026"
+        html, rows = self._report_forms(c, report)
+        clear = [re.search(r'action="([^"]+)"[^>]*>\s*<input type="hidden" name="csrf_token" value="([^"]+)"\s*>'
+                           r'\s*<button class="btn danger small">Clear', row, re.S) for row in rows["1"]]
+        self.assertTrue(all(clear))
+        first = clear[0].group(1).replace("&amp;", "&")
+        self.assertTrue(first.startswith("/students/1/funding/1/delete?next="))
+        r = c.post(first, data={"csrf_token": clear[0].group(2)})
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
+        html, rows = self._report_forms(c, report)
+        self.assertEqual(len(rows["1"]), 1)                                                     # the supplement is still there
+        self.assertIn("Supplement", rows["1"][0]); self.assertNotIn(">Now<", html)
+        # clearing the last one leaves an empty row offering Add / Copy Prev again
+        second = re.search(r'action="([^"]+/delete[^"]*)"', rows["1"][0]).group(1).replace("&amp;", "&")
+        c.post(second, data={"csrf_token": t})
+        html, rows = self._report_forms(c, report)
+        self.assertEqual(re.findall(r">(Edit|Add|Copy Prev|Clear)</(?:a|button)>", rows["1"][0]), ["Add", "Copy Prev"])
+        # other terms are untouched
+        self.assertIn("OLD-1", c.get("/reports/funding?season=Summer&year=2026").get_data(as_text=True))
+
+    def test_copy_prev_and_clear_are_protected(self):
+        c, t = self._funding_setup()
+        good = dict(year=2026, season="Autumn", csrf_token=t)
+        self.assertEqual(c.post("/students/1/funding/copy-prev", data={**good, "csrf_token": "bad"}).status_code, 400)
+        for bad in (dict(year="abc"), dict(year=1800), dict(season="Fall"), dict(season="")):
+            self.assertEqual(c.post("/students/1/funding/copy-prev", data={**good, **bad}).status_code, 400, bad)
+        self.assertEqual(c.post("/students/99/funding/copy-prev", data=good).status_code, 404)
+        for evil in ("//evil.com", "https://evil.com", "\\\\evil.com"):
+            r = c.post("/students/3/funding/copy-prev", data={**good, "next": evil})
+            self.assertEqual(r.headers["Location"], "/students/3", evil)
+        # view-only accounts can do neither
+        vw = self.client("vw"); tv = self.token(vw)
+        self.assertEqual(vw.post("/students/3/funding/copy-prev", data=dict(year=2026, season="Autumn", csrf_token=tv)).status_code, 403)
+        self.assertEqual(vw.post("/students/1/funding/1/delete", data={"csrf_token": tv}).status_code, 403)
+        # a funding entry can't be deleted through another student's URL
+        self.assertEqual(c.post("/students/2/funding/1/delete", data={"csrf_token": t}).status_code, 404)
+
     def test_funding_report_has_no_buttons_for_viewers(self):
         ed = self.client("ed"); t = self.token(ed); self.add_student(ed)
         ed.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", csrf_token=t))
@@ -474,6 +627,7 @@ class WebTests(unittest.TestCase):
             html = vw.get("/reports/funding").get_data(as_text=True)
         self.assertIn("Lovelace", html)
         self.assertNotIn(">Edit<", html); self.assertNotIn(">Add<", html)
+        self.assertNotIn("Copy Prev", html); self.assertNotIn(">Clear<", html)
         self.assertEqual(vw.get("/students/1/funding/1/edit?next=/reports/funding").status_code, 403)   # and no way in
 
     def test_funding_report_access_and_undated_warning(self):

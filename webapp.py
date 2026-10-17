@@ -564,7 +564,7 @@ def create_app(db_path=None):
         get_or_404(table, rid, student_id=sid)
         db().execute(f"DELETE FROM {table} WHERE id = ?", (rid,)); db().commit()
         flash("Deleted.", "ok")
-        return redirect(url_for("student", sid=sid))
+        return redirect(_safe_path(request.args.get("next")) or url_for("student", sid=sid))
 
     # ---- faculty ---------------------------------------------------------------
     @app.route("/faculty")
@@ -667,11 +667,38 @@ def create_app(db_path=None):
         rows, year, season, sort, sdir = funding_report_data()
         students = {r["student_id"] for r in rows}
         funded = {r["student_id"] for r in rows if r["funding_id"] is not None}
+        prev_season, prev_year = physdb.previous_term(season, year)
+        prev_counts = {r[0]: r[1] for r in db().execute(
+            "SELECT student_id, count(*) FROM funding WHERE term_year = ? AND term_season = ? GROUP BY student_id",
+            (prev_year, prev_season))}
+        this_counts = {}
+        for r in rows:
+            if r["funding_id"] is not None:
+                this_counts[r["student_id"]] = this_counts.get(r["student_id"], 0) + 1
         return render_template(
             "funding_report.html", rows=rows, year=year, season=season, sort=sort, sdir=sdir,
             years=term_years(), seasons=physdb.SEASONS, n_students=len(students), n_funded=len(funded),
             total=sum(r["amount"] or 0 for r in rows), undated=physdb.undated_funding_count(db()),
-            here=request.full_path.rstrip("?"))
+            here=request.full_path.rstrip("?"), prev_label=f"{prev_season} {prev_year}",
+            prev_counts=prev_counts, this_counts=this_counts)
+
+    @app.post("/students/<int:sid>/funding/copy-prev")
+    def funding_copy_prev(sid):
+        s = get_or_404("students", sid)
+        try:
+            year, season = int(request.form.get("year", "")), request.form.get("season", "")
+        except ValueError:
+            abort(400)
+        if season not in physdb.SEASONS or year not in [y for y, _ in term_years()]:
+            abort(400)
+        n, (prev_season, prev_year), replaced = physdb.copy_previous_funding(db(), sid, year, season)
+        who = f"{s['last_name']}, {s['first_name']}"
+        if n == 0:
+            flash(f"{who} has no funding recorded for {prev_season} {prev_year}, so nothing was copied.", "error")
+        else:
+            flash(f"Copied {n} funding entr{'y' if n == 1 else 'ies'} from {prev_season} {prev_year} to "
+                  f"{season} {year} for {who}" + (f" (replacing {replaced})." if replaced else "."), "ok")
+        return redirect(_safe_path(request.form.get("next")) or url_for("student", sid=sid))
 
     @app.route("/reports/funding.csv")
     def funding_report_csv():

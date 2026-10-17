@@ -1,7 +1,9 @@
-{% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
+{% extends "base.html" %}{% from "_macros.html" import sort_th, post_button with context %}{% block body %}
 {# this report is wide, so give the page more room and let Notes take it #}
 <style>main{max-width:96rem}.notes{min-width:9rem;width:34%}.source{min-width:20ch}
-.wide th,.wide td{padding:.4rem .4rem}.wide th a.sortlink{white-space:normal}</style>
+.wide th,.wide td{padding:.4rem .4rem}
+.wide td.actions{white-space:normal;width:10.5rem;min-width:10.5rem}.wide td.actions>*{display:inline-block;margin:0 .2rem .2rem 0;vertical-align:top}
+.wide td.actions .small{padding:.12rem .4rem;font-size:.8rem}.wide th a.sortlink{white-space:normal}</style>
 {% set tab = 'funding' %}{% include "_report_tabs.html" %}
 <h1>Funding for {{ season }} {{ year }}</h1>
 <form class="filters" method="get">
@@ -26,7 +28,23 @@
 <td>{{ r.kind|label if r.kind else '' }}</td><td class="source">{{ r.source or '' }}</td><td style="white-space:nowrap">{{ r.poetaf_coa or '' }}</td>
 <td>{% if r.amount is not none %}${{ '{:,.0f}'.format(r.amount) }}{% endif %}</td>
 <td class="notes" style="white-space:pre-wrap">{{ r.notes or '' }}</td>
-{% if can_edit %}<td class="actions">{% if r.funding_id %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=r.student_id, table='funding', rid=r.funding_id, next=here) }}">Edit</a>{% else %}<a class="btn small" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}">Add</a>{% endif %}</td>{% endif %}
+{% if can_edit %}{% set who = r.last_name ~ ', ' ~ r.first_name %}{% set term = season ~ ' ' ~ year %}
+<td class="actions">
+  {% if r.funding_id %}
+    <a class="btn secondary small" href="{{ url_for('child_edit', sid=r.student_id, table='funding', rid=r.funding_id, next=here) }}">Edit</a>
+    {{ post_button(url_for('funding_copy_prev', sid=r.student_id), "Copy Prev",
+         ("Replace the " ~ this_counts[r.student_id] ~ " funding entr" ~ ("y" if this_counts[r.student_id] == 1 else "ies") ~ " for " ~ who ~ " in " ~ term
+          ~ " with a copy of " ~ prev_counts[r.student_id] ~ " from " ~ prev_label ~ "? The current " ~ ("entry" if this_counts[r.student_id] == 1 else "entries") ~ " will be deleted.")
+         if prev_counts.get(r.student_id) else None,
+         fields={"year": year, "season": season, "next": here}) }}
+    {{ post_button(url_for('child_delete', sid=r.student_id, table='funding', rid=r.funding_id, next=here), "Clear",
+         "Delete this funding entry (" ~ r.kind|label ~ (", $" ~ '{:,.0f}'.format(r.amount) if r.amount is not none else "") ~ ") for " ~ who ~ " in " ~ term ~ "? This cannot be undone.",
+         cls="btn danger small") }}
+  {% else %}
+    <a class="btn small" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}">Add</a>
+    {{ post_button(url_for('funding_copy_prev', sid=r.student_id), "Copy Prev", fields={"year": year, "season": season, "next": here}) }}
+  {% endif %}
+</td>{% endif %}
 </tr>
 {% else %}<tr><td colspan="9" class="muted">There are no active students.</td></tr>{% endfor %}</table>
 {% endblock %}
