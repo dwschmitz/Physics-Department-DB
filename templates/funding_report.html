@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
 {# this report is wide, so give the page more room and let Notes take it #}
-<style>main{max-width:96rem}.notes{min-width:13rem;width:34%}.source{min-width:20ch}
-.wide th,.wide td{padding:.4rem .5rem}.wide th a.sortlink{white-space:normal}</style>
+<style>main{max-width:96rem}.notes{min-width:9rem;width:34%}.source{min-width:20ch}
+.wide th,.wide td{padding:.4rem .4rem}.wide th a.sortlink{white-space:normal}</style>
 {% set tab = 'funding' %}{% include "_report_tabs.html" %}
 <h1>Funding for {{ season }} {{ year }}</h1>
 <form class="filters" method="get">
@@ -20,13 +20,13 @@
 {% if undated %}<div class="flash error">{{ undated }} funding entr{{ 'y' if undated == 1 else 'ies' }} of active students
   {{ 'has' if undated == 1 else 'have' }} no term yet (marked &ldquo;please re-enter&rdquo; on the student&rsquo;s page) and
   {{ 'is' if undated == 1 else 'are' }} not included here.</div>{% endif %}
-<table class="wide"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("University ID", "university_id", sort, sdir) }}{{ sort_th("CNET", "cnet", sort, sdir) }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Type", "type", sort, sdir) }}{{ sort_th("Source", "source", sort, sdir, cls="source") }}{{ sort_th("POETAF/COA", "poetaf_coa", sort, sdir) }}{{ sort_th("Amount", "amount", sort, sdir) }}<th class="notes">Notes</th>{% if can_edit %}<th></th>{% endif %}</tr>
+<table class="wide"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("CNET", "cnet", sort, sdir) }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Type", "type", sort, sdir) }}{{ sort_th("Source", "source", sort, sdir, cls="source") }}{{ sort_th("POETAF/COA", "poetaf_coa", sort, sdir) }}{{ sort_th("Amount", "amount", sort, sdir) }}<th class="notes">Notes</th>{% if can_edit %}<th></th>{% endif %}</tr>
 {% for r in rows %}<tr><td style="white-space:nowrap"><a href="{{ url_for('student', sid=r.student_id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
-<td>{{ r.university_id }}</td><td>{{ r.cnet or '' }}</td><td>{{ r.advisors or '' }}</td>
+<td>{{ r.cnet or '' }}</td><td>{{ r.advisors or '' }}</td>
 <td>{{ r.kind|label if r.kind else '' }}</td><td class="source">{{ r.source or '' }}</td><td style="white-space:nowrap">{{ r.poetaf_coa or '' }}</td>
 <td>{% if r.amount is not none %}${{ '{:,.0f}'.format(r.amount) }}{% endif %}</td>
 <td class="notes" style="white-space:pre-wrap">{{ r.notes or '' }}</td>
 {% if can_edit %}<td class="actions">{% if r.funding_id %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=r.student_id, table='funding', rid=r.funding_id, next=here) }}">Edit</a>{% else %}<a class="btn small" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}">Add</a>{% endif %}</td>{% endif %}
 </tr>
-{% else %}<tr><td colspan="10" class="muted">There are no active students.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="9" class="muted">There are no active students.</td></tr>{% endfor %}</table>
 {% endblock %}

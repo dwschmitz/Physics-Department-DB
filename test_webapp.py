@@ -298,10 +298,10 @@ class WebTests(unittest.TestCase):
         self.assertNotIn("$999", html); self.assertNotIn("Dd", html)                          # on leave excluded
         self.assertNotIn("<b>hi</b>", html)
         row_cc = re.search(r"/students/3\">Cc.*?</tr>", html, re.S).group(0)
-        cells = re.findall(r"<td[^>]*>([^<]*)</td>", row_cc)      # the name cell holds a link, so: ID, CNET, advisor,
-        self.assertEqual(len(cells), 8)                           # then type, source, POETAF/COA, amount, notes
-        self.assertEqual(cells[:2], ["U3", "cnet3"])
-        self.assertEqual([x for x in cells[3:] if x], [])         # every funding field is empty
+        cells = re.findall(r"<td[^>]*>([^<]*)</td>", row_cc)      # the name cell holds a link, so: CNET, advisor,
+        self.assertEqual(len(cells), 7)                           # then type, source, POETAF/COA, amount, notes
+        self.assertEqual(cells[0], "cnet3")                       # (University ID is no longer shown on screen)
+        self.assertEqual([x for x in cells[2:] if x], [])         # every funding field is empty
         # other terms, sorting, and bad input
         self.assertEqual(who(page("season=Winter&year=2026")), [("1", "Aa"), ("2", "Bb"), ("3", "Cc")])
         self.assertIn("total $100", page("season=Winter&year=2026"))
@@ -312,16 +312,39 @@ class WebTests(unittest.TestCase):
         # tabs and a visible link from the Reports page
         self.assertIn("Funding by term", c.get("/reports").get_data(as_text=True))
         self.assertIn("Behind schedule", html)
-        # CSV
+        # CSV: the screen drops University ID, but the file carries the full student record
+        c.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", csrf_token=t))
+        c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
         with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
             resp = c.get("/reports/funding.csv?season=Autumn&year=2026")
         self.assertEqual(resp.mimetype, "text/csv")
         self.assertIn("funding_Autumn_2026.csv", resp.headers["Content-Disposition"])
-        lines = resp.get_data(as_text=True).strip().splitlines()
-        self.assertEqual(lines[0], "Last name,First name,University ID,CNET,Advisor,Term,Type,Source,POETAF/COA,Amount,Notes")
-        self.assertEqual(len(lines), 5)                                   # header + 4 rows
-        self.assertTrue(any("Aa,Stu,U1,cnet1,,Autumn 2026,RA,NSF,COA-9,3000.0" in l for l in lines))
-        self.assertTrue(any(l.startswith("Cc,Stu,U3,cnet3,,Autumn 2026,,,,,") for l in lines))   # unfunded: blanks
+        import csv, io
+        parsed = list(csv.reader(io.StringIO(resp.get_data(as_text=True))))
+        header, body = parsed[0], parsed[1:]
+        self.assertEqual(header, [
+            "Last name", "First name", "University ID", "CNET", "Email", "Citizenship", "Status",
+            "Matriculation term", "Matriculation year", "Clock (years)", "Expected graduation year",
+            "Research area", "Advisor", "Student notes",
+            "Funding term", "Funding type", "Source", "POETAF/COA", "Amount", "Funding notes"])
+        self.assertEqual(len(body), 4)                                   # same rows as the screen
+        rows = [dict(zip(header, r)) for r in body]
+        aa = [r for r in rows if r["Last name"] == "Aa" and r["Funding type"] == "RA"][0]
+        self.assertEqual((aa["First name"], aa["University ID"], aa["CNET"], aa["Email"]),
+                         ("Stu", "U1", "cnet1", "s1@u.edu"))
+        self.assertEqual((aa["Citizenship"], aa["Status"], aa["Matriculation term"], aa["Matriculation year"]),
+                         ("Citizen", "Active", "Autumn", "2022"))
+        self.assertEqual(aa["Clock (years)"], "4.0")
+        self.assertEqual(aa["Advisor"], "Niels Bohr")                    # full name in the file
+        self.assertEqual((aa["Funding term"], aa["Source"], aa["POETAF/COA"], aa["Amount"], aa["Funding notes"]),
+                         ("Autumn 2026", "NSF", "COA-9", "3000.0", "<b>hi</b>"))
+        cc = [r for r in rows if r["Last name"] == "Cc"][0]              # unfunded: student info, blank funding
+        self.assertEqual((cc["University ID"], cc["CNET"], cc["Email"], cc["Citizenship"]),
+                         ("U3", "cnet3", "s3@u.edu", "Citizen"))
+        self.assertEqual([cc[k] for k in ("Funding type", "Source", "POETAF/COA", "Amount", "Funding notes")],
+                         ["", "", "", "", ""])
+        self.assertEqual(cc["Funding term"], "Autumn 2026")
+        self.assertNotIn("Dd", [r["Last name"] for r in rows])           # on leave: still excluded
 
     def test_funding_report_edit_and_add_buttons(self):
         from urllib.parse import urlparse, parse_qs, unquote
@@ -394,6 +417,27 @@ class WebTests(unittest.TestCase):
         with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
             html = c.get("/reports/funding").get_data(as_text=True)
         self.assertIn('<td class="source">Department of Energy</td>', html)
+
+    def test_funding_report_shows_full_poetaf_and_no_university_id(self):
+        import csv, io
+        from unittest import mock
+        c = self.client("ed"); t = self.token(c)
+        self.add_student(c, university_id="U777", research_area="=SUM(1)", notes="@cmd", cnet="abc")
+        longest = "12-3456789-ABCDEF-0001-2026-XYZ-9999-0000-000-11111-22222"       # 56 characters
+        c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn",
+               poetaf_coa=longest, csrf_token=t))
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            html = c.get("/reports/funding").get_data(as_text=True)
+            data = c.get("/reports/funding.csv").get_data(as_text=True)
+        self.assertIn(f'<td style="white-space:nowrap">{longest}</td>', html)           # whole value, never wrapped
+        self.assertIn(f'<td style="white-space:nowrap">{longest}</td>', c.get("/students/1").get_data(as_text=True))
+        self.assertNotIn("University ID", html); self.assertNotIn("U777", html)        # not on screen...
+        self.assertIn("U777", data); self.assertIn(longest, data)                       # ...but in the CSV
+        row = list(csv.DictReader(io.StringIO(data)))[0]
+        self.assertEqual(row["POETAF/COA"], longest)
+        # spreadsheet formulas in any column are neutralized
+        self.assertEqual(row["Research area"], "'=SUM(1)"); self.assertEqual(row["Student notes"], "'@cmd")
+        self.assertEqual(c.get("/reports/funding?sort=university_id").status_code, 200)  # old bookmark still works
 
     def test_funding_report_has_no_buttons_for_viewers(self):
         ed = self.client("ed"); t = self.token(ed); self.add_student(ed)

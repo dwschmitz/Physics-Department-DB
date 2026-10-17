@@ -336,11 +336,17 @@ def funding_report(conn, year, season):
     A student with several entries (say an RA plus a supplement) gets one row per entry.
     """
     return [dict(r) for r in conn.execute(
-        """SELECT s.id AS student_id, s.first_name, s.last_name, s.university_id, s.cnet,
+        """SELECT s.id AS student_id, s.first_name, s.last_name, s.university_id, s.cnet, s.email,
+                  s.citizenship, s.status, s.matriculation_year, s.matriculation_term,
+                  s.expected_grad_year, s.research_area, s.notes AS student_notes,
                   (SELECT group_concat(fa.last_name, ', ') FROM advising a
                      JOIN faculty fa ON fa.id = a.faculty_id
                     WHERE a.student_id = s.id AND a.end_date IS NULL
                       AND a.role IN ('advisor', 'co-advisor')) AS advisors,
+                  (SELECT group_concat(fa.first_name || ' ' || fa.last_name, '; ') FROM advising a
+                     JOIN faculty fa ON fa.id = a.faculty_id
+                    WHERE a.student_id = s.id AND a.end_date IS NULL
+                      AND a.role IN ('advisor', 'co-advisor')) AS advisors_full,
                   f.id AS funding_id, f.kind, f.source, f.poetaf_coa, f.amount, f.notes
            FROM students s
            LEFT JOIN funding f ON f.student_id = s.id AND f.term_year = ? AND f.term_season = ?

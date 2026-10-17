@@ -651,7 +651,6 @@ def create_app(db_path=None):
         name = lambda r: (_text(r["last_name"]), _text(r["first_name"]), r["student_id"])
         rows, sort, sdir = sort_rows(rows, {
             "name": name,
-            "university_id": lambda r: _text(r["university_id"]),
             "cnet": lambda r: _text(r["cnet"]),
             "advisor": lambda r: _text(r["advisors"]),
             "type": lambda r: _text(label(r["kind"]) if r["kind"] else None),
@@ -678,11 +677,18 @@ def create_app(db_path=None):
         rows, year, season, _, _ = funding_report_data()
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["Last name", "First name", "University ID", "CNET", "Advisor", "Term", "Type", "Source",
-                    "POETAF/COA", "Amount", "Notes"])
+        w.writerow(["Last name", "First name", "University ID", "CNET", "Email", "Citizenship", "Status",
+                    "Matriculation term", "Matriculation year", "Clock (years)", "Expected graduation year",
+                    "Research area", "Advisor", "Student notes",
+                    "Funding term", "Funding type", "Source", "POETAF/COA", "Amount", "Funding notes"])
+        now = physdb.current_term()
         for r in rows:
             w.writerow([physdb._csv_safe(v) if v is not None else "" for v in (
-                r["last_name"], r["first_name"], r["university_id"], r["cnet"], r["advisors"],
+                r["last_name"], r["first_name"], r["university_id"], r["cnet"], r["email"],
+                label(r["citizenship"]) if r["citizenship"] else None, label(r["status"]),
+                r["matriculation_term"], r["matriculation_year"],
+                None if physdb.clock_label(r, now) == "\u2014" else physdb.clock_label(r, now),
+                r["expected_grad_year"], r["research_area"], r["advisors_full"], r["student_notes"],
                 f"{season} {year}", label(r["kind"]) if r["kind"] else None, r["source"], r["poetaf_coa"],
                 r["amount"], r["notes"])])
         return Response(buf.getvalue(), mimetype="text/csv", headers={
