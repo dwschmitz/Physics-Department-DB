@@ -44,6 +44,8 @@
     {{ post_button(url_for('child_delete', sid=r.student_id, table='funding', rid=r.funding_id, next=here), "Clear",
          "Delete this funding entry (" ~ r.kind|label ~ (", $" ~ '{:,.0f}'.format(r.amount) if r.amount is not none else "") ~ ") for " ~ who ~ " in " ~ term ~ "? This cannot be undone.",
          cls="btn danger small") }}
+    {% if r.last_of_student %}<a class="btn small" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}"
+        title="Add another funding entry for {{ who }} in {{ term }}">Add</a>{% endif %}
   {% else %}
     <a class="btn small" href="{{ url_for('child_new', sid=r.student_id, table='funding', term_year=year, term_season=season, next=here) }}">Add</a>
     {{ post_button(url_for('funding_copy_prev', sid=r.student_id), "Copy Prev", fields={"year": year, "season": season, "next": here}) }}

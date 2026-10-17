@@ -60,6 +60,7 @@ person's password and role (for example, to regain admin access if no admin can 
   student's funding from the term just before (type, source, POETAF/COA, amount, notes), replacing what the
   student already has for the displayed term (it asks first); if the earlier term has nothing, nothing changes.
   **Clear** deletes that row's entry (it asks first).
+  A student's last row also has an **Add** button, for a second entry in the same term (e.g. an RA plus a supplement).
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.

@@ -359,9 +359,12 @@ class WebTests(unittest.TestCase):
                amount="50", csrf_token=t))                        # id 2: another term, must not be edited
         report = "/reports/funding?season=Autumn&year=2026&sort=amount&dir=desc"
         html = c.get(report).get_data(as_text=True)
-        buttons = re.findall(r'class="btn[^"]*" href="([^"]+)">(Edit|Add)</a>', html)
-        self.assertEqual([b for _, b in buttons], ["Edit", "Add"])               # Aa has an entry, Bb has none
-        edit_href, add_href = (h.replace("&amp;", "&") for h, _ in buttons)      # exactly what a browser would follow
+        buttons = re.findall(r'class="btn[^"]*" href="([^"]+)"[^>]*>(Edit|Add)</a>', html)
+        # Aa has one entry (Edit, plus an Add for a second one); Bb has none (Add)
+        self.assertEqual([b for _, b in buttons], ["Edit", "Add", "Add"])
+        edit_href, aa_add_href, add_href = (h.replace("&amp;", "&") for h, _ in buttons)   # what a browser would follow
+        self.assertTrue(aa_add_href.startswith("/students/1/funding/new?"))
+        self.assertEqual(parse_qs(urlparse(aa_add_href).query)["term_season"], ["Autumn"])
         self.assertTrue(edit_href.startswith("/students/1/funding/1/edit?"))      # the Autumn entry, not Winter's
         self.assertTrue(add_href.startswith("/students/2/funding/new?"))
         self.assertEqual(parse_qs(urlparse(add_href).query)["term_year"], ["2026"])
@@ -378,8 +381,8 @@ class WebTests(unittest.TestCase):
                    amount="25", csrf_token=t))
         self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
         page = c.get(report).get_data(as_text=True)
-        self.assertEqual([b for _, b in re.findall(r'class="btn[^"]*" href="([^"]+)">(Edit|Add)</a>', page)],
-                         ["Edit", "Edit"])
+        self.assertEqual([b for _, b in re.findall(r'class="btn[^"]*" href="([^"]+)"[^>]*>(Edit|Add)</a>', page)],
+                         ["Edit", "Add", "Edit", "Add"])                          # both students: Edit + Add for another
         self.assertIn("$25", page)
         # Edit: opens the entry, saves, and returns to the report
         self.assertIn('value="100.0"', c.get(edit_href).get_data(as_text=True))
@@ -530,7 +533,8 @@ class WebTests(unittest.TestCase):
         c, t = self._funding_setup()
         html, rows = self._report_forms(c, "/reports/funding?season=Autumn&year=2026")
         labels = lambda row: re.findall(r">(Edit|Add|Copy Prev|Clear)</(?:a|button)>", row)
-        self.assertEqual([labels(r) for r in rows["1"]], [["Edit", "Copy Prev", "Clear"]] * 2)   # funded rows
+        self.assertEqual([labels(r) for r in rows["1"]],                                         # funded rows; the student's
+                         [["Edit", "Copy Prev", "Clear"], ["Edit", "Copy Prev", "Clear", "Add"]])  # last row also offers Add
         self.assertEqual(labels(rows["2"][0]), ["Add", "Copy Prev"])                             # empty rows
         self.assertEqual(labels(rows["3"][0]), ["Add", "Copy Prev"])
         # every button's own form carries a real CSRF token
@@ -667,6 +671,39 @@ class WebTests(unittest.TestCase):
             # no rule aimed at a heading may switch wrapping back on
             self.assertNotRegex(text, r"th[^{};]*\{[^}]*white-space:\s*(normal|pre-wrap|pre-line)", path.name)
         self.assertNotRegex(css, r"th a\.sortlink\{[^}]*white-space:\s*normal")
+
+    def test_add_another_entry_for_a_student_who_already_has_funding(self):
+        from urllib.parse import urlparse, parse_qs
+        c, t = self._funding_setup()          # Aa has two entries in Autumn 2026; Cc and Bb have none
+        def rows_of(qs, sid="1"):
+            return self._report_forms(c, "/reports/funding?season=Autumn&year=2026" + qs)[1][sid]
+        add_links = lambda row: re.findall(r'<a class="btn small" href="([^"]+)"[^>]*>Add</a>', row)
+        # exactly one Add among a student's rows, and it sits on the last row shown, whatever the sort
+        for qs in ("", "&sort=amount&dir=asc", "&sort=amount&dir=desc", "&sort=type&dir=desc"):
+            rows = rows_of(qs)
+            self.assertEqual([len(add_links(r)) for r in rows], [0] * (len(rows) - 1) + [1], qs)
+        last = rows_of("")[-1]
+        self.assertLess(last.index(">Clear<"), last.index(">Add<"))                      # at the END of the button list
+        # students with no funding still have the single Add (plus Copy Prev); no stray extras
+        self.assertEqual([len(add_links(r)) for r in rows_of("", "2")], [1])
+        # following it opens a new form for that term; saving adds a THIRD entry and returns to the report
+        href = add_links(last)[0].replace("&amp;", "&")
+        q = parse_qs(urlparse(href).query)
+        self.assertEqual((q["term_year"], q["term_season"]), (["2026"], ["Autumn"]))
+        report = "/reports/funding?season=Autumn&year=2026"
+        self.assertEqual(q["next"], [report])
+        self.assertIn('<option value="Autumn" selected>Autumn</option>', c.get(href).get_data(as_text=True))
+        r = c.post(href, data=dict(kind="TA", term_year=2026, term_season="Autumn", source="Third", amount="7", csrf_token=t))
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, report))
+        rows = rows_of("")
+        self.assertEqual(len(rows), 3)                                                    # nothing was replaced
+        self.assertIn("Now", rows[0]); self.assertIn("Third", rows[2])
+        self.assertEqual([len(add_links(r)) for r in rows], [0, 0, 1])                    # Add moved to the new last row
+        # view-only accounts see none of this
+        from unittest import mock
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            html = self.client("vw").get("/reports/funding").get_data(as_text=True)
+        self.assertNotIn(">Add<", html)
 
     def test_funding_report_has_no_buttons_for_viewers(self):
         ed = self.client("ed"); t = self.token(ed); self.add_student(ed)
