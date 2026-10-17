@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
 <h1>Faculty {% if can_edit %}<a class="btn small" href="{{ url_for('faculty_new') }}">+ Add faculty member</a>{% endif %}</h1>
-<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Email", "email", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Current advisees", "advisees", sort, sdir) }}{{ sort_th("Committees", "committees", sort, sdir, "Students for whom this person is advisor, co-advisor, or committee member") }}</tr>
+<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Email", "email", sort, sdir) }}{{ sort_th("CNET", "cnet", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Current advisees", "advisees", sort, sdir) }}{{ sort_th("Committees", "committees", sort, sdir, "Students for whom this person is advisor, co-advisor, or committee member") }}</tr>
 {% for f in rows %}<tr><td><a href="{{ url_for('faculty_detail', fid=f.id) }}">{{ f.last_name }}, {{ f.first_name }}</a></td>
-<td>{{ f.email }}</td><td>{{ f.research_area or '' }}</td><td>{{ f.n_advisees }}</td><td>{{ f.n_committees }}</td></tr>
-{% else %}<tr><td colspan="5" class="muted">No faculty yet.</td></tr>{% endfor %}</table>{% endblock %}
+<td>{{ f.email }}</td><td>{{ f.cnet or '' }}</td><td>{{ f.research_area or '' }}</td><td>{{ f.n_advisees }}</td><td>{{ f.n_committees }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No faculty yet.</td></tr>{% endfor %}</table>{% endblock %}

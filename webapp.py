@@ -24,7 +24,11 @@ import physdb
 STATUSES = ["active", "on_leave", "graduated", "withdrawn"]
 FACULTY_ROLE_FILTERS = {"any": "Any role", "advisor": "Advisor",
                         "committee": "Committee member only"}
-ACCOUNT_ROLES = ["viewer", "editor", "admin"]
+ACCOUNT_ROLES = ["viewer", "editor", "admin"]      # roles an admin can hand out directly
+ROLE_ORDER = ACCOUNT_ROLES + ["faculty"]              # faculty logins are made from a faculty member, see user_new_faculty
+# The ONLY pages a faculty login may open (everything else is refused): their own page, a read-only page for each
+# of their advisees, changing their password, signing in/out, and the stylesheet.
+FACULTY_ENDPOINTS = {"faculty_home", "faculty_student", "account", "logout", "login", "static", "home"}
 MIN_PASSWORD = 10
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
 MILESTONE_KINDS = ["qualifying_exam", "candidacy", "thesis_proposal", "thesis_defense", "other"]
@@ -90,6 +94,7 @@ def fields_for(table, conn):
         return [F("first_name", "First name", required=True),
                 F("last_name", "Last name", required=True),
                 F("email", "Email", "email", True),
+                F("cnet", "CNET", "cnet", help="Also their login name if they are given an account."),
                 F("research_area", "Research area")]
     if table == "advising":
         people = conn.execute("SELECT id, last_name, first_name FROM faculty "
@@ -236,6 +241,8 @@ def create_app(db_path=None):
                 abort(400, "Your session expired. Go back, reload the page and try again.")
             if not can_edit(g.user) and request.endpoint not in ("logout", "account"):
                 abort(403, "Your account is view-only.")
+        if g.user["role"] == "faculty" and request.endpoint not in FACULTY_ENDPOINTS:
+            abort(403, "This page isn't available for faculty accounts.")     # default deny
         if g.user["must_change"] and request.endpoint not in ("account", "logout"):
             return redirect(url_for("account"))
 
@@ -252,7 +259,8 @@ def create_app(db_path=None):
     def inject():
         session.setdefault("csrf", secrets.token_urlsafe(32))
         return dict(csrf_token=session["csrf"], user=g.get("user"),
-                    can_edit=can_edit(g.get("user")), is_admin=bool(g.get("user") and g.user["role"] == "admin"))
+                    can_edit=can_edit(g.get("user")), is_admin=bool(g.get("user") and g.user["role"] == "admin"),
+                    is_faculty=bool(g.get("user") and g.user["role"] == "faculty"))
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -267,7 +275,10 @@ def create_app(db_path=None):
                 session["user_id"] = row["id"]
                 session["pwf"] = pw_fingerprint(row["password_hash"])
                 session["csrf"] = secrets.token_urlsafe(32)
-                return redirect(_safe_path(request.args.get("next")) or url_for("students"))
+                target = _safe_path(request.args.get("next"))
+                if row["role"] == "faculty" and not (target or "").startswith("/my"):
+                    target = None                                   # faculty only ever land on their own page
+                return redirect(target or ("/my" if row["role"] == "faculty" else url_for("students")))
             flash("Incorrect username or password.", "error")
         return render_template("login.html")
 
@@ -275,6 +286,18 @@ def create_app(db_path=None):
     def logout():
         session.clear()
         return redirect(url_for("login"))
+
+    def home_url():
+        return url_for("faculty_home") if g.user["role"] == "faculty" else url_for("students")
+
+    @app.errorhandler(400)
+    @app.errorhandler(403)
+    @app.errorhandler(404)
+    def error_page(e):
+        titles = {400: "That didn't work", 403: "Not available", 404: "Page not found"}
+        user = g.get("user")
+        return render_template("error.html", code=e.code, title=titles[e.code], message=e.description,
+                               home=(home_url() if user else url_for("login"))), e.code
 
     # ---- account management ------------------------------------------------------
     @app.route("/account", methods=["GET", "POST"])
@@ -300,11 +323,11 @@ def create_app(db_path=None):
                 db().commit()
                 session["pwf"] = pw_fingerprint(new_hash)
                 flash("Your password has been changed.", "ok")
-                return redirect(url_for("students"))
+                return redirect(home_url())
         if g.user["must_change"]:
             flash("Please choose a new password before continuing.", "error")
         return render_template("form.html", title="Change your password", fields=fields,
-                               values={}, errors=errors, back=url_for("students"))
+                               values={}, errors=errors, back=home_url())
 
     def user_fields(creating):
         return [F("username", "Username", "username", True)] if creating else []
@@ -317,10 +340,12 @@ def create_app(db_path=None):
     @app.route("/users")
     def users():
         require_admin()
-        rows = [dict(r) for r in db().execute("SELECT * FROM users").fetchall()]
+        rows = [dict(r) for r in db().execute(
+            """SELECT u.*, f.first_name AS f_first, f.last_name AS f_last FROM users u
+               LEFT JOIN faculty f ON f.id = u.faculty_id""").fetchall()]
         rows, sort, sdir = sort_rows(rows, {
             "username": lambda r: _text(r["username"]),
-            "role": lambda r: ACCOUNT_ROLES.index(r["role"]),
+            "role": lambda r: ROLE_ORDER.index(r["role"]),
             "status": lambda r: r["must_change"],
         }, request.args.get("sort"), request.args.get("dir"), "username")
         return render_template("users.html", rows=rows, sort=sort, sdir=sdir)
@@ -349,6 +374,44 @@ def create_app(db_path=None):
                                values=request.form if request.method == "POST" else {"role": "viewer"},
                                errors=errors, back=url_for("users"))
 
+    @app.route("/users/new-faculty", methods=["GET", "POST"])
+    def user_new_faculty():
+        """A login for a faculty member. The username is their CNET, which is also what ties the login to them."""
+        require_admin()
+        candidates = db().execute(
+            """SELECT f.id, f.last_name, f.first_name, f.cnet FROM faculty f
+               WHERE f.cnet IS NOT NULL AND NOT EXISTS (SELECT 1 FROM users u WHERE u.faculty_id = f.id)
+               ORDER BY f.last_name, f.first_name""").fetchall()
+        no_cnet = db().execute("SELECT last_name, first_name FROM faculty WHERE cnet IS NULL "
+                               "ORDER BY last_name, first_name").fetchall()
+        fields = [F("faculty_id", "Faculty member", "select", True,
+                    [(r["id"], f"{r['last_name']}, {r['first_name']} ({r['cnet']})") for r in candidates],
+                    placeholder=True, help="Only faculty with a CNET and no account yet are listed."),
+                  F("password", "Temporary password", "password", True,
+                    help=f"At least {MIN_PASSWORD} characters. They must choose their own at first login.")]
+        intro = "Their username will be their CNET."
+        if no_cnet:
+            intro += (" Not listed because they have no CNET yet: "
+                      + ", ".join(f"{r['first_name']} {r['last_name']}" for r in no_cnet) + ".")
+        errors = {}
+        if request.method == "POST":
+            values, errors = parse_form(fields, request.form)
+            if not errors:
+                cnet = next(r["cnet"] for r in candidates if r["id"] == values["faculty_id"])
+                try:
+                    db().execute("INSERT INTO users (username, password_hash, role, must_change, faculty_id) "
+                                 "VALUES (?,?,?,1,?)", (cnet, generate_password_hash(values["password"]),
+                                                        "faculty", values["faculty_id"]))
+                    db().commit()
+                    flash(f"Faculty account '{cnet}' created.", "ok")
+                    return redirect(url_for("users"))
+                except sqlite3.IntegrityError:
+                    db().rollback()
+                    errors["faculty_id"] = f"A login named '{cnet}' already exists."
+        return render_template("form.html", title="Add faculty account", fields=fields, intro=intro,
+                               values=request.form if request.method == "POST" else {}, errors=errors,
+                               back=url_for("users"))
+
     @app.route("/users/<int:uid>/edit", methods=["GET", "POST"])
     def user_edit(uid):
         require_admin()
@@ -359,6 +422,9 @@ def create_app(db_path=None):
                   F("password", "New temporary password", "password", False,
                     help="Leave blank to keep the current password. Setting one signs the person out "
                          "everywhere and makes them choose a new password at next login.")]
+        if u["role"] == "faculty":                # a faculty login is tied to a person: only its password can change
+            fields = [F("password", "New temporary password", "password", True,
+                        help="Signs them out everywhere and makes them choose a new password at next login.")]
         errors = {}
         if request.method == "POST":
             values, errors = parse_form(fields, request.form)
@@ -386,6 +452,61 @@ def create_app(db_path=None):
             flash(f"Account '{u['username']}' deleted.", "ok")
         return redirect(url_for("users"))
 
+    # ---- pages for faculty logins ----------------------------------------------
+    def require_faculty():
+        if g.user["role"] != "faculty":
+            abort(403, "This page is for faculty accounts.")
+
+    @app.route("/my")
+    def faculty_home():
+        """A faculty member's own page: their advisees (with funding for a term) and their committee students."""
+        require_faculty()
+        fac = get_or_404("faculty", g.user["faculty_id"])
+        now = physdb.current_term()
+        offered = {y for y, _ in term_years()}
+        try:
+            year = int(request.args.get("year", now[1]))
+        except ValueError:
+            year = now[1]
+        year = year if year in offered else now[1]
+        season = request.args.get("season", now[0])
+        season = season if season in physdb.SEASONS else now[0]
+        advisees = physdb.faculty_advisees(db(), fac["id"])
+        funding = physdb.funding_for_term(db(), [a["id"] for a in advisees], year, season)
+        for a in advisees:
+            a["clock"] = physdb.clock_label(a, now)
+            a["funding"] = funding[a["id"]]
+        committee = physdb.faculty_committee_students(db(), fac["id"])
+        for c in committee:
+            c["clock"] = physdb.clock_label(c, now)
+        step = lambda s, y: url_for("faculty_home", year=y, season=s) if y in offered else None
+        prev_season, prev_year = physdb.previous_term(season, year)
+        next_season, next_year = physdb.next_term(season, year)
+        return render_template(
+            "faculty_home.html", fac=fac, advisees=advisees, committee=committee, year=year, season=season,
+            prev_url=step(prev_season, prev_year), next_url=step(next_season, next_year),
+            prev_label=f"{prev_season} {prev_year}", next_label=f"{next_season} {next_year}",
+            total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]), current=f"{now[0]} {now[1]}")
+
+    @app.route("/my/students/<int:sid>")
+    def faculty_student(sid):
+        """Read-only detail for one of the signed-in faculty member's advisees (404 for anyone else's student)."""
+        require_faculty()
+        fid = g.user["faculty_id"]
+        if not physdb.is_advisee(db(), fid, sid):
+            abort(404)
+        s = next(r for r in physdb.faculty_advisees(db(), fid) if r["id"] == sid)        # safe columns only
+        s["clock"] = physdb.clock_label(s)
+        advising = db().execute(
+            f"""SELECT a.role, a.start_date, a.end_date, f.first_name, f.last_name FROM advising a
+                JOIN faculty f ON f.id = a.faculty_id WHERE a.student_id = ? ORDER BY {physdb.ADVISING_ORDER_SQL}""",
+            (sid,)).fetchall()
+        milestones = db().execute("SELECT kind, date, outcome FROM milestones WHERE student_id = ? ORDER BY date",
+                                  (sid,)).fetchall()
+        funding = db().execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
+                               (sid,)).fetchall()
+        return render_template("faculty_student.html", s=s, advising=advising, milestones=milestones, funding=funding)
+
     # ---- generic helpers -------------------------------------------------------
     def get_or_404(table, rid, **extra):
         where = " AND ".join(["id = ?"] + [f"{k} = ?" for k in extra])
@@ -409,12 +530,18 @@ def create_app(db_path=None):
         except sqlite3.IntegrityError as e:
             db().rollback()
             msg = str(e)
+            if "login account that uses their CNET" in msg:
+                return ("This person has a login account that uses their CNET, so it can't be removed. Delete "
+                        "their account on the Accounts page first.")
             if "UNIQUE" in msg:
                 col = msg.rsplit(".", 1)[-1]
-                return {"email": "Someone else already has this email address.",
-                        "university_id": "Another student already has this university ID.",
-                        "cnet": "Another student already has this CNET."
-                        }.get(col, "That entry already exists.")
+                return {("students", "email"): "Someone else already has this email address.",
+                        ("faculty", "email"): "Someone else already has this email address.",
+                        ("students", "university_id"): "Another student already has this university ID.",
+                        ("students", "cnet"): "Another student already has this CNET.",
+                        ("faculty", "cnet"): "Another faculty member already has this CNET.",
+                        ("faculty", "username"): "That CNET is already the login name of a different account.",
+                        }.get((table, col), "That entry already exists.")
             return "Could not save: the data conflicts with existing records."
         return None
 
@@ -457,7 +584,7 @@ def create_app(db_path=None):
     # ---- students --------------------------------------------------------------
     @app.route("/")
     def home():
-        return redirect(url_for("students"))
+        return redirect(url_for("faculty_home") if g.user["role"] == "faculty" else url_for("students"))
 
     @app.route("/students")
     def students():
@@ -576,7 +703,7 @@ def create_app(db_path=None):
                   FROM faculty f""").fetchall()
         name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
         rows, sort, sdir = sort_rows([dict(r) for r in rows], {
-            "name": name, "email": lambda r: _text(r["email"]),
+            "name": name, "email": lambda r: _text(r["email"]), "cnet": lambda r: _text(r["cnet"]),
             "research_area": lambda r: _text(r["research_area"]),
             "advisees": lambda r: r["n_advisees"], "committees": lambda r: r["n_committees"],
         }, request.args.get("sort"), request.args.get("dir"), "name")
@@ -852,6 +979,9 @@ def save_user(username, role):
     if len(pw) < MIN_PASSWORD or pw != getpass.getpass("Repeat password: "):
         raise SystemExit(f"Passwords must match and be at least {MIN_PASSWORD} characters.")
     conn = physdb.connect()
+    existing = conn.execute("SELECT role FROM users WHERE username = ?", (username,)).fetchone()
+    if existing and existing["role"] == "faculty":
+        raise SystemExit(f"'{username}' is a faculty login. Manage it on the Accounts page of the web interface.")
     conn.execute("""INSERT INTO users (username, password_hash, role) VALUES (?,?,?)
                     ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,
                     role=excluded.role, must_change=0""", (username, generate_password_hash(pw), role))

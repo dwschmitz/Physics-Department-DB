@@ -239,6 +239,141 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(len(physdb.funding_report(self.conn, 1999, "Spring")), 3)       # all blank
         self.assertEqual(physdb.undated_funding_count(self.conn), 0)
 
+    # ---------------- faculty CNET and faculty logins ----------------
+    def _login(self, username, role="viewer", faculty_id=None):
+        self.conn.execute("INSERT INTO users (username, password_hash, role, must_change, faculty_id) VALUES (?,?,?,1,?)",
+                          (username, "x", role, faculty_id))
+        self.conn.commit()
+
+    def test_faculty_cnet(self):
+        fid = physdb.add_faculty(self.conn, "Marie", "Curie", "curie@u.edu", cnet="  MCurie ")
+        self.assertEqual(self.conn.execute("SELECT cnet FROM faculty WHERE id = ?", (fid,)).fetchone()[0], "mcurie")
+        self.assertEqual(physdb._find(self.conn, "faculty", "MCURIE"), physdb._find(self.conn, "faculty", fid))
+        self.assertEqual(physdb._find(self.conn, "faculty", "mcurie")["id"], fid)          # look up by CNET
+        with self.assertRaises(sqlite3.IntegrityError):                                    # unique, case-insensitively
+            physdb.add_faculty(self.conn, "X", "Y", "xy@u.edu", cnet="mcurie")
+        with self.assertRaises(ValueError):
+            physdb.add_faculty(self.conn, "X", "Y", "xy@u.edu", cnet="bad name")
+        for i in (1, 2):                                                                   # blank CNETs may repeat
+            physdb.add_faculty(self.conn, "No", f"Cnet{i}", f"nc{i}@u.edu")
+
+    def test_faculty_login_rules(self):
+        a = physdb.add_faculty(self.conn, "Niels", "Bohr", "bohr@u.edu", cnet="nbohr")
+        b = physdb.add_faculty(self.conn, "Marie", "Curie", "curie@u.edu", cnet="mcurie")
+        c = physdb.add_faculty(self.conn, "Max", "Planck", "planck@u.edu")                 # no CNET
+        # a faculty login must point at a faculty member, and others must not
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._login("nobody", role="faculty")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._login("viewer1", role="viewer", faculty_id=a)
+        # its username has to be the faculty member's CNET (nothing else will do)
+        for bad in ("someone-else", "NBOHR", "mcurie"):
+            with self.assertRaises(sqlite3.IntegrityError, msg=bad):
+                self._login(bad, role="faculty", faculty_id=a)
+        with self.assertRaises(sqlite3.IntegrityError):                                    # no CNET -> no login
+            self._login("planck", role="faculty", faculty_id=c)
+        self._login("nbohr", role="faculty", faculty_id=a)
+        with self.assertRaises(sqlite3.IntegrityError):                                    # one login per person
+            self._login("nbohr2", role="faculty", faculty_id=a)
+        self._login("mcurie", role="faculty", faculty_id=b)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM users WHERE role = 'faculty'").fetchone()[0], 2)
+
+    def test_faculty_cnet_changes_follow_the_login(self):
+        a = physdb.add_faculty(self.conn, "Niels", "Bohr", "bohr@u.edu", cnet="nbohr")
+        physdb.add_faculty(self.conn, "Marie", "Curie", "curie@u.edu", cnet="mcurie")
+        self._login("nbohr", role="faculty", faculty_id=a)
+        self._login("taken", role="viewer")
+        user = lambda: self.conn.execute("SELECT username FROM users WHERE faculty_id = ?", (a,)).fetchone()[0]
+        # a new CNET renames the login
+        self.conn.execute("UPDATE faculty SET cnet = 'niels2' WHERE id = ?", (a,)); self.conn.commit()
+        self.assertEqual(user(), "niels2")
+        # removing the CNET is refused while a login exists, and nothing changes
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("UPDATE faculty SET cnet = NULL WHERE id = ?", (a,))
+        self.conn.rollback()
+        self.assertEqual(self.conn.execute("SELECT cnet FROM faculty WHERE id = ?", (a,)).fetchone()[0], "niels2")
+        # a CNET that another login already uses can't be taken, and the faculty record is left untouched
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("UPDATE faculty SET cnet = 'taken' WHERE id = ?", (a,))
+        self.conn.rollback()
+        self.assertEqual((user(), self.conn.execute("SELECT cnet FROM faculty WHERE id = ?", (a,)).fetchone()[0]),
+                         ("niels2", "niels2"))
+        # faculty without a login can change or clear their CNET freely
+        self.conn.execute("UPDATE faculty SET cnet = NULL WHERE email = 'curie@u.edu'"); self.conn.commit()
+        # deleting the faculty member removes the login with it
+        self.conn.execute("DELETE FROM faculty WHERE id = ?", (a,)); self.conn.commit()
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM users WHERE role = 'faculty'").fetchone()[0], 0)
+
+    def test_users_and_faculty_tables_from_older_versions_are_migrated(self):
+        import os, tempfile
+        for with_must_change in (True, False):
+            path = os.path.join(tempfile.mkdtemp(), "old.db")
+            c = sqlite3.connect(path)
+            c.executescript(f"""
+                CREATE TABLE faculty (id INTEGER PRIMARY KEY, first_name TEXT NOT NULL, last_name TEXT NOT NULL,
+                  email TEXT UNIQUE NOT NULL, research_area TEXT);
+                INSERT INTO faculty VALUES (1, 'Niels', 'Bohr', 'bohr@u.edu', 'Atomic');
+                CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+                  role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin'))
+                  {', must_change INTEGER NOT NULL DEFAULT 0' if with_must_change else ''});
+                INSERT INTO users (id, username, password_hash, role) VALUES (1, 'boss', 'h1', 'admin'), (2, 'ed', 'h2', 'editor');
+            """)
+            c.commit(); c.close()
+            conn = physdb.connect(path)
+            rows = [tuple(r) for r in conn.execute("SELECT id, username, password_hash, role, faculty_id FROM users ORDER BY id")]
+            self.assertEqual(rows, [(1, "boss", "h1", "admin", None), (2, "ed", "h2", "editor", None)])
+            self.assertIn("cnet", {r[1] for r in conn.execute("PRAGMA table_info(faculty)")})
+            self.assertEqual(conn.execute("SELECT research_area FROM faculty").fetchone()[0], "Atomic")
+            conn.execute("UPDATE faculty SET cnet = 'nbohr' WHERE id = 1")
+            conn.execute("INSERT INTO users (username, password_hash, role, faculty_id) VALUES ('nbohr', 'h3', 'faculty', 1)")
+            conn.commit()
+            physdb.connect(path)                                                  # a second start changes nothing
+            self.assertEqual(conn.execute("SELECT count(*) FROM users").fetchone()[0], 3)
+
+    def test_faculty_views_only_return_their_own_students_and_safe_columns(self):
+        def student(uid, last):
+            return physdb.add_student(self.conn, university_id=uid, first_name="S", last_name=last, email=f"{uid}@m.o",
+                                      matriculation_year=2022, expected_grad_year=2028, research_area="optics",
+                                      notes="PRIVATE ADMIN NOTE", cnet=f"c{uid}", citizenship="international")
+        bohr = physdb.add_faculty(self.conn, "Niels", "Bohr", "bohr@u.edu", cnet="nbohr")
+        curie = physdb.add_faculty(self.conn, "Marie", "Curie", "curie@u.edu", cnet="mcurie")
+        s = {n: student(f"U{n}", f"Stu{n}") for n in range(1, 8)}
+        a = physdb.assign_advisor
+        a(self.conn, s[1], bohr, "advisor"); a(self.conn, s[2], bohr, "co-advisor")        # Bohr advises 1, 2
+        a(self.conn, s[3], curie, "advisor"); a(self.conn, s[3], bohr, "committee")        # 3: Bohr on committee only
+        a(self.conn, s[4], curie, "advisor"); a(self.conn, s[4], bohr, "committee_chair")  # 4: Bohr chairs
+        a(self.conn, s[5], bohr, "advisor"); a(self.conn, s[5], bohr, "committee")         # 5: advisor AND committee rows
+        a(self.conn, s[6], curie, "advisor")                                                # 6: Curie's, unrelated to Bohr
+        a(self.conn, s[7], bohr, "advisor")
+        self.conn.execute("UPDATE advising SET end_date = '2025-01-01' WHERE student_id = ? AND faculty_id = ?", (s[7], bohr))
+        self.conn.commit()
+        ids = lambda rows: sorted(r["id"] for r in rows)
+        self.assertEqual(ids(physdb.faculty_advisees(self.conn, bohr)), sorted([s[1], s[2], s[5]]))     # not ended, not committee-only
+        self.assertEqual(ids(physdb.faculty_committee_students(self.conn, bohr)), sorted([s[3], s[4]]))  # 5 is an advisee, not "committee only"
+        roles = {r["id"]: r["committee_role"] for r in physdb.faculty_committee_students(self.conn, bohr)}
+        self.assertEqual(roles, {s[3]: "committee", s[4]: "committee_chair"})
+        self.assertEqual(ids(physdb.faculty_advisees(self.conn, curie)), sorted([s[3], s[4], s[6]]))
+        self.assertTrue(physdb.is_advisee(self.conn, bohr, s[1]) and physdb.is_advisee(self.conn, bohr, s[2]))
+        for n in (3, 4, 6, 7):                                                              # committee / other's / ended: no
+            self.assertFalse(physdb.is_advisee(self.conn, bohr, s[n]), n)
+        self.assertFalse(physdb.is_advisee(self.conn, bohr, 9999))
+        # the committee list names the advisor(s)
+        self.assertEqual({r["id"]: r["advisors"] for r in physdb.faculty_committee_students(self.conn, bohr)},
+                         {s[3]: "Marie Curie", s[4]: "Marie Curie"})
+        # only the safe columns come back: never University ID or the internal notes
+        for row in physdb.faculty_advisees(self.conn, bohr) + physdb.faculty_committee_students(self.conn, bohr):
+            self.assertNotIn("university_id", row); self.assertNotIn("notes", row)
+            self.assertNotIn("PRIVATE ADMIN NOTE", str(row))
+            self.assertTrue(set(physdb.FACULTY_STUDENT_COLUMNS) <= set(row))
+        # funding for one term, only for the students asked about
+        physdb.add_funding(self.conn, "U1", "RA", 2026, "Autumn", "NSF", 100)
+        physdb.add_funding(self.conn, "U1", "TA", 2026, "Winter", "Dept", 50)
+        physdb.add_funding(self.conn, "U6", "RA", 2026, "Autumn", "Other", 999)
+        f = physdb.funding_for_term(self.conn, [s[1], s[2]], 2026, "Autumn")
+        self.assertEqual(sorted(f), [s[1], s[2]])
+        self.assertEqual([e["source"] for e in f[s[1]]], ["NSF"]); self.assertEqual(f[s[2]], [])
+        self.assertEqual(physdb.funding_for_term(self.conn, [], 2026, "Autumn"), {})
+
     def test_cnet(self):
         sid = physdb.add_student(self.conn, university_id="U20", first_name="N", last_name="M", email="n@m.o",
                                  matriculation_year=2023, expected_grad_year=None, research_area=None,

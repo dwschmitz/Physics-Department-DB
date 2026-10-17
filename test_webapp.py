@@ -909,6 +909,302 @@ class WebTests(unittest.TestCase):
         self.assertEqual(found("q=%25"), [])                      # wildcard characters are literal
         self.assertIn("advisor", c.get("/students").get_data(as_text=True).split('name="q"')[1][:200])
 
+    # ======================= faculty CNET and faculty logins =======================
+    def _faculty_world(self):
+        """Admin session + faculty Bohr (nbohr), Curie (mcurie), Planck (no CNET) and six students:
+        Aa  advised by Bohr                 Bb  co-advised by Bohr
+        Cc  advised by Curie, Bohr = committee   Dd  advised by Curie, Bohr = chair
+        Ee  Curie's only                     Ff  Bohr WAS the advisor (ended)"""
+        c = self.client("ad"); t = self.token(c)
+        for first, last, cnet in (("Niels", "Bohr", "NBohr"), ("Marie", "Curie", "mcurie"), ("Max", "Planck", "")):
+            c.post("/faculty/new", data=dict(first_name=first, last_name=last, email=f"{last}@u.edu", cnet=cnet, csrf_token=t))
+        for i, last in enumerate(("Aa", "Bb", "Cc", "Dd", "Ee", "Ff"), 1):
+            self.add_student(c, university_id=f"UID{i}", email=f"s{i}@u.edu", first_name="Stu", last_name=last,
+                             cnet=f"stu{last.lower()}", notes=f"SECRET admin note {last}", research_area=f"area-{last}")
+        def adv(sid, fid, role, end=""):
+            c.post(f"/students/{sid}/advising/new", data=dict(faculty_id=fid, role=role, start_date="2024-01-01",
+                   end_date=end, csrf_token=t))
+        adv(1, 1, "advisor"); adv(2, 1, "co-advisor"); adv(3, 2, "advisor"); adv(3, 1, "committee")
+        adv(4, 2, "advisor"); adv(4, 1, "committee_chair"); adv(5, 2, "advisor"); adv(6, 1, "advisor", end="2025-01-01")
+        c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", source="NSF grant",
+               poetaf_coa="1234567-ABC", amount="3000", notes="funding note <b>x</b>", csrf_token=t))
+        c.post("/students/1/funding/new", data=dict(kind="TA", term_year=2026, term_season="Winter", source="Dept",
+               amount="500", csrf_token=t))
+        c.post("/students/2/funding/new", data=dict(kind="supplement", term_year=2026, term_season="Autumn", amount="250", csrf_token=t))
+        c.post("/students/5/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", source="NOT-BOHRS", amount="999", csrf_token=t))
+        c.post("/students/1/milestones/new", data=dict(kind="qualifying_exam", date="2024-05-01", outcome="passed",
+               notes="SECRET milestone note", csrf_token=t))
+        return c, t
+
+    def _make_faculty_login(self, admin, t, fid=1, password="temp-password-1"):
+        r = admin.post("/users/new-faculty", data=dict(faculty_id=fid, password=password, csrf_token=t))
+        self.assertEqual(r.status_code, 302, r.get_data(as_text=True)[:300])
+
+    def _faculty_client(self, username="nbohr", password="temp-password-1", new_password="faculty-new-pass-1"):
+        """Log in as a faculty member, choosing a real password at the forced change; returns a signed-in client."""
+        c = self.app.test_client()
+        r = c.post("/login", data={"username": username, "password": password})
+        self.assertEqual(r.status_code, 302)
+        t = self.token(c, "/account")
+        r = c.post("/account", data=dict(current_password=password, new_password=new_password, confirm=new_password, csrf_token=t))
+        self.assertEqual(r.status_code, 302)
+        return c
+
+    def test_faculty_cnet_field(self):
+        c = self.client("ed"); t = self.token(c)
+        form = c.get("/faculty/new").get_data(as_text=True)
+        self.assertLess(form.index(">Email"), form.index(">CNET<")); self.assertNotIn(">CNET <span", form)   # optional
+        post = lambda **kw: c.post("/faculty/new", data=dict(first_name="N", last_name="Bohr", email="b@u.edu", csrf_token=t, **kw))
+        self.assertEqual(post(cnet="  NBohr ").status_code, 302)
+        page = c.get("/faculty/1").get_data(as_text=True)
+        self.assertIn("<dt>CNET</dt><dd>nbohr</dd>", page)                                        # saved lowercase, trimmed
+        lst = c.get("/faculty").get_data(as_text=True)
+        self.assertIn("sort=cnet", lst); self.assertIn("<td>nbohr</td>", lst)                     # a column on the faculty list
+        r = c.post("/faculty/new", data=dict(first_name="M", last_name="Curie", email="c@u.edu", cnet="NBOHR", csrf_token=t))
+        self.assertIn("Another faculty member already has this CNET", r.get_data(as_text=True))
+        for bad in ("a", "has space", "<b>", "x" * 41):
+            r = c.post("/faculty/new", data=dict(first_name="M", last_name="Curie", email="c@u.edu", cnet=bad, csrf_token=t))
+            self.assertEqual(r.status_code, 200, bad); self.assertIn("Please fix", r.get_data(as_text=True))
+        for i in (1, 2):                                                                          # blank CNETs may repeat
+            self.assertEqual(c.post("/faculty/new", data=dict(first_name="B", last_name=f"Blank{i}", email=f"b{i}@u.edu",
+                                    cnet="", csrf_token=t)).status_code, 302)
+        self.assertEqual([x for x in re.findall(r"<td>(nbohr)</td>", c.get("/faculty?sort=cnet").get_data(as_text=True))], ["nbohr"])
+
+    def test_admin_creates_faculty_accounts(self):
+        c, t = self._faculty_world()
+        form = c.get("/users/new-faculty").get_data(as_text=True)
+        self.assertIn("Their username will be their CNET.", form)
+        self.assertIn("Bohr, Niels (nbohr)", form); self.assertIn("Curie, Marie (mcurie)", form)
+        self.assertNotIn("Planck, Max (", form)                                                   # no CNET -> not offered...
+        self.assertIn("Max Planck", " ".join(form.split()).split("Not listed because")[1])         # ...but named in the note
+        self._make_faculty_login(c, t, fid=1)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        row = conn.execute("SELECT username, role, must_change, faculty_id FROM users WHERE faculty_id = 1").fetchone()
+        conn.close()
+        self.assertEqual(tuple(row), ("nbohr", "faculty", 1, 1))                                  # username = CNET
+        self.assertNotIn("Bohr, Niels (nbohr)", c.get("/users/new-faculty").get_data(as_text=True))   # one login each
+        users = c.get("/users").get_data(as_text=True)
+        self.assertIn("Faculty", users); self.assertIn("Niels Bohr", users)
+        self.assertIn("+ Add faculty account", users)
+        # the form refuses a person who already has one, and a made-up id
+        for fid in (1, 3, 999, ""):
+            r = c.post("/users/new-faculty", data=dict(faculty_id=fid, password="temp-password-2", csrf_token=t))
+            self.assertEqual(r.status_code, 200, fid); self.assertIn("Please fix", r.get_data(as_text=True))
+        r = c.post("/users/new-faculty", data=dict(faculty_id=2, password="short", csrf_token=t))
+        self.assertIn("at least 10", r.get_data(as_text=True))
+        # a login that already uses that name blocks it, with a clear message
+        c.post("/users/new", data=dict(username="mcurie", role="viewer", password="viewer-pass-12", csrf_token=t))
+        r = c.post("/users/new-faculty", data=dict(faculty_id=2, password="temp-password-2", csrf_token=t))
+        self.assertIn("A login named &#39;mcurie&#39; already exists", r.get_data(as_text=True))
+        # only administrators can do any of this
+        for who in ("ed", "vw"):
+            other = self.client(who); tt = self.token(other)
+            self.assertEqual(other.get("/users/new-faculty").status_code, 403)
+            self.assertEqual(other.post("/users/new-faculty", data=dict(faculty_id=2, password="temp-password-3", csrf_token=tt)).status_code, 403)
+
+    def test_faculty_login_flow_and_landing_page(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        f = self.app.test_client()
+        r = f.post("/login", data={"username": "nbohr", "password": "wrong"})
+        self.assertIn("Incorrect username", r.get_data(as_text=True))
+        r = f.post("/login?next=/students", data={"username": "nbohr", "password": "temp-password-1"})
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, "/my"))                    # not /students
+        self.assertEqual(f.get("/my").headers["Location"], "/account")                            # must pick a password first
+        self.assertEqual(f.get("/").headers["Location"], "/account")
+        tok = self.token(f, "/account")
+        r = f.post("/account", data=dict(current_password="temp-password-1", new_password="faculty-new-pass-1",
+                   confirm="faculty-new-pass-1", csrf_token=tok))
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, "/my"))                    # lands on their own page
+        self.assertEqual(f.get("/").headers["Location"], "/my")
+        page = f.get("/my").get_data(as_text=True)
+        self.assertIn("My students", page); self.assertIn("Niels Bohr (nbohr)", page)
+        nav = page.split("<main>")[0]
+        self.assertIn('href="/my"', nav)
+        for forbidden in ("/students", "/faculty", "/reports", "/users", "export"):
+            self.assertNotIn(f'href="{forbidden}', nav)                                           # no links to other pages
+        self.assertIn("(faculty)", nav)
+
+    def test_faculty_see_exactly_their_own_students(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        f = self._faculty_client()
+        from unittest import mock
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            page = f.get("/my").get_data(as_text=True)
+        adv, com = page.split("Students whose committee I am on")
+        self.assertEqual(re.findall(r'/my/students/(\d+)">', adv), ["1", "2"])                    # Aa, Bb: advisor + co-advisor
+        self.assertNotIn("Ff", adv); self.assertNotIn("Ee", adv + com)                            # ended / someone else's
+        self.assertEqual(re.findall(r">(\w+), Stu</td>", com), ["Cc", "Dd"])
+        self.assertIn("Committee member", com); self.assertIn("Committee chair", com)
+        self.assertIn("Marie Curie", com)                                                         # the advisor, named
+        self.assertNotIn("/my/students/3", page); self.assertNotIn("/my/students/4", page)        # committee: listed, not linked
+        # funding for the shown term, with its parameters; other terms and other students' funding are absent
+        for needle in ("Funding for Autumn 2026", "RA · NSF grant · 1234567-ABC · $3,000", "Supplement · $250", "total $3,250"):
+            self.assertIn(needle, page)
+        self.assertNotIn("NOT-BOHRS", page); self.assertNotIn("$999", page); self.assertNotIn("$500", page)
+        # never the University ID or the internal notes
+        for secret in ("UID1", "UID2", "UID3", "SECRET"):
+            self.assertNotIn(secret, page)
+        self.assertIn("area-Aa", page); self.assertIn("stuaa", page)
+        # stepping to another term
+        winter = f.get("/my?year=2026&season=Winter").get_data(as_text=True)
+        self.assertIn("Funding for Winter 2026", winter); self.assertIn("TA · Dept · $500", winter)
+        self.assertNotIn("NSF grant", winter)
+        self.assertIn("year=2027&amp;season=Winter", page)                                         # Next from Autumn 2026
+        fallback = f.get("/my?year=abc&season=Fall")                                              # bad input falls back
+        self.assertEqual(fallback.status_code, 200); self.assertIn("Funding for", fallback.get_data(as_text=True))
+
+    def test_faculty_student_detail_is_limited_to_their_own_advisees(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        f = self._faculty_client()
+        page = f.get("/my/students/1").get_data(as_text=True)
+        self.assertEqual(f.get("/my/students/2").status_code, 200)
+        for needle in ("Stu Aa", "stuaa", "area-Aa", "Qualifying exam", "Passed", "Niels Bohr", "NSF grant", "1234567-ABC",
+                       "$3,000", "Autumn 2026", "Winter 2026", "funding note &lt;b&gt;x&lt;/b&gt;"):   # funding notes shown, escaped
+            self.assertIn(needle, page)
+        self.assertNotIn("<b>x</b>", page)
+        for secret in ("UID1", "SECRET admin note", "SECRET milestone note"):                    # never these
+            self.assertNotIn(secret, page)
+        self.assertNotIn(">Edit<", page); self.assertNotIn(">Clear<", page); self.assertNotIn("<form class=\"inline\"", page)
+        # every other student is a plain 404 -- committee, someone else's, ended advisor, nonexistent
+        for sid in (3, 4, 5, 6, 99):
+            self.assertEqual(f.get(f"/my/students/{sid}").status_code, 404, sid)
+
+    def test_faculty_logins_are_refused_everywhere_else(self):
+        """Default deny: try EVERY address in the app as a faculty member; only their own pages may open."""
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        f = self._faculty_client(); tok = self.token(f, "/my")
+        allowed = webapp.FACULTY_ENDPOINTS
+        checked, tested = 0, set()
+        for rule in self.app.url_map.iter_rules():
+            if rule.endpoint in allowed:
+                continue
+            path = re.sub(r"<(?:int:)?(\w+)>", lambda m: {"table": "funding"}.get(m.group(1), "1"), rule.rule)
+            for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
+                r = f.open(path, method=method, data={"csrf_token": tok} if method == "POST" else None)
+                self.assertEqual(r.status_code, 403, f"{method} {path} ({rule.endpoint}) -> {r.status_code}")
+                checked += 1; tested.add(rule.endpoint)
+        # the sweep really covered the sensitive parts of the app
+        for endpoint in ("students", "student", "student_edit", "student_delete", "export", "funding_report",
+                         "funding_report_csv", "funding_copy", "child_new", "child_edit", "child_delete", "faculty_list",
+                         "faculty_detail", "faculty_edit", "reports", "users", "user_new", "user_new_faculty",
+                         "user_edit", "user_delete"):
+            self.assertIn(endpoint, tested)
+        self.assertEqual(allowed, {"faculty_home", "faculty_student", "account", "logout", "login", "static", "home"})
+        for path in ("/export.csv", "/students", "/students/1", "/faculty", "/reports", "/reports/funding", "/users",
+                     "/students/1/funding/copy?year=2026&season=Autumn", "/nonexistent", "/static/../webapp.py"):
+            self.assertIn(f.get(path).status_code, (403, 404), path)
+        # ... including with a forged "next" at login
+        r = self.app.test_client().post("/login?next=/users", data={"username": "nbohr", "password": "faculty-new-pass-1"})
+        self.assertEqual(r.headers["Location"], "/my")
+        # their own pages and password change still work
+        self.assertEqual(f.get("/my").status_code, 200); self.assertEqual(f.get("/account").status_code, 200)
+        self.assertEqual(f.post("/logout", data={"csrf_token": tok}).status_code, 302)
+
+    def test_faculty_pages_escape_what_they_show(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        c.post("/students/1/edit", data=dict(first_name="<script>alert(1)</script>", last_name="Aa", university_id="UID1",
+               cnet="stuaa", email="s1@u.edu", citizenship="citizen", status="active", matriculation_year="2022",
+               matriculation_term="Autumn", research_area="<img src=x onerror=alert(2)>", csrf_token=t))
+        c.post("/students/3/edit", data=dict(first_name="<b>Bold</b>", last_name="Cc", university_id="UID3",
+               cnet="stucc", email="s3@u.edu", citizenship="citizen", status="active", matriculation_year="2022",
+               matriculation_term="Autumn", csrf_token=t))
+        f = self._faculty_client()
+        for path in ("/my", "/my/students/1"):
+            html = f.get(path).get_data(as_text=True)
+            self.assertNotIn("<script>alert", html); self.assertNotIn("<img src=x", html); self.assertNotIn("<b>Bold</b>", html)
+            self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+
+    def test_generic_add_account_cannot_make_a_faculty_login(self):
+        c, t = self._faculty_world()
+        form = c.get("/users/new").get_data(as_text=True)
+        self.assertNotIn('<option value="faculty"', form)
+        r = c.post("/users/new", data=dict(username="sneaky", role="faculty", password="a-long-password-1", csrf_token=t))
+        self.assertEqual(r.status_code, 200); self.assertIn("Please fix", r.get_data(as_text=True))
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT count(*) FROM users WHERE username = 'sneaky'").fetchone()[0], 0); conn.close()
+
+    def test_refusals_show_a_friendly_page(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        f = self._faculty_client()
+        r = f.get("/students")
+        self.assertEqual(r.status_code, 403)
+        html = r.get_data(as_text=True)
+        self.assertIn("<h1>Not available</h1>", html); self.assertIn("isn&#39;t available for faculty accounts", html)
+        self.assertIn('href="/my">Back to my students</a>', html)
+        r = f.get("/my/students/999")
+        self.assertEqual(r.status_code, 404); self.assertIn("<h1>Page not found</h1>", r.get_data(as_text=True))
+        r = c.get("/students/999")                                                        # staff get the same style
+        self.assertEqual(r.status_code, 404); self.assertIn("Back to the start", r.get_data(as_text=True))
+        self.assertEqual(c.post("/students/new", data={"csrf_token": "bad"}).status_code, 400)
+        self.assertIn("<h1>That didn&#39;t work</h1>", c.post("/students/new", data={"csrf_token": "bad"}).get_data(as_text=True))
+
+    def test_faculty_pages_are_closed_to_everyone_else(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        for who in ("ad", "ed", "vw"):
+            other = self.client(who)
+            for path in ("/my", "/my/students/1"):
+                self.assertEqual(other.get(path).status_code, 403, (who, path))
+        self.assertEqual(self.app.test_client().get("/my").status_code, 302)                      # not logged in -> login
+
+    def test_faculty_account_follows_the_faculty_record(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        f = self._faculty_client()
+        self.assertEqual(f.get("/my").status_code, 200)
+        # changing their CNET renames the login; the old name stops working, the new one works
+        r = c.post("/faculty/1/edit", data=dict(first_name="Niels", last_name="Bohr", email="Bohr@u.edu", cnet="nbohr2", csrf_token=t))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("nbohr2", c.get("/users").get_data(as_text=True))
+        old = self.app.test_client().post("/login", data={"username": "nbohr", "password": "faculty-new-pass-1"})
+        self.assertIn("Incorrect username", old.get_data(as_text=True))
+        new = self.app.test_client().post("/login", data={"username": "nbohr2", "password": "faculty-new-pass-1"})
+        self.assertEqual(new.status_code, 302)
+        # removing it is refused while the login exists (with an explanation); another person's CNET can't be taken
+        r = c.post("/faculty/1/edit", data=dict(first_name="Niels", last_name="Bohr", email="Bohr@u.edu", cnet="", csrf_token=t))
+        self.assertEqual(r.status_code, 200); self.assertIn("login account that uses their CNET", r.get_data(as_text=True))
+        r = c.post("/faculty/1/edit", data=dict(first_name="Niels", last_name="Bohr", email="Bohr@u.edu", cnet="mcurie", csrf_token=t))
+        self.assertIn("Another faculty member already has this CNET", r.get_data(as_text=True))
+        c.post("/users/new", data=dict(username="taken-name", role="viewer", password="viewer-pass-12", csrf_token=t))
+        r = c.post("/faculty/1/edit", data=dict(first_name="Niels", last_name="Bohr", email="Bohr@u.edu", cnet="taken-name", csrf_token=t))
+        self.assertIn("already the login name of a different account", r.get_data(as_text=True))
+        # resetting the password signs them out and forces a new one; the faculty edit page offers only that
+        uid = physdb.connect(self.app.config["DB_PATH"]).execute("SELECT id FROM users WHERE faculty_id = 1").fetchone()[0]
+        edit = c.get(f"/users/{uid}/edit").get_data(as_text=True)
+        self.assertIn("New temporary password", edit); self.assertNotIn('name="role"', edit)
+        r = c.post(f"/users/{uid}/edit", data=dict(role="admin", password="reset-password-77", csrf_token=t))   # role is ignored
+        self.assertEqual(r.status_code, 302)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(tuple(conn.execute("SELECT role, must_change FROM users WHERE id = ?", (uid,)).fetchone()), ("faculty", 1)); conn.close()
+        self.assertEqual(f.get("/my").status_code, 302)                                           # old session is dead
+        # a faculty member who still advises students can't be deleted (so their login stays too)
+        c.post("/faculty/1/delete", data={"csrf_token": t})
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT count(*) FROM users WHERE faculty_id = 1").fetchone()[0], 1); conn.close()
+        # but deleting one with no students removes their login with them, and ends any open session
+        c.post("/faculty/3/edit", data=dict(first_name="Max", last_name="Planck", email="Planck@u.edu", cnet="mplanck", csrf_token=t))
+        self._make_faculty_login(c, t, fid=3, password="planck-temp-pass")
+        pf = self._faculty_client("mplanck", "planck-temp-pass", "planck-new-pass-9")
+        self.assertEqual(pf.get("/my").status_code, 200)
+        self.assertEqual(c.post("/faculty/3/delete", data={"csrf_token": t}).status_code, 302)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT count(*) FROM users WHERE username = 'mplanck'").fetchone()[0], 0); conn.close()
+        self.assertEqual(pf.get("/my").status_code, 302)                                          # signed out at once
+
+    def test_create_user_command_never_touches_a_faculty_login(self):
+        c, t = self._faculty_world(); self._make_faculty_login(c, t)
+        from unittest import mock
+        with mock.patch("getpass.getpass", return_value="a-long-password-1"), \
+             mock.patch.object(physdb, "connect", lambda *a, **k: self._conn_for_cli()):
+            with self.assertRaises(SystemExit) as cm:
+                webapp.save_user("nbohr", "viewer")
+        self.assertIn("faculty login", str(cm.exception))
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT role FROM users WHERE username = 'nbohr'").fetchone()[0], "faculty"); conn.close()
+
+    def _conn_for_cli(self):
+        import sqlite3 as _s
+        conn = _s.connect(self.app.config["DB_PATH"]); conn.row_factory = _s.Row; conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
     def test_cnet_field(self):
         c = self.client("ed")
         form = c.get("/students/new").get_data(as_text=True)

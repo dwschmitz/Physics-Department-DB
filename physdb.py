@@ -124,6 +124,7 @@ def connect(path=DB_PATH):
     if legacy:
         _restore_old_funding(conn, legacy)
     _migrate_users(conn)
+    _add_faculty_accounts(conn)
     _drop_program_column(conn)
     _add_funding_notes(conn)
     _add_student_citizenship(conn)
@@ -246,34 +247,62 @@ def _restore_old_funding(conn, why="text_term"):
 
 
 def _migrate_users(conn):
-    """Upgrade a users table created before the 'admin' role / must_change column existed."""
+    """Upgrade a users table from before the 'admin' role, must_change, or the faculty role/faculty_id existed."""
     ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'users'").fetchone()[0]
-    if "'admin'" in ddl and "must_change" in ddl:
+    if "'faculty'" in ddl and "faculty_id" in ddl and "must_change" in ddl:
         return
     has_mc = "must_change" in ddl
     conn.executescript(f"""
         ALTER TABLE users RENAME TO users_old;
         CREATE TABLE users (
             id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin')),
-            must_change INTEGER NOT NULL DEFAULT 0);
+            role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty')),
+            must_change INTEGER NOT NULL DEFAULT 0,
+            faculty_id INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
+            CHECK ((role = 'faculty') = (faculty_id IS NOT NULL)));
         INSERT INTO users (id, username, password_hash, role, must_change)
             SELECT id, username, password_hash, role, {'must_change' if has_mc else '0'} FROM users_old;
         DROP TABLE users_old;""")
 
 
+def _add_faculty_accounts(conn):
+    """Faculty CNET + the rules that tie a faculty login to it. Run after the users migration.
+
+    Rules, enforced in the database so no code path can break them:
+      * a CNET is unique among faculty (blank ones may repeat);
+      * a faculty member has at most one login;
+      * a faculty login's username IS the faculty member's CNET;
+      * changing the CNET renames the login; removing it is refused while a login exists.
+    """
+    if "cnet" not in {r[1] for r in conn.execute("PRAGMA table_info(faculty)")}:
+        conn.execute("ALTER TABLE faculty ADD COLUMN cnet TEXT")
+    conn.executescript("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_faculty_cnet ON faculty(cnet) WHERE cnet IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_faculty ON users(faculty_id) WHERE faculty_id IS NOT NULL;
+        CREATE TRIGGER IF NOT EXISTS users_faculty_login_is_cnet BEFORE INSERT ON users
+          WHEN NEW.role = 'faculty'
+               AND NEW.username IS NOT (SELECT cnet FROM faculty WHERE id = NEW.faculty_id)
+        BEGIN SELECT RAISE(ABORT, 'A faculty login must use the faculty member''s CNET as its username.'); END;
+        CREATE TRIGGER IF NOT EXISTS faculty_cnet_needed_for_login BEFORE UPDATE OF cnet ON faculty
+          WHEN NEW.cnet IS NULL AND EXISTS (SELECT 1 FROM users WHERE faculty_id = OLD.id)
+        BEGIN SELECT RAISE(ABORT, 'This person has a login account that uses their CNET.'); END;
+        CREATE TRIGGER IF NOT EXISTS faculty_cnet_renames_login AFTER UPDATE OF cnet ON faculty
+          WHEN NEW.cnet IS NOT NULL AND NEW.cnet IS NOT OLD.cnet
+        BEGIN UPDATE users SET username = NEW.cnet WHERE faculty_id = NEW.id; END;""")
+    conn.commit()
+
+
 def _find(conn, table, key):
-    """Resolve a student/faculty by numeric id, university id, or email."""
-    cols = ["email"] + (["university_id", "cnet"] if table == "students" else [])
+    """Resolve a student/faculty by numeric id, university id, email, or CNET (CNETs match in any case)."""
+    cols = ["email", "cnet"] + (["university_id"] if table == "students" else [])
     clause = " OR ".join(f"{c} = ?" for c in cols)
+    params = [str(key).strip().lower() if c == "cnet" else key for c in cols]
     if str(key).isdigit():
-        clause = "id = ? OR " + clause
-        params = [int(key)] + [key] * len(cols)
-    else:
-        params = [key] * len(cols)
+        clause, params = "id = ? OR " + clause, [int(key)] + params
     row = conn.execute(f"SELECT * FROM {table} WHERE {clause}", params).fetchone()
     if row is None:
-        raise SystemExit(f"No {table[:-1]} found for '{key}'")
+        noun = "student" if table == "students" else "faculty member"
+        raise SystemExit(f"No {noun} found for '{key}'")
     return row
 
 
@@ -296,10 +325,13 @@ def add_student(conn, **f):
     return cur.lastrowid
 
 
-def add_faculty(conn, first_name, last_name, email, research_area=None):
+def add_faculty(conn, first_name, last_name, email, research_area=None, cnet=None):
+    cnet = (cnet or "").strip().lower() or None
+    if cnet and not re.fullmatch(CNET_PATTERN, cnet):
+        raise ValueError("CNET must be 2-40 letters, digits, or . _ -")
     cur = conn.execute(
-        "INSERT INTO faculty (first_name, last_name, email, research_area) VALUES (?,?,?,?)",
-        (first_name, last_name, email, research_area))
+        "INSERT INTO faculty (first_name, last_name, email, cnet, research_area) VALUES (?,?,?,?,?)",
+        (first_name, last_name, email, cnet, research_area))
     conn.commit()
     return cur.lastrowid
 
@@ -370,6 +402,55 @@ def list_students(conn, status=None, advisor=None, year=None, committee=None):
             clause, p = faculty_role_clause(role, _find(conn, "faculty", who)["id"])
             sql += f" AND {clause}"; params += p
     return conn.execute(sql + " ORDER BY s.last_name, s.first_name", params).fetchall()
+
+
+# What a faculty member may see about a student. Deliberately NOT included: University ID and the internal
+# admin notes. Every faculty-facing query below selects exactly these columns, so nothing else can leak.
+FACULTY_STUDENT_COLUMNS = ("id", "first_name", "last_name", "cnet", "email", "citizenship", "status",
+                           "matriculation_year", "matriculation_term", "expected_grad_year", "research_area")
+_FSC = ", ".join(f"s.{c}" for c in FACULTY_STUDENT_COLUMNS)
+_ADVISOR_ROLES = "('advisor', 'co-advisor')"
+
+
+def faculty_advisees(conn, faculty_id):
+    """Students this faculty member currently advises (advisor or co-advisor), limited to the visible columns."""
+    return [dict(r) for r in conn.execute(
+        f"""SELECT DISTINCT {_FSC} FROM students s JOIN advising a ON a.student_id = s.id
+            WHERE a.faculty_id = ? AND a.end_date IS NULL AND a.role IN {_ADVISOR_ROLES}
+            ORDER BY s.last_name, s.first_name, s.id""", (faculty_id,))]
+
+
+def is_advisee(conn, faculty_id, student_id):
+    return conn.execute(
+        f"""SELECT 1 FROM advising WHERE faculty_id = ? AND student_id = ? AND end_date IS NULL
+            AND role IN {_ADVISOR_ROLES}""", (faculty_id, student_id)).fetchone() is not None
+
+
+def faculty_committee_students(conn, faculty_id):
+    """Students on whose committee this faculty member sits (member or chair) but whom they do not advise."""
+    return [dict(r) for r in conn.execute(
+        f"""SELECT {_FSC},
+                   CASE WHEN SUM(a.role = 'committee_chair') > 0 THEN 'committee_chair' ELSE 'committee' END AS committee_role,
+                   (SELECT group_concat(fa.first_name || ' ' || fa.last_name, '; ') FROM advising x
+                      JOIN faculty fa ON fa.id = x.faculty_id
+                     WHERE x.student_id = s.id AND x.end_date IS NULL AND x.role IN {_ADVISOR_ROLES}) AS advisors
+            FROM students s JOIN advising a ON a.student_id = s.id
+            WHERE a.faculty_id = ? AND a.end_date IS NULL AND a.role IN ('committee', 'committee_chair')
+              AND NOT EXISTS (SELECT 1 FROM advising b WHERE b.student_id = a.student_id AND b.faculty_id = a.faculty_id
+                              AND b.end_date IS NULL AND b.role IN {_ADVISOR_ROLES})
+            GROUP BY s.id ORDER BY s.last_name, s.first_name, s.id""", (faculty_id,))]
+
+
+def funding_for_term(conn, student_ids, year, season):
+    """{student_id: [funding entries]} for the given students in one term."""
+    out = {sid: [] for sid in student_ids}
+    if not student_ids:
+        return out
+    marks = ",".join("?" * len(student_ids))
+    for r in conn.execute(f"SELECT * FROM funding WHERE term_year = ? AND term_season = ? AND student_id IN ({marks}) "
+                          "ORDER BY id", (year, season, *student_ids)):
+        out[r["student_id"]].append(dict(r))
+    return out
 
 
 def funding_report(conn, year, season):
@@ -479,7 +560,7 @@ def build_parser():
 
     a = sub.add_parser("add-faculty")
     a.add_argument("first_name"); a.add_argument("last_name"); a.add_argument("email")
-    a.add_argument("--research-area")
+    a.add_argument("--research-area"); a.add_argument("--cnet")
 
     a = sub.add_parser("assign-advisor")
     a.add_argument("student"); a.add_argument("faculty")
@@ -530,7 +611,7 @@ def main(argv=None):
             print("Added student", add_student(conn, **d))
         elif c == "add-faculty":
             print("Added faculty", add_faculty(conn, args.first_name, args.last_name,
-                                               args.email, args.research_area))
+                                               args.email, args.research_area, args.cnet))
         elif c == "assign-advisor":
             assign_advisor(conn, args.student, args.faculty, args.role, args.start_date)
         elif c == "add-milestone":

@@ -62,6 +62,16 @@ person's password and role (for example, to regain admin access if no admin can 
   POETAF/COA, amount, notes) are shown so you can pick the one you want. The window also shows what is
   currently recorded and warns that copying replaces it. If the chosen term has nothing, nothing changes.
   The **+** button, last on every row, adds an entry for that student and term, so a second entry in the same term (e.g. an RA plus a supplement) is one click away from any of that student's rows.
+- **Faculty accounts:** give each faculty member a **CNET** (Faculty → add/edit; it is also a column on the
+  list). Then, on the **Accounts** page, **+ Add faculty account** creates a login whose username is their CNET
+  (pick the person and set a temporary password; they choose their own at first sign-in). After signing in a
+  faculty member lands on **My students**: the students they advise (name, CNET, status, matriculation, clock,
+  expected graduation, research area, and their funding for a term, with Prev / Next to change term), a read-only
+  page for each advisee (milestones, advisors and committee, funding for every term), and the list of students
+  whose committee they are on. They cannot see anything else: every other page is refused, and they cannot change
+  anything. They never see University IDs or the internal student/milestone notes. Changing a faculty member's
+  CNET renames their login; it can't be removed while they have a login, and deleting the faculty member deletes
+  the login. Only current advising counts (an advising entry with an end date no longer gives access).
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.

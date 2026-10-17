@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS faculty (
     first_name     TEXT NOT NULL,
     last_name      TEXT NOT NULL,
     email          TEXT UNIQUE NOT NULL,
+    cnet           TEXT,   -- CNET ID, lowercase; unique when present (index made in physdb.connect)
     research_area  TEXT
 );
 
@@ -70,11 +71,15 @@ CREATE INDEX IF NOT EXISTS idx_milestones_student ON milestones(student_id);
 CREATE INDEX IF NOT EXISTS idx_funding_student    ON funding(student_id);
 
 -- Web interface logins. 'viewer' can read; 'editor' can also add/change/delete records;
--- 'admin' can additionally manage accounts. must_change forces a new password at next login.
+-- 'admin' can additionally manage accounts; 'faculty' is a faculty member who can see only their own
+-- advisees and committee students (faculty_id says which faculty member; their username is their CNET).
+-- must_change forces a new password at next login.
 CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY,
     username       TEXT UNIQUE NOT NULL,
     password_hash  TEXT NOT NULL,
-    role           TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin')),
-    must_change    INTEGER NOT NULL DEFAULT 0
+    role           TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty')),
+    must_change    INTEGER NOT NULL DEFAULT 0,
+    faculty_id     INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
+    CHECK ((role = 'faculty') = (faculty_id IS NOT NULL))
 );

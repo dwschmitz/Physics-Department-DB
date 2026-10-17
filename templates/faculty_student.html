@@ -1,0 +1,30 @@
+{% extends "base.html" %}{% block body %}
+<p class="toolbar"><a href="{{ url_for('faculty_home') }}">&larr; My students</a></p>
+<h1>{{ s.first_name }} {{ s.last_name }} <span class="badge {{ s.status }}">{{ s.status|label }}</span></h1>
+<dl>
+  <dt>CNET</dt><dd>{{ s.cnet or '—' }}</dd>
+  <dt>Email</dt><dd>{{ s.email }}</dd>
+  <dt>Citizenship</dt><dd>{{ s.citizenship|label if s.citizenship else '—' }}</dd>
+  <dt>Matriculation</dt><dd>{{ s|matric }} <span class="muted">(clock {{ s.clock }})</span></dd>
+  <dt>Expected graduation</dt><dd>{{ s.expected_grad_year or '—' }}</dd>
+  <dt>Research area</dt><dd>{{ s.research_area or '—' }}</dd>
+</dl>
+
+<h2>Advisors &amp; committee</h2>
+<table><tr><th>Name</th><th>Role</th><th>From</th><th>To</th></tr>
+{% for a in advising %}<tr><td>{{ a.first_name }} {{ a.last_name }}</td><td>{{ a.role|label }}</td><td>{{ a.start_date }}</td><td>{{ a.end_date or 'present' }}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">None recorded.</td></tr>{% endfor %}</table>
+
+<h2>Milestones</h2>
+<table><tr><th>Milestone</th><th>Date</th><th>Outcome</th></tr>
+{% for m in milestones %}<tr><td>{{ m.kind|label }}</td><td>{{ m.date }}</td><td>{{ m.outcome|label }}</td></tr>
+{% else %}<tr><td colspan="3" class="muted">None recorded.</td></tr>{% endfor %}</table>
+
+<h2>Funding</h2>
+<table><tr><th>Term</th><th>Type</th><th>Source</th><th>POETAF/COA</th><th>Amount</th><th>Notes</th></tr>
+{% for f in funding %}<tr><td style="white-space:nowrap">{{ f|term }}</td><td>{{ f.kind|label }}</td><td>{{ f.source or '' }}</td>
+<td style="white-space:nowrap">{{ f.poetaf_coa or '' }}</td>
+<td>{% if f.amount is not none %}${{ '{:,.0f}'.format(f.amount) }}{% endif %}</td>
+<td style="white-space:pre-wrap">{{ f.notes or '' }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">None recorded.</td></tr>{% endfor %}</table>
+{% endblock %}
