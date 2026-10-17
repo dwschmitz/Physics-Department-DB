@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS milestones (
 CREATE TABLE IF NOT EXISTS funding (
     id          INTEGER PRIMARY KEY,
     student_id  INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-    kind        TEXT NOT NULL CHECK (kind IN ('TA', 'RA', 'fellowship', 'stipend_supplement', 'other')),
+    kind        TEXT NOT NULL CHECK (kind IN ('TA', 'RA', 'fellowship', 'supplement', 'other')),
     source      TEXT,
     poetaf_coa  TEXT,                   -- POETAF/COA account number
     term_year   INTEGER CHECK (term_year BETWEEN 1950 AND 2100),

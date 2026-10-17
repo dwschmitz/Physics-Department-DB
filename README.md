@@ -65,7 +65,7 @@ person's password and role (for example, to regain admin access if no admin can 
 
 ## Data model (`schema.sql`)
 `students`, `faculty`, `advising` (advisor/committee history with dates), `milestones`
-(qualifier, candidacy, proposal, defense), `funding` (TA/RA/fellowship/stipend supplement by term, with a POETAF/COA account number).
+(qualifier, candidacy, proposal, defense), `funding` (TA/RA/fellowship/supplement by term, with a POETAF/COA account number).
 Terms are a year plus Autumn, Winter, Spring or Summer, chosen from menus and sorted chronologically
 (newest first); `year` is the calendar year in which the term takes place.
 

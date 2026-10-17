@@ -29,8 +29,8 @@ MIN_PASSWORD = 10
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
 MILESTONE_KINDS = ["qualifying_exam", "candidacy", "thesis_proposal", "thesis_defense", "other"]
 OUTCOMES = ["pending", "passed", "conditional", "failed"]
-FUNDING_KINDS = ["TA", "RA", "fellowship", "stipend_supplement", "other"]
-DISPLAY_NAMES = {"stipend_supplement": "Stipend Supplement", "citizen": "Citizen",
+FUNDING_KINDS = ["TA", "RA", "fellowship", "supplement", "other"]
+DISPLAY_NAMES = {"citizen": "Citizen",
                  "permanent_resident": "Permanent Resident", "international": "International"}
 
 CHILD_TABLES = {

@@ -98,6 +98,40 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(clock("Autumn", 2020, "withdrawn"), "—")
         self.assertEqual(clock("Autumn", 2024, "on_leave"), "2.0")
 
+    def test_stipend_supplement_entries_are_renamed_supplement(self):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "stipend.db")
+        c = sqlite3.connect(path)
+        c.executescript("""
+            CREATE TABLE students (id INTEGER PRIMARY KEY, university_id TEXT UNIQUE NOT NULL,
+              first_name TEXT NOT NULL, last_name TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active', matriculation_year INTEGER NOT NULL,
+              expected_grad_year INTEGER, research_area TEXT, notes TEXT);
+            CREATE TABLE funding (id INTEGER PRIMARY KEY,
+              student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+              kind TEXT NOT NULL CHECK (kind IN ('TA', 'RA', 'fellowship', 'stipend_supplement', 'other')),
+              source TEXT, poetaf_coa TEXT,
+              term_year INTEGER CHECK (term_year BETWEEN 1950 AND 2100),
+              term_season TEXT CHECK (term_season IN ('Winter', 'Spring', 'Summer', 'Autumn')),
+              legacy_term TEXT, amount REAL, notes TEXT,
+              CHECK ((term_year IS NULL) = (term_season IS NULL)));
+            CREATE INDEX idx_funding_student ON funding(student_id);
+            INSERT INTO students VALUES (1,'U1','A','B','a@b.c','active',2020,NULL,NULL,NULL);
+            INSERT INTO funding VALUES (1,1,'stipend_supplement','Dept','ACCT',2026,'Autumn',NULL,500,'keep');
+            INSERT INTO funding VALUES (2,1,'RA','NSF',NULL,2026,'Autumn',NULL,3000,NULL);
+        """)
+        c.commit(); c.close()
+        conn = physdb.connect(path)
+        rows = {r["id"]: r for r in conn.execute("SELECT * FROM funding")}
+        self.assertEqual((rows[1]["kind"], rows[1]["amount"], rows[1]["poetaf_coa"], rows[1]["notes"]),
+                         ("supplement", 500.0, "ACCT", "keep"))
+        self.assertEqual(rows[2]["kind"], "RA")
+        self.assertEqual(conn.execute("SELECT count(*) FROM funding WHERE kind = 'stipend_supplement'").fetchone()[0], 0)
+        with self.assertRaises(sqlite3.IntegrityError):     # the old name is no longer accepted
+            physdb.add_funding(conn, "U1", "stipend_supplement", 2027, "Spring")
+        physdb.connect(path)                                # second start changes nothing
+        self.assertEqual(conn.execute("SELECT count(*) FROM funding WHERE kind = 'supplement'").fetchone()[0], 1)
+
     def test_funding_report(self):
         def add(uid, last, status="active"):
             sid = physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=last,
@@ -107,7 +141,7 @@ class PhysDBTests(unittest.TestCase):
             return uid
         add("A1", "Zed"); add("B1", "Yu"); add("C1", "Xi", "on_leave"); add("D1", "Wu", "graduated")
         physdb.add_funding(self.conn, "A1", "RA", 2026, "Autumn", "NSF", 3000, "COA-1", "note a")
-        physdb.add_funding(self.conn, "A1", "stipend_supplement", 2026, "Autumn", None, 500)
+        physdb.add_funding(self.conn, "A1", "supplement", 2026, "Autumn", None, 500)
         physdb.add_funding(self.conn, "A1", "TA", 2026, "Winter", "Dept", 2000)      # other term
         physdb.add_funding(self.conn, "C1", "RA", 2026, "Autumn", "NSF", 1)          # on leave: excluded
         rows = physdb.funding_report(self.conn, 2026, "Autumn")
@@ -115,7 +149,7 @@ class PhysDBTests(unittest.TestCase):
         self.assertIn(("U1001", None, None), who)                  # Ada (setUp): active, nothing recorded
         self.assertIn(("B1", None, None), who)                     # still listed, with empty fields
         self.assertEqual(sorted(w for w in who if w[0] == "A1"),
-                         [("A1", "RA", 3000.0), ("A1", "stipend_supplement", 500.0)])   # one row per entry
+                         [("A1", "RA", 3000.0), ("A1", "supplement", 500.0)])   # one row per entry
         self.assertEqual({w[0] for w in who}, {"U1001", "A1", "B1"})       # on leave / graduated excluded
         a1 = [r for r in rows if r["kind"] == "RA"][0]
         self.assertEqual((a1["source"], a1["poetaf_coa"], a1["notes"]), ("NSF", "COA-1", "note a"))
@@ -257,7 +291,7 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(conn.execute("SELECT notes, poetaf_coa, amount FROM funding WHERE id = 7").fetchone()[:], ("keep me", "ACCT", 100.0))
         self.assertEqual(conn.execute("SELECT legacy_term FROM funding WHERE id = 8").fetchone()[0], "AY 25-26")
-        physdb.add_funding(conn, "U1", "stipend_supplement", 2027, "Spring")
+        physdb.add_funding(conn, "U1", "supplement", 2027, "Spring")
         self.assertEqual(conn.execute("SELECT count(*) FROM funding").fetchone()[0], 3)
         self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name='funding_old'").fetchone()[0], 0)
         self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name='idx_funding_student'").fetchone()[0], 1)

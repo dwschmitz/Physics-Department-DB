@@ -170,7 +170,7 @@ def _stash_old_funding(conn):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(funding)")}
     if "term_year" not in cols:
         why = "text_term"
-    elif "stipend_supplement" not in row[0]:
+    elif "'supplement'" not in row[0]:
         why = "check"
     else:
         return None
@@ -183,8 +183,11 @@ def _restore_old_funding(conn, why="text_term"):
     if why == "check":
         old = {r[1] for r in conn.execute("PRAGMA table_info(funding_old)")}
         new = {r[1] for r in conn.execute("PRAGMA table_info(funding)")}
-        cols = ", ".join(c for c in (r[1] for r in conn.execute("PRAGMA table_info(funding)")) if c in old and c in new)
-        conn.executescript(f"INSERT INTO funding ({cols}) SELECT {cols} FROM funding_old;"
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(funding)") if r[1] in old and r[1] in new]
+        # the 'Stipend Supplement' type was renamed 'Supplement': convert saved entries while copying
+        picks = ", ".join("CASE kind WHEN 'stipend_supplement' THEN 'supplement' ELSE kind END"
+                          if c == "kind" else c for c in cols)
+        conn.executescript(f"INSERT INTO funding ({', '.join(cols)}) SELECT {picks} FROM funding_old;"
                            "DROP TABLE funding_old;")
         conn.commit()
         return
@@ -330,7 +333,7 @@ def funding_report(conn, year, season):
     """One row per funding entry for the term, for every ACTIVE student.
 
     Active students with nothing recorded for that term still appear once, with empty funding fields.
-    A student with several entries (say an RA plus a stipend supplement) gets one row per entry.
+    A student with several entries (say an RA plus a supplement) gets one row per entry.
     """
     return [dict(r) for r in conn.execute(
         """SELECT s.id AS student_id, s.first_name, s.last_name, s.university_id, s.cnet,
@@ -445,7 +448,7 @@ def build_parser():
     a.add_argument("--notes")
 
     a = sub.add_parser("add-funding")
-    a.add_argument("student"); a.add_argument("kind", choices=["TA", "RA", "fellowship", "stipend_supplement", "other"])
+    a.add_argument("student"); a.add_argument("kind", choices=["TA", "RA", "fellowship", "supplement", "other"])
     a.add_argument("year", type=int); a.add_argument("season", type=str.capitalize, choices=SEASONS)
     a.add_argument("--source"); a.add_argument("--amount", type=float)
     a.add_argument("--poetaf-coa", help="POETAF/COA account number"); a.add_argument("--notes")

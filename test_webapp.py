@@ -280,7 +280,7 @@ class WebTests(unittest.TestCase):
                        csrf_token=t, **extra))
             self.assertEqual(r.status_code, 302)
         fund(1, "RA", 2026, "Autumn", source="NSF", poetaf_coa="COA-9", amount="3000", notes="<b>hi</b>")
-        fund(1, "stipend_supplement", 2026, "Autumn", amount="500")
+        fund(1, "supplement", 2026, "Autumn", amount="500")
         fund(2, "TA", 2026, "Winter", amount="100")                 # a different term
         fund(4, "RA", 2026, "Autumn", amount="999")                 # on leave -> not included
         def page(qs=""):
@@ -293,7 +293,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(who(html), [("1", "Aa"), ("1", "Aa"), ("2", "Bb"), ("3", "Cc")])   # 2 rows for Aa; unfunded kept
         self.assertIn("3 active students", html); self.assertIn("1 with funding recorded", html)
         self.assertIn("2 without", html); self.assertIn("total $3,500", html)
-        for needle in ("NSF", "COA-9", "$3,000", "Stipend Supplement", "$500", "cnet1", "&lt;b&gt;hi&lt;/b&gt;"):
+        for needle in ("NSF", "COA-9", "$3,000", "Supplement", "$500", "cnet1", "&lt;b&gt;hi&lt;/b&gt;"):
             self.assertIn(needle, html)
         self.assertNotIn("$999", html); self.assertNotIn("Dd", html)                          # on leave excluded
         self.assertNotIn("<b>hi</b>", html)
@@ -576,16 +576,16 @@ class WebTests(unittest.TestCase):
         self.assertEqual(rows["Curie"], ["0", "1"])
         self.assertIn("Committees", html)
 
-    def test_stipend_supplement_funding_type(self):
+    def test_supplement_funding_type(self):
         c = self.client("ed"); self.add_student(c); t = self.token(c)
         form = c.get("/students/1/funding/new").get_data(as_text=True)
-        self.assertIn('<option value="stipend_supplement" >Stipend Supplement</option>', form)
-        self.assertLess(form.index(">Fellowship<"), form.index(">Stipend Supplement<"))
-        self.assertLess(form.index(">Stipend Supplement<"), form.index(">Other<"))
-        r = c.post("/students/1/funding/new", data=dict(kind="stipend_supplement", term_year="2026",
+        self.assertIn('<option value="supplement" >Supplement</option>', form)
+        self.assertLess(form.index(">Fellowship<"), form.index(">Supplement<"))
+        self.assertLess(form.index(">Supplement<"), form.index(">Other<"))
+        r = c.post("/students/1/funding/new", data=dict(kind="supplement", term_year="2026",
                    term_season="Winter", csrf_token=t))
         self.assertEqual(r.status_code, 302)
-        self.assertIn("Stipend Supplement", c.get("/students/1").get_data(as_text=True))
+        self.assertIn("Supplement", c.get("/students/1").get_data(as_text=True))
         bad = c.post("/students/1/funding/new", data=dict(kind="bonus", term_year="2026",
                      term_season="Winter", csrf_token=t))
         self.assertEqual(bad.status_code, 200)
