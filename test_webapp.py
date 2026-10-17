@@ -534,7 +534,7 @@ class WebTests(unittest.TestCase):
         html, rows = self._report_forms(c, "/reports/funding?season=Autumn&year=2026")
         labels = lambda row: re.findall(r">(Edit|\+|Copy Prev|Clear)</(?:a|button)>", row)
         self.assertEqual([labels(r) for r in rows["1"]],                                         # funded rows; the student's
-                         [["Edit", "Copy Prev", "Clear"], ["Edit", "Copy Prev", "Clear", "+"]])    # last row also offers +
+                         [["Edit", "Clear", "Copy Prev"], ["Edit", "Clear", "Copy Prev", "+"]])    # last row also offers +
         self.assertEqual(labels(rows["2"][0]), ["Copy Prev", "+"])                               # empty rows: the "+" is
         self.assertEqual(labels(rows["3"][0]), ["Copy Prev", "+"])                               # last, as on funded rows
         # every button's own form carries a real CSRF token
