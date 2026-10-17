@@ -268,6 +268,74 @@ class WebTests(unittest.TestCase):
             r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
         self.assertEqual(cells, {"StuU1": "0.0", "StuU2": "1.0", "StuU3": "2.5", "StuU4": "—"})
 
+    def test_funding_report_page(self):
+        from unittest import mock
+        c = self.client("ed"); t = self.token(c)
+        for i, (last, status) in enumerate((("Aa", "active"), ("Bb", "active"), ("Cc", "active"),
+                                            ("Dd", "on_leave"), ("Ee", "graduated")), 1):
+            self.add_student(c, university_id=f"U{i}", email=f"s{i}@u.edu", first_name="Stu", last_name=last,
+                             status=status, cnet=f"cnet{i}")
+        def fund(sid, kind, year, season, **extra):
+            r = c.post(f"/students/{sid}/funding/new", data=dict(kind=kind, term_year=year, term_season=season,
+                       csrf_token=t, **extra))
+            self.assertEqual(r.status_code, 302)
+        fund(1, "RA", 2026, "Autumn", source="NSF", poetaf_coa="COA-9", amount="3000", notes="<b>hi</b>")
+        fund(1, "stipend_supplement", 2026, "Autumn", amount="500")
+        fund(2, "TA", 2026, "Winter", amount="100")                 # a different term
+        fund(4, "RA", 2026, "Autumn", amount="999")                 # on leave -> not included
+        def page(qs=""):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return c.get("/reports/funding?" + qs).get_data(as_text=True)
+        html = page()                                               # defaults to the current term
+        self.assertIn("Funding for Autumn 2026", html)
+        self.assertIn("<option selected>Autumn</option>", html); self.assertIn("<option selected>2026</option>", html)
+        who = lambda h: re.findall(r"/students/(\d+)\">(\w+),", h)
+        self.assertEqual(who(html), [("1", "Aa"), ("1", "Aa"), ("2", "Bb"), ("3", "Cc")])   # 2 rows for Aa; unfunded kept
+        self.assertIn("3 active students", html); self.assertIn("1 with funding recorded", html)
+        self.assertIn("2 without", html); self.assertIn("total $3,500", html)
+        for needle in ("NSF", "COA-9", "$3,000", "Stipend Supplement", "$500", "cnet1", "&lt;b&gt;hi&lt;/b&gt;"):
+            self.assertIn(needle, html)
+        self.assertNotIn("$999", html); self.assertNotIn("Dd", html)                          # on leave excluded
+        self.assertNotIn("<b>hi</b>", html)
+        row_cc = re.search(r"/students/3\">Cc.*?</tr>", html, re.S).group(0)
+        cells = re.findall(r"<td[^>]*>([^<]*)</td>", row_cc)      # the name cell holds a link, so: ID, CNET, advisor,
+        self.assertEqual(len(cells), 8)                           # then type, source, POETAF/COA, amount, notes
+        self.assertEqual(cells[:2], ["U3", "cnet3"])
+        self.assertEqual([x for x in cells[3:] if x], [])         # every funding field is empty
+        # other terms, sorting, and bad input
+        self.assertEqual(who(page("season=Winter&year=2026")), [("1", "Aa"), ("2", "Bb"), ("3", "Cc")])
+        self.assertIn("total $100", page("season=Winter&year=2026"))
+        self.assertEqual(who(page("sort=amount&dir=desc")), [("1", "Aa"), ("1", "Aa"), ("2", "Bb"), ("3", "Cc")])
+        self.assertEqual(who(page("sort=name&dir=desc")), [("3", "Cc"), ("2", "Bb"), ("1", "Aa"), ("1", "Aa")])
+        self.assertIn("Funding for Autumn 2026", page("year=abc&season=Fall"))
+        self.assertIn("Funding for Autumn 2026", page("year=1800"))
+        # tabs and a visible link from the Reports page
+        self.assertIn("Funding by term", c.get("/reports").get_data(as_text=True))
+        self.assertIn("Behind schedule", html)
+        # CSV
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            resp = c.get("/reports/funding.csv?season=Autumn&year=2026")
+        self.assertEqual(resp.mimetype, "text/csv")
+        self.assertIn("funding_Autumn_2026.csv", resp.headers["Content-Disposition"])
+        lines = resp.get_data(as_text=True).strip().splitlines()
+        self.assertEqual(lines[0], "Last name,First name,University ID,CNET,Advisor,Term,Type,Source,POETAF/COA,Amount,Notes")
+        self.assertEqual(len(lines), 5)                                   # header + 4 rows
+        self.assertTrue(any("Aa,Stu,U1,cnet1,,Autumn 2026,RA,NSF,COA-9,3000.0" in l for l in lines))
+        self.assertTrue(any(l.startswith("Cc,Stu,U3,cnet3,,Autumn 2026,,,,,") for l in lines))   # unfunded: blanks
+
+    def test_funding_report_access_and_undated_warning(self):
+        anon = self.app.test_client()
+        self.assertEqual(anon.get("/reports/funding").status_code, 302)
+        self.assertEqual(anon.get("/reports/funding.csv").status_code, 302)
+        ed = self.client("ed"); self.add_student(ed)
+        self.assertEqual(self.client("vw").get("/reports/funding").status_code, 200)          # viewers may read
+        self.assertNotIn("no term yet", ed.get("/reports/funding").get_data(as_text=True))
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        conn.execute("INSERT INTO funding (student_id, kind, legacy_term) VALUES (1, 'TA', 'AY 25-26')")
+        conn.commit(); conn.close()
+        text = " ".join(ed.get("/reports/funding").get_data(as_text=True).split())     # ignore line breaks
+        self.assertIn("1 funding entry of active students has no term yet", text)
+
     def test_search_matches_advisor(self):
         c = self.client("ed"); t = self.token(c)
         for i, last in enumerate(("Aa", "Bb", "Cc", "Dd", "Ee"), 1):

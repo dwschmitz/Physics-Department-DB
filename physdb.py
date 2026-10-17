@@ -326,6 +326,32 @@ def list_students(conn, status=None, advisor=None, year=None, committee=None):
     return conn.execute(sql + " ORDER BY s.last_name, s.first_name", params).fetchall()
 
 
+def funding_report(conn, year, season):
+    """One row per funding entry for the term, for every ACTIVE student.
+
+    Active students with nothing recorded for that term still appear once, with empty funding fields.
+    A student with several entries (say an RA plus a stipend supplement) gets one row per entry.
+    """
+    return [dict(r) for r in conn.execute(
+        """SELECT s.id AS student_id, s.first_name, s.last_name, s.university_id, s.cnet,
+                  (SELECT group_concat(fa.last_name, ', ') FROM advising a
+                     JOIN faculty fa ON fa.id = a.faculty_id
+                    WHERE a.student_id = s.id AND a.end_date IS NULL
+                      AND a.role IN ('advisor', 'co-advisor')) AS advisors,
+                  f.id AS funding_id, f.kind, f.source, f.poetaf_coa, f.amount, f.notes
+           FROM students s
+           LEFT JOIN funding f ON f.student_id = s.id AND f.term_year = ? AND f.term_season = ?
+           WHERE s.status = 'active'
+           ORDER BY s.last_name, s.first_name, s.id, f.id""", (year, season))]
+
+
+def undated_funding_count(conn):
+    """Funding entries of active students that have no term yet (left over from free-text terms)."""
+    return conn.execute(
+        """SELECT count(*) FROM funding f JOIN students s ON s.id = f.student_id
+           WHERE f.term_year IS NULL AND s.status = 'active'""").fetchone()[0]
+
+
 def missing_milestone(conn, kind, min_years=2):
     """Active students who matriculated >= min_years ago and have no passed `kind`."""
     cutoff = datetime.date.today().year - min_years

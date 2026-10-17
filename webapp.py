@@ -626,6 +626,58 @@ def create_app(db_path=None):
         return render_template("reports.html", rows=rows, kind=kind, years=years, kinds=MILESTONE_KINDS,
                                sort=sort, sdir=sdir)
 
+    def funding_report_data():
+        """Parse ?year=&season=&sort=&dir= and build the sorted report rows."""
+        now_season, now_year = physdb.current_term()[0], physdb.current_term()[1]
+        try:
+            year = int(request.args.get("year", now_year))
+        except ValueError:
+            year = now_year
+        if year not in [y for y, _ in term_years()]:
+            year = now_year
+        season = request.args.get("season", now_season)
+        if season not in physdb.SEASONS:
+            season = now_season
+        rows = physdb.funding_report(db(), year, season)
+        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]), r["student_id"])
+        rows, sort, sdir = sort_rows(rows, {
+            "name": name,
+            "university_id": lambda r: _text(r["university_id"]),
+            "cnet": lambda r: _text(r["cnet"]),
+            "advisor": lambda r: _text(r["advisors"]),
+            "type": lambda r: _text(label(r["kind"]) if r["kind"] else None),
+            "source": lambda r: _text(r["source"]),
+            "poetaf_coa": lambda r: _text(r["poetaf_coa"]),
+            "amount": lambda r: r["amount"],
+        }, request.args.get("sort"), request.args.get("dir"), "name")
+        return rows, year, season, sort, sdir
+
+    @app.route("/reports/funding")
+    def funding_report():
+        rows, year, season, sort, sdir = funding_report_data()
+        students = {r["student_id"] for r in rows}
+        funded = {r["student_id"] for r in rows if r["funding_id"] is not None}
+        return render_template(
+            "funding_report.html", rows=rows, year=year, season=season, sort=sort, sdir=sdir,
+            years=term_years(), seasons=physdb.SEASONS, n_students=len(students), n_funded=len(funded),
+            total=sum(r["amount"] or 0 for r in rows), undated=physdb.undated_funding_count(db()))
+
+    @app.route("/reports/funding.csv")
+    def funding_report_csv():
+        import csv, io
+        rows, year, season, _, _ = funding_report_data()
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["Last name", "First name", "University ID", "CNET", "Advisor", "Term", "Type", "Source",
+                    "POETAF/COA", "Amount", "Notes"])
+        for r in rows:
+            w.writerow([physdb._csv_safe(v) if v is not None else "" for v in (
+                r["last_name"], r["first_name"], r["university_id"], r["cnet"], r["advisors"],
+                f"{season} {year}", label(r["kind"]) if r["kind"] else None, r["source"], r["poetaf_coa"],
+                r["amount"], r["notes"])])
+        return Response(buf.getvalue(), mimetype="text/csv", headers={
+            "Content-Disposition": f"attachment; filename=funding_{season}_{year}.csv"})
+
     @app.route("/export.csv")
     def export():
         import io

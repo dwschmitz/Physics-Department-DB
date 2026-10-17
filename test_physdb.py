@@ -98,6 +98,31 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(clock("Autumn", 2020, "withdrawn"), "—")
         self.assertEqual(clock("Autumn", 2024, "on_leave"), "2.0")
 
+    def test_funding_report(self):
+        def add(uid, last, status="active"):
+            sid = physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=last,
+                                     email=f"{uid}@m.o", matriculation_year=2022, expected_grad_year=None,
+                                     research_area=None, notes=None)
+            self.conn.execute("UPDATE students SET status = ? WHERE id = ?", (status, sid))
+            return uid
+        add("A1", "Zed"); add("B1", "Yu"); add("C1", "Xi", "on_leave"); add("D1", "Wu", "graduated")
+        physdb.add_funding(self.conn, "A1", "RA", 2026, "Autumn", "NSF", 3000, "COA-1", "note a")
+        physdb.add_funding(self.conn, "A1", "stipend_supplement", 2026, "Autumn", None, 500)
+        physdb.add_funding(self.conn, "A1", "TA", 2026, "Winter", "Dept", 2000)      # other term
+        physdb.add_funding(self.conn, "C1", "RA", 2026, "Autumn", "NSF", 1)          # on leave: excluded
+        rows = physdb.funding_report(self.conn, 2026, "Autumn")
+        who = [(r["university_id"], r["kind"], r["amount"]) for r in rows]
+        self.assertIn(("U1001", None, None), who)                  # Ada (setUp): active, nothing recorded
+        self.assertIn(("B1", None, None), who)                     # still listed, with empty fields
+        self.assertEqual(sorted(w for w in who if w[0] == "A1"),
+                         [("A1", "RA", 3000.0), ("A1", "stipend_supplement", 500.0)])   # one row per entry
+        self.assertEqual({w[0] for w in who}, {"U1001", "A1", "B1"})       # on leave / graduated excluded
+        a1 = [r for r in rows if r["kind"] == "RA"][0]
+        self.assertEqual((a1["source"], a1["poetaf_coa"], a1["notes"]), ("NSF", "COA-1", "note a"))
+        self.assertEqual([w for w in physdb.funding_report(self.conn, 2026, "Winter") if w["kind"]][0]["kind"], "TA")
+        self.assertEqual(len(physdb.funding_report(self.conn, 1999, "Spring")), 3)       # all blank
+        self.assertEqual(physdb.undated_funding_count(self.conn), 0)
+
     def test_cnet(self):
         sid = physdb.add_student(self.conn, university_id="U20", first_name="N", last_name="M", email="n@m.o",
                                  matriculation_year=2023, expected_grad_year=None, research_area=None,

@@ -1,4 +1,5 @@
 {% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
+{% set tab = 'behind' %}{% include "_report_tabs.html" %}
 <h1>Students who may be behind schedule</h1>
 <form class="filters" method="get">
   <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ sdir }}">

@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
+{% set tab = 'funding' %}{% include "_report_tabs.html" %}
+<h1>Funding for {{ season }} {{ year }}</h1>
+<form class="filters" method="get">
+  <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ sdir }}">
+  <label>Term<select name="season">
+    {% for s in seasons %}<option {{ 'selected' if s == season }}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Year<select name="year">
+    {% for y, _ in years %}<option {{ 'selected' if y == year }}>{{ y }}</option>{% endfor %}</select></label>
+  <button class="btn">Show report</button>
+  <a class="btn secondary" href="{{ url_for('funding_report_csv', year=year, season=season, sort=sort, dir=sdir) }}">Download CSV</a>
+</form>
+<p class="muted">{{ n_students }} active student{{ '' if n_students == 1 else 's' }}
+  &middot; {{ n_funded }} with funding recorded for this term
+  &middot; {{ n_students - n_funded }} without
+  &middot; total ${{ '{:,.0f}'.format(total) }}</p>
+{% if undated %}<div class="flash error">{{ undated }} funding entr{{ 'y' if undated == 1 else 'ies' }} of active students
+  {{ 'has' if undated == 1 else 'have' }} no term yet (marked &ldquo;please re-enter&rdquo; on the student&rsquo;s page) and
+  {{ 'is' if undated == 1 else 'are' }} not included here.</div>{% endif %}
+<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("University ID", "university_id", sort, sdir) }}{{ sort_th("CNET", "cnet", sort, sdir) }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Type", "type", sort, sdir) }}{{ sort_th("Source", "source", sort, sdir) }}{{ sort_th("POETAF/COA", "poetaf_coa", sort, sdir) }}{{ sort_th("Amount", "amount", sort, sdir) }}<th>Notes</th></tr>
+{% for r in rows %}<tr><td style="white-space:nowrap"><a href="{{ url_for('student', sid=r.student_id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
+<td>{{ r.university_id }}</td><td>{{ r.cnet or '' }}</td><td>{{ r.advisors or '' }}</td>
+<td>{{ r.kind|label if r.kind else '' }}</td><td>{{ r.source or '' }}</td><td style="white-space:nowrap">{{ r.poetaf_coa or '' }}</td>
+<td>{% if r.amount is not none %}${{ '{:,.0f}'.format(r.amount) }}{% endif %}</td>
+<td style="white-space:pre-wrap">{{ r.notes or '' }}</td></tr>
+{% else %}<tr><td colspan="9" class="muted">There are no active students.</td></tr>{% endfor %}</table>
+{% endblock %}
