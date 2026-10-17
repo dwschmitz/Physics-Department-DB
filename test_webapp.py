@@ -250,6 +250,23 @@ class WebTests(unittest.TestCase):
         self.assertEqual(who("faculty=1&role=bogus"), ["Stu1", "Stu2", "Stu3", "Stu4"])
         self.assertEqual(who("faculty=abc"), ["Stu1", "Stu2", "Stu3", "Stu4", "Stu5"])
 
+    def test_advisors_listed_in_role_order(self):
+        c = self.client("ed"); t = self.token(c); self.add_student(c)
+        names = ["Aaron", "Bravo", "Carter", "Dunn", "Evans", "Fox"]
+        for n in names:
+            c.post("/faculty/new", data=dict(first_name="P", last_name=n, email=f"{n}@u.edu", csrf_token=t))
+        def assign(fid, role, end=""):
+            c.post("/students/1/advising/new", data=dict(faculty_id=fid, role=role, start_date="2024-01-01",
+                   end_date=end, csrf_token=t))
+        # entered in scrambled order, with alphabetically-first people on the lowest-ranked roles
+        assign(1, "committee"); assign(2, "committee_chair"); assign(6, "co-advisor")
+        assign(5, "committee"); assign(4, "advisor"); assign(3, "advisor", end="2025-01-01")
+        page = c.get("/students/1").get_data(as_text=True)
+        section = page[page.index("Advisors"):page.index("Milestones")]
+        order = [n for n in sorted(names, key=section.index) if n in section]
+        self.assertEqual(order, ["Dunn", "Fox", "Bravo", "Aaron", "Evans", "Carter"])
+        #   advisor, co-advisor, chair, members (alphabetical), then the ended advisor last
+
     def test_faculty_committee_count(self):
         c = self.client("ed"); t = self.token(c)
         for i in (1, 2, 3):

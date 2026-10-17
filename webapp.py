@@ -441,9 +441,9 @@ def create_app(db_path=None):
     def student(sid):
         s = get_or_404("students", sid)
         d = db()
-        advising = d.execute("""SELECT a.*, f.first_name, f.last_name FROM advising a
+        advising = d.execute(f"""SELECT a.*, f.first_name, f.last_name FROM advising a
                                 JOIN faculty f ON f.id = a.faculty_id WHERE a.student_id = ?
-                                ORDER BY a.end_date IS NOT NULL, a.start_date DESC""", (sid,)).fetchall()
+                                ORDER BY {physdb.ADVISING_ORDER_SQL}""", (sid,)).fetchall()
         milestones = d.execute("SELECT * FROM milestones WHERE student_id = ? ORDER BY date", (sid,)).fetchall()
         funding = d.execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
                             (sid,)).fetchall()

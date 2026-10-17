@@ -170,6 +170,16 @@ class PhysDBTests(unittest.TestCase):
         physdb.connect(path)   # second start is a no-op
         self.assertEqual(conn.execute("SELECT count(*) FROM funding").fetchone()[0], 3)
 
+    def test_show_student_lists_advisor_first(self):
+        for last, role in (("Zed", "committee"), ("Yu", "committee_chair"), ("Bohr2", "advisor")):
+            fid = physdb.add_faculty(self.conn, "P", last, f"{last}@u.edu")
+            physdb.assign_advisor(self.conn, "U1001", fid, role, "2024-01-01")
+        text = physdb.show_student(self.conn, "U1001")
+        order = sorted(("Bohr2", "Yu", "Zed"), key=text.index)
+        self.assertEqual(order, ["Bohr2", "Yu", "Zed"])
+        self.assertLess(text.index("advisor: P Bohr2"), text.index("committee_chair: P Yu"))
+        self.assertLess(text.index("committee_chair: P Yu"), text.index("committee: P Zed"))
+
     def test_export(self):
         buf = io.StringIO()
         physdb.export_csv(self.conn, buf)

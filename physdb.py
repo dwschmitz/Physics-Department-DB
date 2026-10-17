@@ -22,6 +22,14 @@ SEASON_RANK_SQL = ("CASE term_season WHEN 'Winter' THEN 1 WHEN 'Spring' THEN 2 "
 FUNDING_ORDER_SQL = f"term_year IS NULL, term_year DESC, {SEASON_RANK_SQL} DESC, id DESC"
 
 
+# ORDER BY fragment for a student's advisors/committee (tables aliased `a` = advising, `f` = faculty):
+# current entries first, then ended ones; within each: advisor, co-advisor, committee chair, members.
+ADVISING_ORDER_SQL = ("a.end_date IS NOT NULL, "
+                      "CASE a.role WHEN 'advisor' THEN 1 WHEN 'co-advisor' THEN 2 "
+                      "WHEN 'committee_chair' THEN 3 WHEN 'committee' THEN 4 ELSE 5 END, "
+                      "f.last_name, f.first_name, a.start_date")
+
+
 def connect(path=DB_PATH):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
@@ -251,9 +259,9 @@ def show_student(conn, key):
         out.append(f"  Notes: {s['notes']}")
     out.append("  Advisors:")
     for r in conn.execute(
-            """SELECT f.first_name, f.last_name, a.role, a.start_date, a.end_date
+            f"""SELECT f.first_name, f.last_name, a.role, a.start_date, a.end_date
                FROM advising a JOIN faculty f ON f.id = a.faculty_id
-               WHERE a.student_id = ? ORDER BY a.start_date""", (s["id"],)):
+               WHERE a.student_id = ? ORDER BY {ADVISING_ORDER_SQL}""", (s["id"],)):
         end = r["end_date"] or "present"
         out.append(f"    {r['role']}: {r['first_name']} {r['last_name']} ({r['start_date']} – {end})")
     out.append("  Milestones:")
