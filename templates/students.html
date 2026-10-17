@@ -6,8 +6,10 @@
     {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if s == status }}>{{ s|label }}</option>{% endfor %}</select></label>
   <label>Program<select name="program"><option value="">Any</option>
     {% for p in programs %}<option {{ 'selected' if p == program }}>{{ p }}</option>{% endfor %}</select></label>
-  <label>Advisor<select name="advisor"><option value="">Any</option>
-    {% for f in faculty %}<option value="{{ f.id }}" {{ 'selected' if advisor == f.id|string }}>{{ f.last_name }}, {{ f.first_name }}</option>{% endfor %}</select></label>
+  <label>Faculty member<select name="faculty"><option value="">Any</option>
+    {% for f in faculty %}<option value="{{ f.id }}" {{ 'selected' if faculty_id == f.id|string }}>{{ f.last_name }}, {{ f.first_name }}</option>{% endfor %}</select></label>
+  <label title="Advisor includes co-advisors. Committee member only leaves out students this person also advises.">Their role<select name="role">
+    {% for key, text in role_filters.items() %}<option value="{{ key }}" {{ 'selected' if role == key }}>{{ text }}</option>{% endfor %}</select></label>
   <button class="btn">Filter</button> <a class="btn secondary" href="{{ url_for('students') }}">Clear</a>
   {% if can_edit %}<a class="btn" href="{{ url_for('student_new') }}">+ Add student</a>{% endif %}
   <a class="btn secondary" href="{{ url_for('export') }}">Download CSV</a>

@@ -10,7 +10,8 @@ python3 physdb.py assign-advisor U1001 bohr@uni.edu            # --role co-advis
 python3 physdb.py add-milestone U1001 qualifying_exam 2024-05-01 --outcome passed
 python3 physdb.py add-funding U1001 TA 2026 Autumn --source Dept --amount 12000 --poetaf-coa 1234567
 python3 physdb.py set-status U1001 on_leave
-python3 physdb.py list --status active --advisor bohr@uni.edu --year 2022
+python3 physdb.py list --status active --advisor bohr@uni.edu --year 2022   # students Bohr advises
+python3 physdb.py list --committee bohr@uni.edu                              # students where Bohr is only on the committee
 python3 physdb.py show U1001
 python3 physdb.py missing qualifying_exam --min-years 2        # students behind schedule
 python3 physdb.py export > students.csv

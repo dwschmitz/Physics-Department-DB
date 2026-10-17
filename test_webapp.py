@@ -224,6 +224,30 @@ class WebTests(unittest.TestCase):
         self.assertEqual(order, sorted(order))   # newest first, chronological within a year
         self.assertIn("&lt;b&gt;9", page)        # account number is escaped
 
+    def test_student_filter_advisor_vs_committee(self):
+        c = self.client("ed"); t = self.token(c)
+        for i in range(1, 6):
+            self.add_student(c, university_id=f"U{i}", email=f"s{i}@u.edu", last_name=f"Stu{i}")
+        for name in ("Bohr", "Curie"):
+            c.post("/faculty/new", data=dict(first_name="X", last_name=name, email=f"{name}@u.edu", csrf_token=t))
+        def assign(sid, fid, role, end=""):
+            c.post(f"/students/{sid}/advising/new", data=dict(faculty_id=fid, role=role,
+                   start_date="2024-01-01", end_date=end, csrf_token=t))
+        assign(1, 1, "advisor"); assign(2, 1, "committee"); assign(3, 2, "advisor")
+        assign(3, 1, "committee_chair"); assign(4, 1, "advisor"); assign(4, 1, "committee")
+        assign(5, 1, "advisor", end="2025-01-01")
+        def who(qs):
+            html = c.get("/students?" + qs).get_data(as_text=True)
+            return sorted(set(__import__("re").findall(r"Stu\d", html)))
+        self.assertEqual(who("faculty=1&role=advisor"), ["Stu1", "Stu4"])
+        self.assertEqual(who("faculty=1&role=committee"), ["Stu2", "Stu3"])
+        self.assertEqual(who("faculty=1&role=any"), ["Stu1", "Stu2", "Stu3", "Stu4"])
+        self.assertEqual(who("faculty=1"), ["Stu1", "Stu2", "Stu3", "Stu4"])
+        self.assertEqual(who("faculty=2&role=committee"), [])
+        self.assertEqual(who("role=advisor"), ["Stu1", "Stu3", "Stu4"])        # anyone with a current advisor
+        self.assertEqual(who("faculty=1&role=bogus"), ["Stu1", "Stu2", "Stu3", "Stu4"])
+        self.assertEqual(who("faculty=abc"), ["Stu1", "Stu2", "Stu3", "Stu4", "Stu5"])
+
     def test_faculty_committee_count(self):
         c = self.client("ed"); t = self.token(c)
         for i in (1, 2, 3):

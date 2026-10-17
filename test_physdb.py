@@ -30,6 +30,27 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(len(physdb.list_students(self.conn, advisor="bohr@uni.edu")), 1)
         self.assertIn("Niels Bohr", physdb.show_student(self.conn, "U1001"))
 
+    def test_advisor_and_committee_filters_are_distinct(self):
+        def add(uid):
+            return physdb.add_student(self.conn, university_id=uid, first_name=uid, last_name=uid,
+                                      email=f"{uid}@u.edu", program="PhD", start_year=2022,
+                                      expected_grad_year=None, research_area=None, notes=None)
+        physdb.add_faculty(self.conn, "Marie", "Curie", "curie@uni.edu")
+        for uid in ("A", "B", "C", "D", "E"):
+            add(uid)
+        a = physdb.assign_advisor
+        a(self.conn, "A", "bohr@uni.edu", "advisor"); a(self.conn, "B", "bohr@uni.edu", "committee")
+        a(self.conn, "C", "curie@uni.edu", "advisor"); a(self.conn, "C", "bohr@uni.edu", "committee_chair")
+        a(self.conn, "D", "bohr@uni.edu", "advisor"); a(self.conn, "D", "bohr@uni.edu", "committee")
+        a(self.conn, "E", "bohr@uni.edu", "co-advisor")
+        names = lambda rows: sorted(r["university_id"] for r in rows)
+        self.assertEqual(names(physdb.list_students(self.conn, advisor="bohr@uni.edu")), ["A", "D", "E"])
+        self.assertEqual(names(physdb.list_students(self.conn, committee="bohr@uni.edu")), ["B", "C"])
+        self.assertEqual(names(physdb.list_students(self.conn, advisor="curie@uni.edu")), ["C"])
+        self.assertEqual(names(physdb.list_students(self.conn, advisor="curie@uni.edu",
+                                                    committee="bohr@uni.edu")), ["C"])
+        self.assertEqual(physdb.list_students(self.conn, advisor="curie@uni.edu", committee="curie@uni.edu"), [])
+
     def test_missing_milestone(self):
         self.assertEqual(len(physdb.missing_milestone(self.conn, "qualifying_exam")), 1)
         physdb.add_milestone(self.conn, "U1001", "qualifying_exam", "2022-05-01", "passed")

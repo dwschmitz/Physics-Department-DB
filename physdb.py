@@ -156,18 +156,39 @@ def set_status(conn, student, status):
     conn.commit()
 
 
-def list_students(conn, status=None, advisor=None, year=None):
-    sql = """SELECT DISTINCT s.* FROM students s
-             LEFT JOIN advising a ON a.student_id = s.id AND a.end_date IS NULL
-             WHERE 1=1"""
-    params = []
+def faculty_role_clause(role, faculty_id=None):
+    """SQL condition (on a students row aliased `s`) for a current advising relationship.
+
+    role 'advisor':   advisor or co-advisor.
+    role 'committee': committee member or chair, but NOT students the same person also advises.
+    role 'any':       any current role.
+    faculty_id restricts to one faculty member; None means any faculty member.
+    """
+    conds, params = ["a.student_id = s.id", "a.end_date IS NULL"], []
+    if faculty_id is not None:
+        conds.append("a.faculty_id = ?"); params.append(faculty_id)
+    if role == "advisor":
+        conds.append("a.role IN ('advisor', 'co-advisor')")
+    elif role == "committee":
+        conds.append("a.role IN ('committee', 'committee_chair')")
+        conds.append("NOT EXISTS (SELECT 1 FROM advising b WHERE b.student_id = a.student_id "
+                     "AND b.faculty_id = a.faculty_id AND b.end_date IS NULL "
+                     "AND b.role IN ('advisor', 'co-advisor'))")
+    return f"EXISTS (SELECT 1 FROM advising a WHERE {' AND '.join(conds)})", params
+
+
+def list_students(conn, status=None, advisor=None, year=None, committee=None):
+    """advisor: students this faculty member advises. committee: students for whom they are
+    only on the committee (not also the advisor). Both may be combined."""
+    sql, params = "SELECT s.* FROM students s WHERE 1=1", []
     if status:
         sql += " AND s.status = ?"; params.append(status)
     if year:
         sql += " AND s.start_year = ?"; params.append(year)
-    if advisor:
-        f = _find(conn, "faculty", advisor)
-        sql += " AND a.faculty_id = ?"; params.append(f["id"])
+    for who, role in ((advisor, "advisor"), (committee, "committee")):
+        if who:
+            clause, p = faculty_role_clause(role, _find(conn, "faculty", who)["id"])
+            sql += f" AND {clause}"; params += p
     return conn.execute(sql + " ORDER BY s.last_name, s.first_name", params).fetchall()
 
 
@@ -269,7 +290,9 @@ def build_parser():
                    choices=["active", "on_leave", "graduated", "withdrawn"])
 
     a = sub.add_parser("list")
-    a.add_argument("--status"); a.add_argument("--advisor"); a.add_argument("--year", type=int)
+    a.add_argument("--status"); a.add_argument("--year", type=int)
+    a.add_argument("--advisor", help="students this faculty member advises (advisor or co-advisor)")
+    a.add_argument("--committee", help="students for whom this faculty member is only on the committee")
 
     a = sub.add_parser("show"); a.add_argument("student")
 
@@ -301,7 +324,7 @@ def main(argv=None):
         elif c == "set-status":
             set_status(conn, args.student, args.status)
         elif c == "list":
-            for r in list_students(conn, args.status, args.advisor, args.year):
+            for r in list_students(conn, args.status, args.advisor, args.year, args.committee):
                 print(_row_line(r))
         elif c == "show":
             print(show_student(conn, args.student))

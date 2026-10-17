@@ -22,6 +22,8 @@ import physdb
 
 STATUSES = ["active", "on_leave", "graduated", "withdrawn"]
 PROGRAMS = ["PhD", "MS"]
+FACULTY_ROLE_FILTERS = {"any": "Any role", "advisor": "Advisor",
+                        "committee": "Committee member only"}
 ACCOUNT_ROLES = ["viewer", "editor", "admin"]
 MIN_PASSWORD = 10
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
@@ -404,7 +406,10 @@ def create_app(db_path=None):
         q = request.args.get("q", "").strip()
         status = request.args.get("status", "")
         program = request.args.get("program", "")
-        advisor = request.args.get("advisor", "")
+        faculty_id = request.args.get("faculty", "")
+        role = request.args.get("role", "any")
+        if role not in FACULTY_ROLE_FILTERS:
+            role = "any"
         sql = """SELECT s.*, (SELECT group_concat(f.last_name, ', ') FROM advising a
                   JOIN faculty f ON f.id = a.faculty_id
                   WHERE a.student_id = s.id AND a.end_date IS NULL AND a.role IN ('advisor','co-advisor'))
@@ -419,14 +424,14 @@ def create_app(db_path=None):
             sql += " AND s.status = ?"; params.append(status)
         if program in PROGRAMS:
             sql += " AND s.program = ?"; params.append(program)
-        if advisor.isdigit():
-            sql += " AND EXISTS (SELECT 1 FROM advising a WHERE a.student_id = s.id " \
-                   "AND a.faculty_id = ? AND a.end_date IS NULL)"
-            params.append(int(advisor))
+        if faculty_id.isdigit() or role != "any":
+            clause, p = physdb.faculty_role_clause(role, int(faculty_id) if faculty_id.isdigit() else None)
+            sql += f" AND {clause}"; params += p
         rows = db().execute(sql + " ORDER BY s.last_name, s.first_name", params).fetchall()
         faculty = db().execute("SELECT id, last_name, first_name FROM faculty ORDER BY last_name").fetchall()
         return render_template("students.html", rows=rows, faculty=faculty, q=q, status=status,
-                               program=program, advisor=advisor, statuses=STATUSES, programs=PROGRAMS)
+                               program=program, faculty_id=faculty_id, role=role, role_filters=FACULTY_ROLE_FILTERS,
+                               statuses=STATUSES, programs=PROGRAMS)
 
     @app.route("/students/new", methods=["GET", "POST"])
     def student_new():
