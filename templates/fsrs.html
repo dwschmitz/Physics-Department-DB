@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
+<h1>FSRs {% if can_edit %}<a class="btn small" href="{{ url_for('fsr_new') }}">+ Add FSR</a>{% endif %}</h1>
+<p class="muted">Financial services reps, who help manage funding accounts for faculty and the department. Choose a faculty member's FSR on the faculty member's edit page.</p>
+<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Email", "email", sort, sdir) }}{{ sort_th("CNET", "cnet", sort, sdir) }}{{ sort_th("Faculty", "faculty", sort, sdir) }}</tr>
+{% for r in rows %}<tr><td><a href="{{ url_for('fsr_detail', rid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
+<td>{{ r.email }}</td><td>{{ r.cnet or '' }}</td>
+<td>{% for f in r.faculty %}<a href="{{ url_for('faculty_detail', fid=f.id) }}">{{ f.last_name }}, {{ f.first_name }}</a>{{ '; ' if not loop.last }}{% endfor %}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">No FSRs yet.</td></tr>{% endfor %}</table>{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% from "_macros.html" import delete_button with context %}{% block body %}
+<h1>{{ fsr.first_name }} {{ fsr.last_name }} <span class="muted">(FSR)</span></h1>
+<p class="toolbar"><a href="{{ url_for('fsr_list') }}">&larr; All FSRs</a>
+{% if can_edit %} <a class="btn small" href="{{ url_for('fsr_edit', rid=fsr.id) }}">Edit</a>
+ {{ delete_button(url_for('fsr_delete', rid=fsr.id), 'Delete this FSR? Faculty listed with them will have no FSR, and their login account (if any) is removed.') }}{% endif %}</p>
+<dl><dt>Email</dt><dd>{{ fsr.email }}</dd><dt>CNET</dt><dd>{{ fsr.cnet or '—' }}</dd>
+<dt>Faculty</dt><dd>{% for f in faculty %}<a href="{{ url_for('faculty_detail', fid=f.id) }}">{{ f.first_name }} {{ f.last_name }}</a>{{ ', ' if not loop.last }}{% else %}—{% endfor %}</dd></dl>
+{% set staff_view = True %}{% include "_fsr_overview.html" %}
+{% endblock %}

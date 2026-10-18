@@ -20,13 +20,23 @@ CREATE TABLE IF NOT EXISTS students (
     notes               TEXT
 );
 
+-- Financial services representatives: they help manage funding accounts for faculty and the department.
+CREATE TABLE IF NOT EXISTS fsrs (
+    id          INTEGER PRIMARY KEY,
+    first_name  TEXT NOT NULL,
+    last_name   TEXT NOT NULL,
+    email       TEXT UNIQUE NOT NULL,
+    cnet        TEXT    -- CNET ID, lowercase; unique when present (index made in physdb.connect)
+);
+
 CREATE TABLE IF NOT EXISTS faculty (
     id             INTEGER PRIMARY KEY,
     first_name     TEXT NOT NULL,
     last_name      TEXT NOT NULL,
     email          TEXT UNIQUE NOT NULL,
     cnet           TEXT,   -- CNET ID, lowercase; unique when present (index made in physdb.connect)
-    research_area  TEXT
+    research_area  TEXT,
+    fsr_id         INTEGER REFERENCES fsrs(id) ON DELETE SET NULL   -- this faculty member's FSR, if any
 );
 
 -- A student may have several advisors / committee members over time.
@@ -75,14 +85,16 @@ CREATE INDEX IF NOT EXISTS idx_funding_student    ON funding(student_id);
 
 -- Web interface logins. 'viewer' can read; 'editor' can also add/change/delete records;
 -- 'admin' can additionally manage accounts; 'faculty' is a faculty member who can see only their own
--- advisees and committee students (faculty_id says which faculty member; their username is their CNET).
+-- advisees and committee students (faculty_id says which faculty member; their username is their CNET);
+-- 'fsr' is a financial services rep who can see the advisees of the faculty they are the FSR for (fsr_id).
 -- must_change forces a new password at next login.
 CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY,
     username       TEXT UNIQUE NOT NULL,
     password_hash  TEXT NOT NULL,
-    role           TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty')),
+    role           TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty', 'fsr')),
     must_change    INTEGER NOT NULL DEFAULT 0,
     faculty_id     INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
-    CHECK ((role = 'faculty') = (faculty_id IS NOT NULL))
+    fsr_id         INTEGER REFERENCES fsrs(id) ON DELETE CASCADE,
+    CHECK ((role = 'faculty') = (faculty_id IS NOT NULL) AND (role = 'fsr') = (fsr_id IS NOT NULL))
 );

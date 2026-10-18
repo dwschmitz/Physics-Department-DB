@@ -1,12 +1,8 @@
 {# The two tables of a faculty member's students. Shared by a faculty member's own page and the staff view of them.
    Expects: advisees, committee, season, year, prev_url/next_url + labels, total, n_active_advisees, n_active_committee,
    and staff_view (True: names link to the staff student pages; False: the faculty member's own read-only pages). #}
-{% from "_macros.html" import post_button with context %}
+{% from "_macros.html" import funding_cell with context %}
 {% set editing = staff_view and can_edit %}
-{% if editing %}<style>main{max-width:96rem}.fund-line{display:flex;align-items:center;gap:.5rem;flex-wrap:nowrap;white-space:nowrap;margin:.1rem 0}
-.fund-line .small{padding:.12rem .35rem;font-size:.78rem;white-space:nowrap}
-.fund-line .small.plus{padding:.12rem .5rem;font-size:1rem;font-weight:700;line-height:1.17rem}
-.fund-line form,.fund-line a{margin:0}</style>{% endif %}
 <h2>{{ 'Advisees' if staff_view else 'Students I advise' }} <span class="muted">({{ n_active_advisees }} active)</span></h2>
 <div class="copy-stepper">
   {% if prev_url %}<a class="btn secondary small" href="{{ prev_url }}" title="{{ prev_label }}">&lsaquo; Prev</a>{% else %}<span class="btn secondary small disabled">&lsaquo; Prev</span>{% endif %}
@@ -19,23 +15,7 @@
 <tr><td style="white-space:nowrap"><a href="{{ url_for('student', sid=s.id) if staff_view else url_for('faculty_student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a></td>
 <td><span class="badge {{ s.status }}">{{ s.status|label }}</span></td>
 <td>{{ s.clock }}</td><td>{{ s.expected_grad_year or '' }}</td><td>{{ s.research_area or '' }}</td>
-<td>{% set who = s.last_name ~ ', ' ~ s.first_name %}{% set term = season ~ ' ' ~ year %}
-{% for e in s.funding %}
-  {% set parts = [e.kind|label] %}{% if e.source %}{% set parts = parts + [e.source] %}{% endif %}
-  {% if e.poetaf_coa %}{% set parts = parts + [e.poetaf_coa] %}{% endif %}
-  {% if e.amount is not none %}{% set parts = parts + ['$' ~ '{:,.0f}'.format(e.amount)] %}{% endif %}
-  {% if editing %}<div class="fund-line"><span>{{ parts|join(' · ') }}</span>
-    <a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='funding', rid=e.id, next=here) }}">Edit</a>
-    {{ post_button(url_for('child_delete', sid=s.id, table='funding', rid=e.id, next=here), "Clear",
-         "Delete this funding entry (" ~ e.kind|label ~ (", $" ~ '{:,.0f}'.format(e.amount) if e.amount is not none else "") ~ ") for " ~ who ~ " in " ~ term ~ "? This cannot be undone.",
-         cls="btn danger small") }}
-    <a class="btn secondary small" data-copy href="{{ url_for('funding_copy', sid=s.id, year=year, season=season, next=here) }}" title="Copy funding from another term into {{ term }}">Copy</a>
-    <a class="btn small plus" href="{{ url_for('child_new', sid=s.id, table='funding', term_year=year, term_season=season, next=here) }}" title="Add another funding entry for {{ who }} in {{ term }}" aria-label="Add another funding entry for {{ who }} in {{ term }}">+</a></div>
-  {% else %}<div>{{ parts|join(' · ') }}</div>{% endif %}
-{% else %}{% if editing %}<div class="fund-line"><span class="muted">none recorded</span>
-    <a class="btn secondary small" data-copy href="{{ url_for('funding_copy', sid=s.id, year=year, season=season, next=here) }}" title="Copy funding from another term into {{ term }}">Copy</a>
-    <a class="btn small plus" href="{{ url_for('child_new', sid=s.id, table='funding', term_year=year, term_season=season, next=here) }}" title="Add a funding entry for {{ who }} in {{ term }}" aria-label="Add a funding entry for {{ who }} in {{ term }}">+</a></div>
-  {% else %}<span class="muted">none recorded</span>{% endif %}{% endfor %}</td></tr>
+<td>{{ funding_cell(s, editing, here, year, season) }}</td></tr>
 {% else %}<tr><td colspan="6" class="muted">{{ 'No current advisees.' if staff_view else 'No students are listed with you as advisor.' }}</td></tr>{% endfor %}
 </table>
 
@@ -48,28 +28,4 @@
 <td>{{ s.clock }}</td><td>{{ s.research_area or '' }}</td><td>{{ s.advisors or '' }}</td></tr>
 {% else %}<tr><td colspan="6" class="muted">{{ 'Not on any thesis committees.' if staff_view else 'You are not listed on any other committees.' }}</td></tr>{% endfor %}
 </table>
-{% if editing %}
-<dialog id="copy-dialog" aria-label="Copy funding from another term"></dialog>
-<script>
-(function () {
-  var dlg = document.getElementById('copy-dialog');
-  if (!dlg || !dlg.showModal) return;       // very old browsers: the Copy links still work as plain pages
-  function load(url) {
-    return fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'fragment=1', {credentials: 'same-origin'})
-      .then(function (r) { if (!r.ok) { throw new Error(r.status); } return r.text(); })
-      .then(function (html) { dlg.innerHTML = html; });
-  }
-  document.addEventListener('click', function (e) {
-    var open = e.target.closest('a[data-copy]');
-    if (open) {
-      e.preventDefault();
-      load(open.href).then(function () { dlg.showModal(); }, function () { window.location = open.href; });
-      return;
-    }
-    var step = e.target.closest('#copy-dialog a[data-step]');
-    if (step) { e.preventDefault(); load(step.href).catch(function () { window.location = step.href; }); return; }
-    if (e.target.closest('#copy-dialog [data-close]')) { e.preventDefault(); dlg.close(); }
-  });
-})();
-</script>
-{% endif %}
+{% include "_funding_tools.html" %}

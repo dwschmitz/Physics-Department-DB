@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block body %}
 <h1>{{ title }}</h1>
 <p>{{ message }}</p>
-<p><a class="btn" href="{{ home }}">{{ 'Back to my students' if is_faculty else 'Back to the start' }}</a></p>
+<p><a class="btn" href="{{ home }}">{{ 'Back to my students' if is_faculty or is_fsr else 'Back to the start' }}</a></p>
 {% endblock %}

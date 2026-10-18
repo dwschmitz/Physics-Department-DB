@@ -78,6 +78,16 @@ person's password and role (for example, to regain admin access if no admin can 
   the login. Only current advising counts (an advising entry with an end date no longer gives access).
   Staff see the same two tables, titled **Advisees** and **Thesis Committees**, on each faculty member's page
   (Faculty → click a name), with the same funding-term stepper; names there link to the full student pages.
+- **FSRs** (financial services reps, who help manage funding accounts): the **FSRs** tab lists them (name, email,
+  CNET, and the faculty they work with, each a link to that faculty member's page). Editors add an FSR with first
+  name, last name, email and CNET. A faculty member has at most one FSR, chosen from a pull-down on the faculty
+  edit page; the FSR also shows on the faculty list and page. Deleting an FSR just leaves their faculty without one.
+  **FSR accounts** work like faculty accounts: on the **Accounts** page, **+ Add FSR account** makes a login whose
+  username is the FSR's CNET. An FSR who signs in lands on **My students**: every student currently advised
+  (advisor or co-advisor) by any faculty member they are the FSR for, with the advisor's name, status, clock,
+  expected graduation, research area and funding for a term (Prev / Next to change term). That is all they can see
+  (no University IDs or notes, no student pages), and they cannot change anything. Staff see the same table on
+  an FSR's page (FSRs → click a name).
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.
@@ -87,7 +97,7 @@ person's password and role (for example, to regain admin access if no admin can 
 - Set `PHYSDB_SECRET` (or protect the generated `.secret_key` file) so sessions can't be forged.
 
 ## Data model (`schema.sql`)
-`students`, `faculty`, `advising` (advisor/committee history with dates), `milestones`
+`students`, `faculty` (each with an optional FSR), `fsrs`, `advising` (advisor/committee history with dates), `milestones`
 (qualifier, candidacy, committee formed, proposal, defense; the student's page shows the clock on each milestone's date), `funding` (TA/RA/fellowship/supplement by term, with a POETAF/COA account number).
 Terms are a year plus Autumn, Winter, Spring or Summer, chosen from menus and sorted chronologically
 (newest first); `year` is the calendar year in which the term takes place.

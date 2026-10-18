@@ -148,7 +148,9 @@ def connect(path=DB_PATH):
         _restore_old_funding(conn, legacy)
     _finish_interrupted_rebuilds(conn)
     _migrate_users(conn)
+    _add_faculty_fsr(conn)
     _add_faculty_accounts(conn)
+    _add_fsr_accounts(conn)
     _drop_program_column(conn)
     _add_funding_notes(conn)
     _add_student_citizenship(conn)
@@ -304,22 +306,58 @@ def _restore_old_funding(conn, why="text_term"):
 
 
 def _migrate_users(conn):
-    """Upgrade a users table from before the 'admin' role, must_change, or the faculty role/faculty_id existed."""
+    """Upgrade a users table from before the 'admin' role, must_change, the faculty role/faculty_id or the
+    'fsr' role/fsr_id existed."""
     ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'users'").fetchone()[0]
-    if "'faculty'" in ddl and "faculty_id" in ddl and "must_change" in ddl:
+    if "'fsr'" in ddl and "fsr_id" in ddl and "must_change" in ddl:
         return
     has_mc = "must_change" in ddl
+    has_fac = "faculty_id" in ddl
+    # Triggers on other tables mention users; SQLite would rewrite them to point at users_old, so drop them now
+    # (they are recreated, with the right table, by the _add_*_accounts steps that run next).
+    conn.executescript("""
+        DROP TRIGGER IF EXISTS faculty_cnet_needed_for_login;
+        DROP TRIGGER IF EXISTS faculty_cnet_renames_login;
+        DROP TRIGGER IF EXISTS fsr_cnet_needed_for_login;
+        DROP TRIGGER IF EXISTS fsr_cnet_renames_login;""")
     conn.executescript(f"""
         ALTER TABLE users RENAME TO users_old;
         CREATE TABLE users (
             id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty')),
+            role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty', 'fsr')),
             must_change INTEGER NOT NULL DEFAULT 0,
             faculty_id INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
-            CHECK ((role = 'faculty') = (faculty_id IS NOT NULL)));
-        INSERT INTO users (id, username, password_hash, role, must_change)
-            SELECT id, username, password_hash, role, {'must_change' if has_mc else '0'} FROM users_old;
+            fsr_id INTEGER REFERENCES fsrs(id) ON DELETE CASCADE,
+            CHECK ((role = 'faculty') = (faculty_id IS NOT NULL) AND (role = 'fsr') = (fsr_id IS NOT NULL)));
+        INSERT INTO users (id, username, password_hash, role, must_change, faculty_id)
+            SELECT id, username, password_hash, role, {'must_change' if has_mc else '0'},
+                   {'faculty_id' if has_fac else 'NULL'} FROM users_old;
         DROP TABLE users_old;""")
+    conn.commit()
+
+
+def _add_faculty_fsr(conn):
+    """Faculty gained an FSR (fsr_id) after the first release; add the column to older databases."""
+    if "fsr_id" not in {r[1] for r in conn.execute("PRAGMA table_info(faculty)")}:
+        conn.execute("ALTER TABLE faculty ADD COLUMN fsr_id INTEGER REFERENCES fsrs(id) ON DELETE SET NULL")
+        conn.commit()
+
+
+def _add_fsr_accounts(conn):
+    """The same rules as for faculty logins, for FSRs: unique CNET, one login each, username = CNET."""
+    conn.executescript("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_fsrs_cnet ON fsrs(cnet) WHERE cnet IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_fsr ON users(fsr_id) WHERE fsr_id IS NOT NULL;
+        CREATE TRIGGER IF NOT EXISTS users_fsr_login_is_cnet BEFORE INSERT ON users
+          WHEN NEW.role = 'fsr' AND NEW.username IS NOT (SELECT cnet FROM fsrs WHERE id = NEW.fsr_id)
+        BEGIN SELECT RAISE(ABORT, 'An FSR login must use the FSR''s CNET as its username.'); END;
+        CREATE TRIGGER IF NOT EXISTS fsr_cnet_needed_for_login BEFORE UPDATE OF cnet ON fsrs
+          WHEN NEW.cnet IS NULL AND EXISTS (SELECT 1 FROM users WHERE fsr_id = OLD.id)
+        BEGIN SELECT RAISE(ABORT, 'This person has a login account that uses their CNET.'); END;
+        CREATE TRIGGER IF NOT EXISTS fsr_cnet_renames_login AFTER UPDATE OF cnet ON fsrs
+          WHEN NEW.cnet IS NOT NULL AND NEW.cnet IS NOT OLD.cnet
+        BEGIN UPDATE users SET username = NEW.cnet WHERE fsr_id = NEW.id; END;""")
+    conn.commit()
 
 
 def _add_faculty_accounts(conn):
@@ -389,6 +427,16 @@ def add_faculty(conn, first_name, last_name, email, research_area=None, cnet=Non
     cur = conn.execute(
         "INSERT INTO faculty (first_name, last_name, email, cnet, research_area) VALUES (?,?,?,?,?)",
         (first_name, last_name, email, cnet, research_area))
+    conn.commit()
+    return cur.lastrowid
+
+
+def add_fsr(conn, first_name, last_name, email, cnet=None):
+    cnet = (cnet or "").strip().lower() or None
+    if cnet and not re.fullmatch(CNET_PATTERN, cnet):
+        raise ValueError("CNET must be 2-40 letters, digits, or . _ -")
+    cur = conn.execute("INSERT INTO fsrs (first_name, last_name, email, cnet) VALUES (?,?,?,?)",
+                       (first_name, last_name, email, cnet))
     conn.commit()
     return cur.lastrowid
 
@@ -484,6 +532,20 @@ def is_advisee(conn, faculty_id, student_id):
     return conn.execute(
         f"""SELECT 1 FROM advising WHERE faculty_id = ? AND student_id = ? AND end_date IS NULL
             AND role IN {_ADVISOR_ROLES}""", (faculty_id, student_id)).fetchone() is not None
+
+
+def fsr_advisees(conn, fsr_id):
+    """Students currently advised (advisor or co-advisor) by any faculty member this FSR is the FSR for, limited to
+    the same visible columns, plus `advisors`: those faculty members' names."""
+    return [dict(r) for r in conn.execute(
+        f"""SELECT {_FSC},
+                   (SELECT group_concat(fa.first_name || ' ' || fa.last_name, '; ') FROM advising x
+                      JOIN faculty fa ON fa.id = x.faculty_id
+                     WHERE x.student_id = s.id AND x.end_date IS NULL AND x.role IN {_ADVISOR_ROLES}) AS advisors
+            FROM students s
+            WHERE s.id IN (SELECT a.student_id FROM advising a JOIN faculty f ON f.id = a.faculty_id
+                           WHERE f.fsr_id = ? AND a.end_date IS NULL AND a.role IN {_ADVISOR_ROLES})
+            ORDER BY s.last_name, s.first_name, s.id""", (fsr_id,))]
 
 
 def faculty_committee_students(conn, faculty_id):
@@ -632,6 +694,9 @@ def build_parser():
     a.add_argument("first_name"); a.add_argument("last_name"); a.add_argument("email")
     a.add_argument("--research-area"); a.add_argument("--cnet")
 
+    a = sub.add_parser("add-fsr", help="add a financial services rep")
+    a.add_argument("first_name"); a.add_argument("last_name"); a.add_argument("email"); a.add_argument("--cnet")
+
     a = sub.add_parser("assign-advisor")
     a.add_argument("student"); a.add_argument("faculty")
     a.add_argument("--role", default="advisor",
@@ -682,6 +747,8 @@ def main(argv=None):
         elif c == "add-faculty":
             print("Added faculty", add_faculty(conn, args.first_name, args.last_name,
                                                args.email, args.research_area, args.cnet))
+        elif c == "add-fsr":
+            print("Added FSR", add_fsr(conn, args.first_name, args.last_name, args.email, args.cnet))
         elif c == "assign-advisor":
             assign_advisor(conn, args.student, args.faculty, args.role, args.start_date)
         elif c == "add-milestone":

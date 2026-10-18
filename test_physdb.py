@@ -464,6 +464,60 @@ class PhysDBTests(unittest.TestCase):
             physdb.connect(path)                                                  # a second start changes nothing
             self.assertEqual(conn.execute("SELECT count(*) FROM users").fetchone()[0], 3)
 
+    def test_users_table_from_the_faculty_era_gains_fsr_logins(self):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "faculty_era.db")
+        conn = physdb.connect(path)
+        physdb.add_faculty(conn, "Niels", "Bohr", "bohr@u.edu", cnet="nbohr")
+        conn.executescript("""   -- put the users table back the way the faculty release made it (no 'fsr' role, no fsr_id)
+            DROP TRIGGER fsr_cnet_needed_for_login; DROP TRIGGER fsr_cnet_renames_login;
+            DROP TABLE users;
+            CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+              role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty')),
+              must_change INTEGER NOT NULL DEFAULT 0,
+              faculty_id INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
+              CHECK ((role = 'faculty') = (faculty_id IS NOT NULL)));
+            INSERT INTO users VALUES (1, 'boss', 'h1', 'admin', 0, NULL), (2, 'nbohr', 'h2', 'faculty', 1, 1);""")
+        conn.commit(); conn.close()
+        conn = physdb.connect(path)
+        self.assertEqual([tuple(r) for r in conn.execute("SELECT id, username, role, must_change, faculty_id, fsr_id FROM users ORDER BY id")],
+                         [(1, "boss", "admin", 0, None, None), (2, "nbohr", "faculty", 1, 1, None)])
+        self.assertIn("fsr_id", {r[1] for r in conn.execute("PRAGMA table_info(faculty)")})
+        # the faculty login rules still work after the rebuild (their triggers were re-pointed at the new table)
+        conn.execute("UPDATE faculty SET cnet = 'niels' WHERE id = 1"); conn.commit()
+        self.assertEqual(conn.execute("SELECT username FROM users WHERE id = 2").fetchone()[0], "niels")
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute("UPDATE faculty SET cnet = NULL WHERE id = 1")
+        # and an FSR can be added, linked to faculty, and given a login named by their CNET
+        fsr = physdb.add_fsr(conn, "Xavier", "Xx", "xx@u.edu", cnet="FSRX")
+        conn.execute("UPDATE faculty SET fsr_id = ?", (fsr,))
+        conn.execute("INSERT INTO users (username, password_hash, role, fsr_id) VALUES ('fsrx', 'h3', 'fsr', ?)", (fsr,))
+        for bad in ("INSERT INTO users (username, password_hash, role, fsr_id) VALUES ('other', 'h', 'fsr', %d)" % fsr,   # one login each
+                    "INSERT INTO users (username, password_hash, role) VALUES ('x', 'h', 'fsr')",                          # needs an FSR
+                    "INSERT INTO users (username, password_hash, role, fsr_id) VALUES ('x', 'h', 'viewer', %d)" % fsr):  # only for fsr
+            with self.assertRaises(sqlite3.IntegrityError, msg=bad):
+                conn.execute(bad)
+        conn.execute("UPDATE fsrs SET cnet = 'newx' WHERE id = ?", (fsr,)); conn.commit()
+        self.assertEqual(conn.execute("SELECT username FROM users WHERE fsr_id = ?", (fsr,)).fetchone()[0], "newx")
+        conn.execute("DELETE FROM fsrs WHERE id = ?", (fsr,)); conn.commit()
+        self.assertIsNone(conn.execute("SELECT fsr_id FROM faculty").fetchone()[0])           # faculty keep going
+        self.assertEqual(conn.execute("SELECT count(*) FROM users WHERE role = 'fsr'").fetchone()[0], 0)   # the login goes
+        physdb.connect(path)                                                                    # a second start changes nothing
+
+    def test_fsr_advisees(self):
+        fsr = physdb.add_fsr(self.conn, "Xavier", "Xx", "xx@u.edu")
+        other = physdb.add_faculty(self.conn, "Marie", "Curie", "curie@uni.edu")
+        self.conn.execute("UPDATE faculty SET fsr_id = ? WHERE id = ?", (fsr, self.fid))
+        s2 = physdb.add_student(self.conn, university_id="U2", first_name="B", last_name="B", email="b@u.edu", matriculation_year=2021,
+                                 expected_grad_year=None, research_area=None, notes=None)
+        physdb.assign_advisor(self.conn, "U1001", self.fid, "co-advisor")
+        physdb.assign_advisor(self.conn, "U2", other, "advisor")
+        self.assertEqual([r["last_name"] for r in physdb.fsr_advisees(self.conn, fsr)], ["Lovelace"])
+        self.assertNotIn("university_id", physdb.fsr_advisees(self.conn, fsr)[0])
+        self.assertEqual(physdb.fsr_advisees(self.conn, fsr)[0]["advisors"], "Niels Bohr")
+        with self.assertRaises(ValueError):
+            physdb.add_fsr(self.conn, "A", "B", "ab@u.edu", cnet="bad cnet")
+
     def test_faculty_views_only_return_their_own_students_and_safe_columns(self):
         def student(uid, last):
             return physdb.add_student(self.conn, university_id=uid, first_name="S", last_name=last, email=f"{uid}@m.o",

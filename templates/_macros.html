@@ -20,3 +20,23 @@
   <button class="{{ cls }}">{{ label }}</button>
 </form>
 {% endmacro %}
+
+{# The funding entries of one student for a term; with `editing`, each gets Edit / Clear / Copy / + buttons.
+   Import with context (the buttons need the CSRF token). #}
+{% macro funding_cell(s, editing, here, year, season) %}{% set who = s.last_name ~ ', ' ~ s.first_name %}{% set term = season ~ ' ' ~ year %}
+{% for e in s.funding %}
+  {% set parts = [e.kind|label] %}{% if e.source %}{% set parts = parts + [e.source] %}{% endif %}
+  {% if e.poetaf_coa %}{% set parts = parts + [e.poetaf_coa] %}{% endif %}
+  {% if e.amount is not none %}{% set parts = parts + ['$' ~ '{:,.0f}'.format(e.amount)] %}{% endif %}
+  {% if editing %}<div class="fund-line"><span>{{ parts|join(' · ') }}</span>
+    <a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='funding', rid=e.id, next=here) }}">Edit</a>
+    {{ post_button(url_for('child_delete', sid=s.id, table='funding', rid=e.id, next=here), "Clear",
+         "Delete this funding entry (" ~ e.kind|label ~ (", $" ~ '{:,.0f}'.format(e.amount) if e.amount is not none else "") ~ ") for " ~ who ~ " in " ~ term ~ "? This cannot be undone.",
+         cls="btn danger small") }}
+    <a class="btn secondary small" data-copy href="{{ url_for('funding_copy', sid=s.id, year=year, season=season, next=here) }}" title="Copy funding from another term into {{ term }}">Copy</a>
+    <a class="btn small plus" href="{{ url_for('child_new', sid=s.id, table='funding', term_year=year, term_season=season, next=here) }}" title="Add another funding entry for {{ who }} in {{ term }}" aria-label="Add another funding entry for {{ who }} in {{ term }}">+</a></div>
+  {% else %}<div>{{ parts|join(' · ') }}</div>{% endif %}
+{% else %}{% if editing %}<div class="fund-line"><span class="muted">none recorded</span>
+    <a class="btn secondary small" data-copy href="{{ url_for('funding_copy', sid=s.id, year=year, season=season, next=here) }}" title="Copy funding from another term into {{ term }}">Copy</a>
+    <a class="btn small plus" href="{{ url_for('child_new', sid=s.id, table='funding', term_year=year, term_season=season, next=here) }}" title="Add a funding entry for {{ who }} in {{ term }}" aria-label="Add a funding entry for {{ who }} in {{ term }}">+</a></div>
+  {% else %}<span class="muted">none recorded</span>{% endif %}{% endfor %}{% endmacro %}

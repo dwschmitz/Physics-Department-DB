@@ -26,10 +26,14 @@ STATUSES = ["active", "on_leave", "graduated", "withdrawn"]
 FACULTY_ROLE_FILTERS = {"any": "Any role", "advisor": "Advisor",
                         "committee": "Committee member only"}
 ACCOUNT_ROLES = ["viewer", "editor", "admin"]      # roles an admin can hand out directly
-ROLE_ORDER = ACCOUNT_ROLES + ["faculty"]              # faculty logins are made from a faculty member, see user_new_faculty
+ROLE_ORDER = ACCOUNT_ROLES + ["faculty", "fsr"]       # faculty / FSR logins are made from the person, see user_new_faculty
 # The ONLY pages a faculty login may open (everything else is refused): their own page, a read-only page for each
 # of their advisees, changing their password, signing in/out, and the stylesheet.
 FACULTY_ENDPOINTS = {"faculty_home", "faculty_student", "account", "logout", "login", "static", "home"}
+# An FSR login gets just their own page (the advisees of the faculty they are FSR for) and the same basics.
+FSR_ENDPOINTS = {"fsr_home", "account", "logout", "login", "static", "home"}
+LIMITED_ENDPOINTS = {"faculty": FACULTY_ENDPOINTS, "fsr": FSR_ENDPOINTS}   # login role -> the only pages it may open
+HOME_ENDPOINT = {"faculty": "faculty_home", "fsr": "fsr_home"}              # where each limited role lands
 MIN_PASSWORD = 10
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
 MILESTONE_KINDS = physdb.MILESTONE_KINDS
@@ -40,7 +44,7 @@ DISPLAY_NAMES = {"gde_classical_mechanics": "GDE Classical Mechanics", "gde_quan
                  "candidacy": "Candidacy", "ms_degree": "MS Degree", "committee_formed": "Committee Formed", "pre_oral": "Pre-Oral",
                  "thesis_defense": "Thesis Defense", "qualifying_exam": "Qualifying Exam",
                  "thesis_proposal": "Thesis Proposal", "citizen": "Citizen",
-                 "permanent_resident": "Permanent Resident", "international": "International"}
+                 "permanent_resident": "Permanent Resident", "international": "International", "fsr": "FSR"}
 
 CHILD_TABLES = {
     "advising": "Advisor / committee member",
@@ -96,11 +100,19 @@ def fields_for(table, conn, row=None):
             F("notes", "Notes", "textarea"),
         ]
     if table == "faculty":
+        reps = conn.execute("SELECT id, last_name, first_name FROM fsrs ORDER BY last_name, first_name").fetchall()
         return [F("first_name", "First name", required=True),
                 F("last_name", "Last name", required=True),
                 F("email", "Email", "email", True),
                 F("cnet", "CNET", "cnet", help="Also their login name if they are given an account."),
-                F("research_area", "Research area")]
+                F("research_area", "Research area"),
+                F("fsr_id", "FSR", "select", False, [(r["id"], f"{r['last_name']}, {r['first_name']}") for r in reps],
+                  help="The financial services rep who helps manage this person's funding accounts.")]
+    if table == "fsrs":
+        return [F("first_name", "First name", required=True),
+                F("last_name", "Last name", required=True),
+                F("email", "Email", "email", True),
+                F("cnet", "CNET", "cnet", help="Also their login name if they are given an account.")]
     if table == "advising":
         people = conn.execute("SELECT id, last_name, first_name FROM faculty "
                               "ORDER BY last_name, first_name").fetchall()
@@ -250,8 +262,9 @@ def create_app(db_path=None):
                 abort(400, "Your session expired. Go back, reload the page and try again.")
             if not can_edit(g.user) and request.endpoint not in ("logout", "account"):
                 abort(403, "Your account is view-only.")
-        if g.user["role"] == "faculty" and request.endpoint not in FACULTY_ENDPOINTS:
-            abort(403, "This page isn't available for faculty accounts.")     # default deny
+        limited = LIMITED_ENDPOINTS.get(g.user["role"])
+        if limited is not None and request.endpoint not in limited:
+            abort(403, f"This page isn't available for {g.user['role']} accounts.")    # default deny
         if g.user["must_change"] and request.endpoint not in ("account", "logout"):
             return redirect(url_for("account"))
 
@@ -269,7 +282,8 @@ def create_app(db_path=None):
         session.setdefault("csrf", secrets.token_urlsafe(32))
         return dict(csrf_token=session["csrf"], user=g.get("user"),
                     can_edit=can_edit(g.get("user")), is_admin=bool(g.get("user") and g.user["role"] == "admin"),
-                    is_faculty=bool(g.get("user") and g.user["role"] == "faculty"))
+                    is_faculty=bool(g.get("user") and g.user["role"] == "faculty"),
+                    is_fsr=bool(g.get("user") and g.user["role"] == "fsr"))
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -285,9 +299,9 @@ def create_app(db_path=None):
                 session["pwf"] = pw_fingerprint(row["password_hash"])
                 session["csrf"] = secrets.token_urlsafe(32)
                 target = _safe_path(request.args.get("next"))
-                if row["role"] == "faculty" and not (target or "").startswith("/my"):
-                    target = None                                   # faculty only ever land on their own page
-                return redirect(target or ("/my" if row["role"] == "faculty" else url_for("students")))
+                if row["role"] in HOME_ENDPOINT and not (target or "").startswith(url_for(HOME_ENDPOINT[row["role"]])):
+                    target = None                                   # limited logins only ever land on their own page
+                return redirect(target or home_url_for(row["role"]))
             flash("Incorrect username or password.", "error")
         return render_template("login.html")
 
@@ -296,8 +310,11 @@ def create_app(db_path=None):
         session.clear()
         return redirect(url_for("login"))
 
+    def home_url_for(role):
+        return url_for(HOME_ENDPOINT.get(role, "students"))
+
     def home_url():
-        return url_for("faculty_home") if g.user["role"] == "faculty" else url_for("students")
+        return home_url_for(g.user["role"])
 
     @app.errorhandler(400)
     @app.errorhandler(403)
@@ -350,8 +367,8 @@ def create_app(db_path=None):
     def users():
         require_admin()
         rows = [dict(r) for r in db().execute(
-            """SELECT u.*, f.first_name AS f_first, f.last_name AS f_last FROM users u
-               LEFT JOIN faculty f ON f.id = u.faculty_id""").fetchall()]
+            """SELECT u.*, COALESCE(f.first_name, r.first_name) AS f_first, COALESCE(f.last_name, r.last_name) AS f_last
+               FROM users u LEFT JOIN faculty f ON f.id = u.faculty_id LEFT JOIN fsrs r ON r.id = u.fsr_id""").fetchall()]
         rows, sort, sdir = sort_rows(rows, {
             "username": lambda r: _text(r["username"]),
             "role": lambda r: ROLE_ORDER.index(r["role"]),
@@ -421,6 +438,44 @@ def create_app(db_path=None):
                                values=request.form if request.method == "POST" else {}, errors=errors,
                                back=url_for("users"))
 
+    @app.route("/users/new-fsr", methods=["GET", "POST"])
+    def user_new_fsr():
+        """A login for an FSR. The username is their CNET, which is also what ties the login to them."""
+        require_admin()
+        candidates = db().execute(
+            """SELECT r.id, r.last_name, r.first_name, r.cnet FROM fsrs r
+               WHERE r.cnet IS NOT NULL AND NOT EXISTS (SELECT 1 FROM users u WHERE u.fsr_id = r.id)
+               ORDER BY r.last_name, r.first_name""").fetchall()
+        no_cnet = db().execute("SELECT last_name, first_name FROM fsrs WHERE cnet IS NULL "
+                               "ORDER BY last_name, first_name").fetchall()
+        fields = [F("fsr_id", "FSR", "select", True,
+                    [(r["id"], f"{r['last_name']}, {r['first_name']} ({r['cnet']})") for r in candidates],
+                    placeholder=True, help="Only FSRs with a CNET and no account yet are listed."),
+                  F("password", "Temporary password", "password", True,
+                    help=f"At least {MIN_PASSWORD} characters. They must choose their own at first login.")]
+        intro = "Their username will be their CNET."
+        if no_cnet:
+            intro += (" Not listed because they have no CNET yet: "
+                      + ", ".join(f"{r['first_name']} {r['last_name']}" for r in no_cnet) + ".")
+        errors = {}
+        if request.method == "POST":
+            values, errors = parse_form(fields, request.form)
+            if not errors:
+                cnet = next(r["cnet"] for r in candidates if r["id"] == values["fsr_id"])
+                try:
+                    db().execute("INSERT INTO users (username, password_hash, role, must_change, fsr_id) "
+                                 "VALUES (?,?,?,1,?)", (cnet, generate_password_hash(values["password"]),
+                                                        "fsr", values["fsr_id"]))
+                    db().commit()
+                    flash(f"FSR account '{cnet}' created.", "ok")
+                    return redirect(url_for("users"))
+                except sqlite3.IntegrityError:
+                    db().rollback()
+                    errors["fsr_id"] = f"A login named '{cnet}' already exists."
+        return render_template("form.html", title="Add FSR account", fields=fields, intro=intro,
+                               values=request.form if request.method == "POST" else {}, errors=errors,
+                               back=url_for("users"))
+
     @app.route("/users/<int:uid>/edit", methods=["GET", "POST"])
     def user_edit(uid):
         require_admin()
@@ -431,7 +486,7 @@ def create_app(db_path=None):
                   F("password", "New temporary password", "password", False,
                     help="Leave blank to keep the current password. Setting one signs the person out "
                          "everywhere and makes them choose a new password at next login.")]
-        if u["role"] == "faculty":                # a faculty login is tied to a person: only its password can change
+        if u["role"] in ("faculty", "fsr"):       # these logins are tied to a person: only the password can change
             fields = [F("password", "New temporary password", "password", True,
                         help="Signs them out everywhere and makes them choose a new password at next login.")]
         errors = {}
@@ -466,11 +521,9 @@ def create_app(db_path=None):
         if g.user["role"] != "faculty":
             abort(403, "This page is for faculty accounts.")
 
-    def faculty_overview(faculty_id, endpoint, **url_args):
-        """Everything the two-table faculty overview needs, for one faculty member: their advisees (with funding for a
-        term and the clock) and the students whose committee they are on. Used for a faculty member's own page and for
-        the staff view of a faculty member, so the two always look alike. `endpoint` is the page that the term
-        Prev / Next links point back to."""
+    def term_stepper(endpoint, **url_args):
+        """The funding term shown on an overview page (from ?year=&season=, else the current term) and the links for
+        its Prev / Next buttons, which point back at `endpoint`."""
         now = physdb.current_term()
         offered = {y for y, _ in term_years()}
         try:
@@ -480,6 +533,20 @@ def create_app(db_path=None):
         year = year if year in offered else now[1]
         season = request.args.get("season", now[0])
         season = season if season in physdb.SEASONS else now[0]
+        step = lambda s, y: url_for(endpoint, year=y, season=s, **url_args) if y in offered else None
+        prev_season, prev_year = physdb.previous_term(season, year)
+        next_season, next_year = physdb.next_term(season, year)
+        return dict(now=now, year=year, season=season, here=request.full_path.rstrip("?"),
+                    prev_url=step(prev_season, prev_year), next_url=step(next_season, next_year),
+                    prev_label=f"{prev_season} {prev_year}", next_label=f"{next_season} {next_year}")
+
+    def faculty_overview(faculty_id, endpoint, **url_args):
+        """Everything the two-table faculty overview needs, for one faculty member: their advisees (with funding for a
+        term and the clock) and the students whose committee they are on. Used for a faculty member's own page and for
+        the staff view of a faculty member, so the two always look alike. `endpoint` is the page that the term
+        Prev / Next links point back to."""
+        term = term_stepper(endpoint, **url_args)
+        year, season, now = term["year"], term["season"], term["now"]
         advisees = physdb.faculty_advisees(db(), faculty_id)
         funding = physdb.funding_for_term(db(), [a["id"] for a in advisees], year, season)
         for a in advisees:
@@ -488,13 +555,8 @@ def create_app(db_path=None):
         committee = physdb.faculty_committee_students(db(), faculty_id)
         for c in committee:
             c["clock"] = physdb.clock_label(c, now)
-        step = lambda s, y: url_for(endpoint, year=y, season=s, **url_args) if y in offered else None
-        prev_season, prev_year = physdb.previous_term(season, year)
-        next_season, next_year = physdb.next_term(season, year)
         return dict(
-            advisees=advisees, committee=committee, year=year, season=season, here=request.full_path.rstrip("?"),
-            prev_url=step(prev_season, prev_year), next_url=step(next_season, next_year),
-            prev_label=f"{prev_season} {prev_year}", next_label=f"{next_season} {next_year}",
+            advisees=advisees, committee=committee, **term,
             total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]),
             n_active_advisees=sum(a["status"] == "active" for a in advisees),        # the headings count active students
             n_active_committee=sum(c["status"] == "active" for c in committee))
@@ -524,6 +586,71 @@ def create_app(db_path=None):
         funding = db().execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
                                (sid,)).fetchall()
         return render_template("faculty_student.html", s=s, advising=advising, milestones=milestones, funding=funding)
+
+    # ---- FSRs --------------------------------------------------------------------
+    def fsr_overview(fsr_id, endpoint, **url_args):
+        """The students of every faculty member this FSR is the FSR for, with funding for a term and the clock.
+        Used for an FSR's own page and for the staff view of an FSR."""
+        term = term_stepper(endpoint, **url_args)
+        students = physdb.fsr_advisees(db(), fsr_id)
+        funding = physdb.funding_for_term(db(), [a["id"] for a in students], term["year"], term["season"])
+        for a in students:
+            a["clock"] = physdb.clock_label(a, term["now"])
+            a["funding"] = funding[a["id"]]
+        return dict(
+            advisees=students, **term, with_advisor=True, link_students=False,
+            total=sum(e["amount"] or 0 for a in students for e in a["funding"]),
+            n_active_advisees=sum(a["status"] == "active" for a in students))
+
+    def fsr_faculty(fsr_id):
+        return db().execute("SELECT id, first_name, last_name FROM faculty WHERE fsr_id = ? "
+                            "ORDER BY last_name, first_name", (fsr_id,)).fetchall()
+
+    @app.route("/fsr")
+    def fsr_home():
+        """An FSR's own page: the students of the faculty they work with."""
+        if g.user["role"] != "fsr":
+            abort(403, "This page is for FSR accounts.")
+        fsr = get_or_404("fsrs", g.user["fsr_id"])
+        return render_template("fsr_home.html", fsr=fsr, faculty=fsr_faculty(fsr["id"]),
+                               **fsr_overview(fsr["id"], "fsr_home"))
+
+    @app.route("/fsrs")
+    def fsr_list():
+        rows = [dict(r) for r in db().execute("SELECT * FROM fsrs").fetchall()]
+        for r in rows:
+            r["faculty"] = fsr_faculty(r["id"])
+        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
+        rows, sort, sdir = sort_rows(rows, {
+            "name": name, "email": lambda r: _text(r["email"]), "cnet": lambda r: _text(r["cnet"]),
+            "faculty": lambda r: _text(r["faculty"][0]["last_name"]) if r["faculty"] else None,
+        }, request.args.get("sort"), request.args.get("dir"), "name")
+        return render_template("fsrs.html", rows=rows, sort=sort, sdir=sdir)
+
+    @app.route("/fsrs/new", methods=["GET", "POST"])
+    def fsr_new():
+        require_editor()
+        return form_page("fsrs", "Add FSR", None, url_for("fsr_list"))
+
+    @app.route("/fsrs/<int:rid>")
+    def fsr_detail(rid):
+        fsr = get_or_404("fsrs", rid)
+        return render_template("fsr_detail.html", fsr=fsr, faculty=fsr_faculty(rid),
+                               **fsr_overview(rid, "fsr_detail", rid=rid), staff_view=True)
+
+    @app.route("/fsrs/<int:rid>/edit", methods=["GET", "POST"])
+    def fsr_edit(rid):
+        require_editor()
+        fsr = get_or_404("fsrs", rid)
+        return form_page("fsrs", f"Edit {fsr['first_name']} {fsr['last_name']}", fsr,
+                         url_for("fsr_detail", rid=rid), rid=rid)
+
+    @app.post("/fsrs/<int:rid>/delete")
+    def fsr_delete(rid):
+        get_or_404("fsrs", rid)
+        db().execute("DELETE FROM fsrs WHERE id = ?", (rid,)); db().commit()     # faculty keep going without an FSR
+        flash("Deleted.", "ok")
+        return redirect(url_for("fsr_list"))
 
     # ---- generic helpers -------------------------------------------------------
     def get_or_404(table, rid, **extra):
@@ -558,6 +685,8 @@ def create_app(db_path=None):
                         ("students", "university_id"): "Another student already has this university ID.",
                         ("students", "cnet"): "Another student already has this CNET.",
                         ("faculty", "cnet"): "Another faculty member already has this CNET.",
+                        ("fsrs", "email"): "Someone else already has this email address.",
+                        ("fsrs", "cnet"): "Another FSR already has this CNET.",
                         ("faculty", "username"): "That CNET is already the login name of a different account.",
                         }.get((table, col), "That entry already exists.")
             return "Could not save: the data conflicts with existing records."
@@ -602,7 +731,7 @@ def create_app(db_path=None):
     # ---- students --------------------------------------------------------------
     @app.route("/")
     def home():
-        return redirect(url_for("faculty_home") if g.user["role"] == "faculty" else url_for("students"))
+        return redirect(home_url())
 
     @app.route("/students")
     def students():
@@ -715,7 +844,7 @@ def create_app(db_path=None):
     # ---- faculty ---------------------------------------------------------------
     @app.route("/faculty")
     def faculty_list():
-        rows = db().execute("""SELECT f.*,
+        rows = db().execute("""SELECT f.*, (SELECT r.last_name || ', ' || r.first_name FROM fsrs r WHERE r.id = f.fsr_id) AS fsr,
                   (SELECT count(DISTINCT a.student_id) FROM advising a JOIN students s ON s.id = a.student_id
                   WHERE a.faculty_id = f.id AND s.status = 'active'
                   AND a.end_date IS NULL AND a.role IN ('advisor','co-advisor')) AS n_advisees,
@@ -725,7 +854,7 @@ def create_app(db_path=None):
         name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
         rows, sort, sdir = sort_rows([dict(r) for r in rows], {
             "name": name, "email": lambda r: _text(r["email"]), "cnet": lambda r: _text(r["cnet"]),
-            "research_area": lambda r: _text(r["research_area"]),
+            "research_area": lambda r: _text(r["research_area"]), "fsr": lambda r: _text(r["fsr"]),
             "advisees": lambda r: r["n_advisees"], "committees": lambda r: r["n_committees"],
         }, request.args.get("sort"), request.args.get("dir"), "name")
         return render_template("faculty.html", rows=rows, sort=sort, sdir=sdir)
@@ -738,7 +867,8 @@ def create_app(db_path=None):
     @app.route("/faculty/<int:fid>")
     def faculty_detail(fid):
         f = get_or_404("faculty", fid)
-        return render_template("faculty_detail.html", f=f, **faculty_overview(fid, "faculty_detail", fid=fid))
+        fsr = db().execute("SELECT * FROM fsrs WHERE id = ?", (f["fsr_id"],)).fetchone() if f["fsr_id"] else None
+        return render_template("faculty_detail.html", f=f, fsr=fsr, **faculty_overview(fid, "faculty_detail", fid=fid))
 
     @app.route("/faculty/<int:fid>/edit", methods=["GET", "POST"])
     def faculty_edit(fid):

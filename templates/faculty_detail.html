@@ -3,6 +3,7 @@
 <p class="toolbar"><a href="{{ url_for('faculty_list') }}">&larr; All faculty</a>
 {% if can_edit %} <a class="btn small" href="{{ url_for('faculty_edit', fid=f.id) }}">Edit</a>
  {{ delete_button(url_for('faculty_delete', fid=f.id), 'Delete this faculty member?') }}{% endif %}</p>
-<dl><dt>Email</dt><dd>{{ f.email }}</dd><dt>CNET</dt><dd>{{ f.cnet or '—' }}</dd><dt>Research area</dt><dd>{{ f.research_area or '—' }}</dd></dl>
+<dl><dt>Email</dt><dd>{{ f.email }}</dd><dt>CNET</dt><dd>{{ f.cnet or '—' }}</dd><dt>Research area</dt><dd>{{ f.research_area or '—' }}</dd>
+<dt>FSR</dt><dd>{% if fsr %}<a href="{{ url_for('fsr_detail', rid=fsr.id) }}">{{ fsr.first_name }} {{ fsr.last_name }}</a>{% else %}—{% endif %}</dd></dl>
 {% set staff_view = True %}{% include "_faculty_overview.html" %}
 {% endblock %}

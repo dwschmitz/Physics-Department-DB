@@ -9,14 +9,17 @@
   {% if user %}
   {% if is_faculty %}
   <a href="{{ url_for('faculty_home') }}">My students</a>
+  {% elif is_fsr %}
+  <a href="{{ url_for('fsr_home') }}">My students</a>
   {% else %}
   <a href="{{ url_for('students') }}">Students</a>
   <a href="{{ url_for('faculty_list') }}">Faculty</a>
+  <a href="{{ url_for('fsr_list') }}">FSRs</a>
   <a href="{{ url_for('reports') }}">Reports</a>
   {% if is_admin %}<a href="{{ url_for('users') }}">Accounts</a>{% endif %}
   {% endif %}
   <span class="spacer"></span>
-  <a href="{{ url_for('account') }}" title="Change your password">{{ user['username'] }}</a>{% if is_faculty %} (faculty){% elif not can_edit %} (view only){% endif %}
+  <a href="{{ url_for('account') }}" title="Change your password">{{ user['username'] }}</a>{% if is_faculty %} (faculty){% elif is_fsr %} (FSR){% elif not can_edit %} (view only){% endif %}
   <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button>Log out</button></form>
   {% endif %}

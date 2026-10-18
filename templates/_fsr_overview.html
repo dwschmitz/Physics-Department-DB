@@ -1,0 +1,22 @@
+{# The students of the faculty an FSR works with. Shared by an FSR's own page and the staff view of an FSR.
+   Expects: advisees, season, year, prev_url/next_url + labels, total, n_active_advisees, here, and staff_view (True:
+   names link to the staff student pages, and staff with edit rights get the funding buttons). #}
+{% from "_macros.html" import funding_cell with context %}
+{% set editing = staff_view and can_edit %}
+<h2>{{ 'Students' if staff_view else 'Students I support' }} <span class="muted">({{ n_active_advisees }} active)</span></h2>
+<div class="copy-stepper">
+  {% if prev_url %}<a class="btn secondary small" href="{{ prev_url }}" title="{{ prev_label }}">&lsaquo; Prev</a>{% else %}<span class="btn secondary small disabled">&lsaquo; Prev</span>{% endif %}
+  <strong class="copy-source">Funding for {{ season }} {{ year }}</strong>
+  {% if next_url %}<a class="btn secondary small" href="{{ next_url }}" title="{{ next_label }}">Next &rsaquo;</a>{% else %}<span class="btn secondary small disabled">Next &rsaquo;</span>{% endif %}
+  {% if advisees %}<span class="muted">total ${{ '{:,.0f}'.format(total) }}</span>{% endif %}
+</div>
+<table><tr><th>Name</th><th>Advisor</th><th>Status</th><th>Clock</th><th>Expected graduation</th><th>Research area</th><th>Funding, {{ season }} {{ year }}</th></tr>
+{% for s in advisees %}
+<tr><td style="white-space:nowrap">{% if staff_view %}<a href="{{ url_for('student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a>{% else %}{{ s.last_name }}, {{ s.first_name }}{% endif %}</td>
+<td>{{ s.advisors or '' }}</td>
+<td><span class="badge {{ s.status }}">{{ s.status|label }}</span></td>
+<td>{{ s.clock }}</td><td>{{ s.expected_grad_year or '' }}</td><td>{{ s.research_area or '' }}</td>
+<td>{{ funding_cell(s, editing, here, year, season) }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">{{ 'No students: none of the faculty listed for this FSR currently advise anyone.' if staff_view else 'No students yet: none of the faculty you work with currently advise anyone.' }}</td></tr>{% endfor %}
+</table>
+{% include "_funding_tools.html" %}

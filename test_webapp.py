@@ -1142,6 +1142,135 @@ class WebTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200); self.assertIn('<option value="committee_formed" selected>Committee Formed</option>', r.get_data(as_text=True))
         self.assertNotIn("Lovelace", re.sub(r"\s+", " ", r.get_data(as_text=True)).split("<table")[1])   # they have one (passed)
 
+    # ---- FSRs ----------------------------------------------------------------------------------------------
+    def _fsr_world(self):
+        """_faculty_world plus FSRs Xx (cnet fsrx) for Bohr, and Yy (no CNET) for Curie. Returns (admin client, token)."""
+        c, t = self._faculty_world()
+        for first, last, cnet in (("Xavier", "Xx", "FSRX"), ("Yara", "Yy", "")):
+            r = c.post("/fsrs/new", data=dict(first_name=first, last_name=last, email=f"{last}@u.edu", cnet=cnet, csrf_token=t))
+            self.assertEqual(r.status_code, 302, r.get_data(as_text=True)[:300])
+        for fid, first, last, email, cnet, fsr in ((1, "Niels", "Bohr", "Bohr@u.edu", "nbohr", 1), (2, "Marie", "Curie", "Curie@u.edu", "mcurie", 2)):
+            r = c.post(f"/faculty/{fid}/edit", data=dict(first_name=first, last_name=last, email=email, cnet=cnet,
+                       fsr_id=fsr, csrf_token=t))
+            self.assertEqual(r.status_code, 302, r.get_data(as_text=True)[:300])
+        return c, t
+
+    def test_fsr_records_and_faculty_link(self):
+        c, t = self._fsr_world()
+        form = c.get("/fsrs/new").get_data(as_text=True)
+        for label in ("First name", "Last name", "Email", "CNET"):
+            self.assertIn(f">{label}", form)
+        self.assertEqual(re.findall(r'name="(\w+)"', form.split('<form method="post" class="form"')[1].split("</form>")[0])[1:5],
+                         ["first_name", "last_name", "email", "cnet"])
+        # CNET is stored lowercase; a duplicate email or CNET is refused with a message, not an error page
+        dup = c.post("/fsrs/new", data=dict(first_name="A", last_name="B", email="Xx@u.edu", cnet="", csrf_token=t))
+        self.assertEqual(dup.status_code, 200); self.assertIn("already has this email", dup.get_data(as_text=True))
+        dup = c.post("/fsrs/new", data=dict(first_name="A", last_name="B", email="new@u.edu", cnet="fsrx", csrf_token=t))
+        self.assertIn("already has this CNET", dup.get_data(as_text=True))
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT cnet FROM fsrs WHERE id = 1").fetchone()[0], "fsrx"); conn.close()
+        # the faculty form has a pull-down of FSRs (blank allowed), with the current one selected
+        edit = c.get("/faculty/1/edit").get_data(as_text=True)
+        sel = edit.split('name="fsr_id"')[1].split("</select>")[0]
+        self.assertEqual(re.findall(r'<option value="(\d*)"[^>]*>([^<]*)</option>', sel), [("", ""), ("1", "Xx, Xavier"), ("2", "Yy, Yara")])
+        self.assertIn('<option value="1" selected>', sel)
+        r = c.post("/faculty/1/edit", data=dict(first_name="Niels", last_name="Bohr", email="Bohr@u.edu", cnet="nbohr", fsr_id="99", csrf_token=t))
+        self.assertEqual(r.status_code, 200)                                       # not a real FSR
+        # list page: faculty names are links to their summary pages, and the column sorts
+        c.post("/faculty/3/edit", data=dict(first_name="Max", last_name="Planck", email="Planck@u.edu", cnet="", fsr_id="1", csrf_token=t))
+        page = c.get("/fsrs").get_data(as_text=True)
+        row = re.search(r"<tr><td><a [^>]*>Xx, Xavier</a></td>(.*?)</tr>", page, re.S).group(1)
+        self.assertEqual(re.findall(r'<a href="(/faculty/\d+)">([^<]*)</a>', row), [("/faculty/1", "Bohr, Niels"), ("/faculty/3", "Planck, Max")])
+        self.assertIn("fsrx", row)
+        names = lambda q: re.findall(r"<tr><td><a [^>]*>(\w+), \w+</a></td>", c.get("/fsrs" + q).get_data(as_text=True))
+        self.assertEqual(names(""), ["Xx", "Yy"]); self.assertEqual(names("?sort=name&dir=desc"), ["Yy", "Xx"])
+        self.assertEqual(names("?sort=faculty"), ["Xx", "Yy"])                     # Bohr < Curie
+        # faculty list and summary page show the FSR
+        self.assertIn("Xx, Xavier", c.get("/faculty").get_data(as_text=True))
+        detail = c.get("/faculty/1").get_data(as_text=True)
+        self.assertIn('<a href="/fsrs/1">Xavier Xx</a>', detail)
+        # viewers can look but not change
+        v = self.client("vw")
+        self.assertEqual(v.get("/fsrs").status_code, 200); self.assertEqual(v.get("/fsrs/1").status_code, 200)
+        self.assertNotIn("+ Add FSR", v.get("/fsrs").get_data(as_text=True))
+        self.assertEqual(v.get("/fsrs/new").status_code, 403); self.assertEqual(v.get("/fsrs/1/edit").status_code, 403)
+        self.assertEqual(v.post("/fsrs/1/delete", data={"csrf_token": self.token(v)}).status_code, 403)
+        # deleting an FSR leaves their faculty without one
+        r = c.post("/fsrs/1/delete", data={"csrf_token": t}); self.assertEqual(r.status_code, 302)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual([x[0] for x in conn.execute("SELECT fsr_id FROM faculty ORDER BY id")], [None, 2, None]); conn.close()
+
+    def test_fsr_login_sees_only_their_faculty_advisees(self):
+        from unittest import mock
+        c, t = self._fsr_world()
+        form = c.get("/users/new-fsr").get_data(as_text=True)
+        self.assertIn("Xx, Xavier (fsrx)", form); self.assertNotIn("Yy, Yara", form)    # only FSRs with a CNET
+        self.assertIn("Yara Yy", form)                                                   # ...and who is missing is explained
+        r = c.post("/users/new-fsr", data=dict(fsr_id=1, password="temp-password-1", csrf_token=t)); self.assertEqual(r.status_code, 302)
+        r = c.post("/users/new-fsr", data=dict(fsr_id=1, password="temp-password-2", csrf_token=t)); self.assertEqual(r.status_code, 200)
+        users = c.get("/users").get_data(as_text=True)
+        self.assertIn("FSR", users); self.assertIn("Xavier Xx", users); self.assertIn("+ Add FSR account", users)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(tuple(conn.execute("SELECT username, role, faculty_id, fsr_id FROM users WHERE fsr_id = 1").fetchone()),
+                         ("fsrx", "fsr", None, 1)); conn.close()
+        f = self.app.test_client()
+        r = f.post("/login?next=/students", data={"username": "fsrx", "password": "temp-password-1"})
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, "/fsr"))
+        self.assertEqual(f.get("/fsr").headers["Location"], "/account")                  # must choose a password first
+        nt = self.token(f, "/account")
+        f.post("/account", data=dict(current_password="temp-password-1", new_password="fsr-new-pass-1", confirm="fsr-new-pass-1", csrf_token=nt))
+        def page(q="", client=f):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return client.get("/fsr" + q).get_data(as_text=True)
+        html = page()
+        self.assertIn("<h1>My students</h1>", html); self.assertIn("Niels Bohr", html)
+        headers = re.findall(r"<th>([^<]*)</th>", html.split("</tr>")[0].split("<table>")[-1])
+        self.assertEqual(headers, ["Name", "Advisor", "Status", "Clock", "Expected graduation", "Research area", "Funding, Autumn 2026"])
+        who = lambda h: re.findall(r"<tr><td[^>]*>(\w+), Stu</td>", h)
+        self.assertEqual(who(html), ["Aa", "Bb"])        # Bohr's advisor/co-advisor students; not committee-only, not the ended one
+        self.assertIn("RA · NSF grant · 1234567-ABC · $3,000", html); self.assertIn("Supplement · $250", html)
+        self.assertNotIn("NOT-BOHRS", html)
+        for hidden in ("UID1", "SECRET", "s1@u.edu"):
+            self.assertNotIn(hidden, html)
+        self.assertNotIn("/students/", html); self.assertNotIn(">Clear<", html); self.assertNotIn("data-copy", html)
+        self.assertIn('<h2>Students I support <span class="muted">(2 active)</span></h2>', html)
+        self.assertIn("Winter 2027", html)                                                # term stepper
+        self.assertNotIn("Winter 2026</strong>", html)
+        # a second faculty member joins this FSR: their advisees appear too (advisor column names who advises)
+        c.post("/faculty/2/edit", data=dict(first_name="Marie", last_name="Curie", email="Curie@u.edu", cnet="mcurie", fsr_id="1", csrf_token=t))
+        html = page()
+        self.assertEqual(who(html), ["Aa", "Bb", "Cc", "Dd", "Ee"])
+        self.assertIn("Marie Curie", html); self.assertIn("NOT-BOHRS", html)
+        self.assertIn("Winter 2026</strong>", page("?year=2026&season=Winter"))
+        # nothing else is reachable, and nothing can be changed
+        for path in ("/students", "/students/1", "/faculty", "/faculty/1", "/fsrs", "/fsrs/1", "/users", "/reports", "/my",
+                     "/my/students/1", "/students/1/funding/new", "/students/1/funding/copy", "/reports/funding", "/fsrs/new"):
+            self.assertEqual(f.get(path).status_code, 403, path)
+        nt = self.token(f, "/account")
+        for path in ("/students/1/funding/1/delete", "/fsrs/1/delete", "/faculty/1/delete", "/students/new"):
+            self.assertEqual(f.post(path, data={"csrf_token": nt}).status_code, 403, path)
+        # staff pages for faculty logins/staff stay closed to the FSR, and a faculty login can't open /fsr
+        self._make_faculty_login(c, t)
+        fac = self._faculty_client()
+        self.assertEqual(fac.get("/fsr").status_code, 403); self.assertEqual(fac.get("/fsrs").status_code, 403)
+        self.assertEqual(self.client("ed").get("/fsr").status_code, 403)
+        # changing the CNET renames the login; removing it is refused while the login exists
+        r = c.post("/fsrs/1/edit", data=dict(first_name="Xavier", last_name="Xx", email="Xx@u.edu", cnet="xnew", csrf_token=t))
+        self.assertEqual(r.status_code, 302)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT username FROM users WHERE fsr_id = 1").fetchone()[0], "xnew"); conn.close()
+        r = c.post("/fsrs/1/edit", data=dict(first_name="Xavier", last_name="Xx", email="Xx@u.edu", cnet="", csrf_token=t))
+        self.assertEqual(r.status_code, 200); self.assertIn("login account", r.get_data(as_text=True))
+        # the staff page of an FSR shows the same table, with links to students and the funding buttons
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            sp = c.get("/fsrs/1").get_data(as_text=True)
+        self.assertEqual(re.findall(r'<a href="/students/(\d+)">(\w+), Stu</a>', sp), [("1", "Aa"), ("2", "Bb"), ("3", "Cc"), ("4", "Dd"), ("5", "Ee")])
+        self.assertIn(">Clear</button>", sp)
+        # deleting the FSR removes their login too
+        c.post("/fsrs/1/delete", data={"csrf_token": t})
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT count(*) FROM users WHERE role = 'fsr'").fetchone()[0], 0); conn.close()
+
     def test_child_edit_heading_names_the_student(self):
         c, t = self._faculty_world()
         self.assertIn("<h1>Edit: funding for Stu Aa</h1>", c.get("/students/1/funding/1/edit").get_data(as_text=True))
