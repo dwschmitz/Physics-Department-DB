@@ -457,11 +457,11 @@ def create_app(db_path=None):
         if g.user["role"] != "faculty":
             abort(403, "This page is for faculty accounts.")
 
-    @app.route("/my")
-    def faculty_home():
-        """A faculty member's own page: their advisees (with funding for a term) and their committee students."""
-        require_faculty()
-        fac = get_or_404("faculty", g.user["faculty_id"])
+    def faculty_overview(faculty_id, endpoint, **url_args):
+        """Everything the two-table faculty overview needs, for one faculty member: their advisees (with funding for a
+        term and the clock) and the students whose committee they are on. Used for a faculty member's own page and for
+        the staff view of a faculty member, so the two always look alike. `endpoint` is the page that the term
+        Prev / Next links point back to."""
         now = physdb.current_term()
         offered = {y for y, _ in term_years()}
         try:
@@ -471,24 +471,31 @@ def create_app(db_path=None):
         year = year if year in offered else now[1]
         season = request.args.get("season", now[0])
         season = season if season in physdb.SEASONS else now[0]
-        advisees = physdb.faculty_advisees(db(), fac["id"])
+        advisees = physdb.faculty_advisees(db(), faculty_id)
         funding = physdb.funding_for_term(db(), [a["id"] for a in advisees], year, season)
         for a in advisees:
             a["clock"] = physdb.clock_label(a, now)
             a["funding"] = funding[a["id"]]
-        committee = physdb.faculty_committee_students(db(), fac["id"])
+        committee = physdb.faculty_committee_students(db(), faculty_id)
         for c in committee:
             c["clock"] = physdb.clock_label(c, now)
-        step = lambda s, y: url_for("faculty_home", year=y, season=s) if y in offered else None
+        step = lambda s, y: url_for(endpoint, year=y, season=s, **url_args) if y in offered else None
         prev_season, prev_year = physdb.previous_term(season, year)
         next_season, next_year = physdb.next_term(season, year)
-        return render_template(
-            "faculty_home.html", fac=fac, advisees=advisees, committee=committee, year=year, season=season,
+        return dict(
+            advisees=advisees, committee=committee, year=year, season=season,
             prev_url=step(prev_season, prev_year), next_url=step(next_season, next_year),
             prev_label=f"{prev_season} {prev_year}", next_label=f"{next_season} {next_year}",
-            total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]), current=f"{now[0]} {now[1]}",
+            total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]),
             n_active_advisees=sum(a["status"] == "active" for a in advisees),        # the headings count active students
             n_active_committee=sum(c["status"] == "active" for c in committee))
+
+    @app.route("/my")
+    def faculty_home():
+        """A faculty member's own page: their advisees (with funding for a term) and their committee students."""
+        require_faculty()
+        fac = get_or_404("faculty", g.user["faculty_id"])
+        return render_template("faculty_home.html", fac=fac, **faculty_overview(fac["id"], "faculty_home"))
 
     @app.route("/my/students/<int:sid>")
     def faculty_student(sid):
@@ -720,11 +727,7 @@ def create_app(db_path=None):
     @app.route("/faculty/<int:fid>")
     def faculty_detail(fid):
         f = get_or_404("faculty", fid)
-        rows = db().execute("""SELECT s.id, s.first_name, s.last_name, s.status, a.role, a.start_date
-                  FROM advising a JOIN students s ON s.id = a.student_id
-                  WHERE a.faculty_id = ? AND a.end_date IS NULL
-                  ORDER BY s.last_name, s.first_name""", (fid,)).fetchall()
-        return render_template("faculty_detail.html", f=f, rows=rows)
+        return render_template("faculty_detail.html", f=f, **faculty_overview(fid, "faculty_detail", fid=fid))
 
     @app.route("/faculty/<int:fid>/edit", methods=["GET", "POST"])
     def faculty_edit(fid):

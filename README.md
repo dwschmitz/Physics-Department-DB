@@ -73,6 +73,8 @@ person's password and role (for example, to regain admin access if no admin can 
   anything. They never see University IDs or the internal student/milestone notes. Changing a faculty member's
   CNET renames their login; it can't be removed while they have a login, and deleting the faculty member deletes
   the login. Only current advising counts (an advising entry with an end date no longer gives access).
+  Staff see the same two tables, titled **Advisees** and **Thesis Committees**, on each faculty member's page
+  (Faculty → click a name), with the same funding-term stepper; names there link to the full student pages.
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.

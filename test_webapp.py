@@ -1122,6 +1122,66 @@ class WebTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200); self.assertIn('<option value="committee_formed" selected>Committee Formed</option>', r.get_data(as_text=True))
         self.assertNotIn("Lovelace", re.sub(r"\s+", " ", r.get_data(as_text=True)).split("<table")[1])   # they have one (passed)
 
+    def test_staff_view_of_a_faculty_member_has_advisee_and_committee_tables(self):
+        from unittest import mock
+        c, t = self._faculty_world()
+        def page(path="/faculty/1", client=None):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return (client or c).get(path).get_data(as_text=True)
+        html = page()
+        self.assertIn('<h2>Advisees <span class="muted">(2 active)</span></h2>', html)
+        self.assertIn('<h2>Thesis Committees <span class="muted">(2 active)</span></h2>', html)
+        self.assertNotIn("Current students", html)                                         # replaced by the two tables
+        adv, com = html.split("<h2>Thesis Committees")
+        headers = lambda h: re.findall(r"<th>([^<]*)</th>", h.split("</tr>")[0].split("<table>")[-1])
+        self.assertEqual(headers(adv), ["Name", "Status", "Clock", "Expected graduation", "Research area", "Funding, Autumn 2026"])
+        self.assertEqual(headers(com), ["Name", "Role", "Status", "Clock", "Research area", "Advisor"])
+        # the right people, linked to the staff student pages (committee names too: staff can open any student)
+        self.assertEqual(re.findall(r'/students/(\d+)">(\w+), Stu', adv), [("1", "Aa"), ("2", "Bb")])
+        self.assertEqual(re.findall(r'/students/(\d+)">(\w+), Stu', com), [("3", "Cc"), ("4", "Dd")])
+        self.assertNotIn("/my/", html)
+        for gone in ("Ee, Stu", "Ff, Stu"):                                                # not Bohr's / ended
+            self.assertNotIn(gone, html)
+        self.assertIn("Committee member", com); self.assertIn("Committee chair", com); self.assertIn("Marie Curie", com)
+        self.assertRegex(adv, r"<td>4\.0</td>")                                            # clock (matriculated Autumn 2022)
+        # funding for the term, and a term stepper that stays on THIS page
+        for needle in ("Funding for Autumn 2026", "RA · NSF grant · 1234567-ABC · $3,000", "Supplement · $250", "total $3,250"):
+            self.assertIn(needle, adv)
+        self.assertNotIn("NOT-BOHRS", html); self.assertNotIn("$500", html)
+        self.assertIn('href="/faculty/1?year=2026&amp;season=Summer"', adv)
+        self.assertIn('href="/faculty/1?year=2027&amp;season=Winter"', adv)
+        winter = page("/faculty/1?year=2026&season=Winter")
+        self.assertIn("Funding for Winter 2026", winter); self.assertIn("TA · Dept · $500", winter); self.assertNotIn("NSF grant", winter)
+        self.assertEqual(c.get("/faculty/1?year=abc&season=Fall").status_code, 200)         # bad input falls back
+        # still the faculty page it was: details and the staff buttons
+        for needle in ("<dt>CNET</dt><dd>nbohr</dd>", "Bohr@u.edu", "All faculty", ">Edit<", "Delete this faculty member?"):
+            self.assertIn(needle, html)
+        # the same two lists a faculty member sees on their own page
+        self._make_faculty_login(c, t); f = self._faculty_client()
+        mine = page("/my", client=f)
+        self.assertEqual(re.findall(r">(\w+), Stu", mine.split("Students whose committee")[0]), ["Aa", "Bb"])
+        self.assertEqual(re.findall(r">(\w+), Stu", mine.split("Students whose committee")[1]), ["Cc", "Dd"])
+        # graduated students stay listed but are not counted
+        for sid, last in ((2, "Bb"), (4, "Dd")):
+            c.post(f"/students/{sid}/edit", data=dict(first_name="Stu", last_name=last, university_id=f"UID{sid}", cnet=f"stu{last.lower()}",
+                   email=f"s{sid}@u.edu", citizenship="citizen", status="graduated", matriculation_year="2022",
+                   matriculation_term="Autumn", csrf_token=t))
+        html = page()
+        adv, com = html.split("<h2>Thesis Committees")
+        self.assertIn("(1 active)", adv); self.assertIn("(1 active)", com)
+        self.assertIn("Bb, Stu", adv); self.assertIn("Dd, Stu", com)
+        # other faculty: their own students; empty tables say so
+        curie = page("/faculty/2")
+        self.assertEqual(re.findall(r'/students/(\d+)">(\w+), Stu', curie.split("<h2>Thesis Committees")[0]), [("3", "Cc"), ("4", "Dd"), ("5", "Ee")])
+        self.assertIn("Not on any thesis committees.", curie)
+        planck = page("/faculty/3")
+        self.assertIn("No current advisees.", planck); self.assertIn("Not on any thesis committees.", planck)
+        self.assertEqual(planck.count("(0 active)"), 2)
+        # editors and viewers see the same page; faculty logins cannot open it
+        for who in ("ed", "vw"):
+            self.assertIn("<h2>Advisees", page(client=self.client(who)))
+        self.assertEqual(f.get("/faculty/1").status_code, 403)
+
     def test_faculty_summary_columns_and_active_counts(self):
         c, t = self._faculty_world(); self._make_faculty_login(c, t)
         f = self._faculty_client()

@@ -4,8 +4,5 @@
 {% if can_edit %} <a class="btn small" href="{{ url_for('faculty_edit', fid=f.id) }}">Edit</a>
  {{ delete_button(url_for('faculty_delete', fid=f.id), 'Delete this faculty member?') }}{% endif %}</p>
 <dl><dt>Email</dt><dd>{{ f.email }}</dd><dt>CNET</dt><dd>{{ f.cnet or '—' }}</dd><dt>Research area</dt><dd>{{ f.research_area or '—' }}</dd></dl>
-<h2>Current students</h2>
-<table><tr><th>Student</th><th>Role</th><th>Since</th><th>Status</th></tr>
-{% for r in rows %}<tr><td><a href="{{ url_for('student', sid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
-<td>{{ r.role|label }}</td><td>{{ r.start_date }}</td><td>{{ r.status|label }}</td></tr>
-{% else %}<tr><td colspan="4" class="muted">None.</td></tr>{% endfor %}</table>{% endblock %}
+{% set staff_view = True %}{% include "_faculty_overview.html" %}
+{% endblock %}

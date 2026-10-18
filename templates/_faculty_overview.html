@@ -1,0 +1,33 @@
+{# The two tables of a faculty member's students. Shared by a faculty member's own page and the staff view of them.
+   Expects: advisees, committee, season, year, prev_url/next_url + labels, total, n_active_advisees, n_active_committee,
+   and staff_view (True: names link to the staff student pages; False: the faculty member's own read-only pages). #}
+<h2>{{ 'Advisees' if staff_view else 'Students I advise' }} <span class="muted">({{ n_active_advisees }} active)</span></h2>
+<div class="copy-stepper">
+  {% if prev_url %}<a class="btn secondary small" href="{{ prev_url }}" title="{{ prev_label }}">&lsaquo; Prev</a>{% else %}<span class="btn secondary small disabled">&lsaquo; Prev</span>{% endif %}
+  <strong class="copy-source">Funding for {{ season }} {{ year }}</strong>
+  {% if next_url %}<a class="btn secondary small" href="{{ next_url }}" title="{{ next_label }}">Next &rsaquo;</a>{% else %}<span class="btn secondary small disabled">Next &rsaquo;</span>{% endif %}
+  {% if advisees %}<span class="muted">total ${{ '{:,.0f}'.format(total) }}</span>{% endif %}
+</div>
+<table><tr><th>Name</th><th>Status</th><th>Clock</th><th>Expected graduation</th><th>Research area</th><th>Funding, {{ season }} {{ year }}</th></tr>
+{% for s in advisees %}
+<tr><td style="white-space:nowrap"><a href="{{ url_for('student', sid=s.id) if staff_view else url_for('faculty_student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a></td>
+<td><span class="badge {{ s.status }}">{{ s.status|label }}</span></td>
+<td>{{ s.clock }}</td><td>{{ s.expected_grad_year or '' }}</td><td>{{ s.research_area or '' }}</td>
+<td>{% for e in s.funding %}
+  {% set parts = [e.kind|label] %}{% if e.source %}{% set parts = parts + [e.source] %}{% endif %}
+  {% if e.poetaf_coa %}{% set parts = parts + [e.poetaf_coa] %}{% endif %}
+  {% if e.amount is not none %}{% set parts = parts + ['$' ~ '{:,.0f}'.format(e.amount)] %}{% endif %}
+  <div>{{ parts|join(' · ') }}</div>
+{% else %}<span class="muted">none recorded</span>{% endfor %}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">{{ 'No current advisees.' if staff_view else 'No students are listed with you as advisor.' }}</td></tr>{% endfor %}
+</table>
+
+<h2>{{ 'Thesis Committees' if staff_view else 'Students whose committee I am on' }} <span class="muted">({{ n_active_committee }} active)</span></h2>
+<table><tr><th>Name</th><th>{{ 'Role' if staff_view else 'My role' }}</th><th>Status</th><th>Clock</th><th>Research area</th><th>Advisor</th></tr>
+{% for s in committee %}
+<tr><td style="white-space:nowrap">{% if staff_view %}<a href="{{ url_for('student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a>{% else %}{{ s.last_name }}, {{ s.first_name }}{% endif %}</td>
+<td>{{ 'Committee chair' if s.committee_role == 'committee_chair' else 'Committee member' }}</td>
+<td><span class="badge {{ s.status }}">{{ s.status|label }}</span></td>
+<td>{{ s.clock }}</td><td>{{ s.research_area or '' }}</td><td>{{ s.advisors or '' }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">{{ 'Not on any thesis committees.' if staff_view else 'You are not listed on any other committees.' }}</td></tr>{% endfor %}
+</table>
