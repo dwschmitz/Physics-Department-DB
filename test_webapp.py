@@ -526,7 +526,9 @@ class WebTests(unittest.TestCase):
         self.assertEqual(len(student), 4)                                  # student, advisor, milestone, funding
         self.assertIn('Permanently delete Bob "Rob" O\'Brien <b>&</b> and all of their records?', student)
         self.assertEqual(student.count("Delete this entry?"), 3)
-        self.assertEqual(self.confirm_prompts(c.get("/faculty/1").get_data(as_text=True)), ["Delete this faculty member?"])
+        fac = self.confirm_prompts(c.get("/faculty/1?year=2026&season=Autumn").get_data(as_text=True))
+        self.assertEqual(fac, ["Delete this faculty member?",
+                               'Delete this funding entry (RA, $5) for O\'Brien <b>&</b>, Bob "Rob" in Autumn 2026? This cannot be undone.'])
         users = self.confirm_prompts(c.get("/users").get_data(as_text=True))
         self.assertTrue(users and all(u.startswith("Delete the account ") for u in users))
         from unittest import mock
@@ -1139,6 +1141,32 @@ class WebTests(unittest.TestCase):
         r = c.get("/reports?kind=committee_formed&years=0")
         self.assertEqual(r.status_code, 200); self.assertIn('<option value="committee_formed" selected>Committee Formed</option>', r.get_data(as_text=True))
         self.assertNotIn("Lovelace", re.sub(r"\s+", " ", r.get_data(as_text=True)).split("<table")[1])   # they have one (passed)
+
+    def test_staff_view_of_a_faculty_member_has_funding_buttons(self):
+        from unittest import mock
+        c, t = self._faculty_world()
+        def page(client, path="/faculty/1"):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return client.get(path).get_data(as_text=True)
+        html = page(c)
+        # Aa and Bb each have one entry (Edit, Clear, Copy, +); Ff-less table: no advisee lacks funding here
+        self.assertEqual(html.count('class="btn secondary small" href="/students/1/funding/1/edit'), 1)
+        self.assertEqual(len(re.findall(r'>Clear</button>', html)), 2)
+        self.assertEqual(html.count("data-copy href"), 2)
+        self.assertEqual(html.count('class="btn small plus"'), 2)
+        self.assertIn("next=/faculty/1", html)
+        # an editor sees them, a viewer does not
+        self.assertIn(">Clear</button>", page(self.client("ed")))
+        v = page(self.client("vw"))
+        self.assertNotIn(">Clear</button>", v); self.assertNotIn("data-copy", v); self.assertNotIn("copy-dialog", v)
+        # Clear works and returns to the faculty page
+        r = c.post("/students/1/funding/1/delete?next=/faculty/1%3Fseason%3DAutumn%26year%3D2026", data={"csrf_token": t})
+        self.assertEqual(r.status_code, 302); self.assertIn("/faculty/1", r.headers["Location"])
+        # a faculty login's own page has none of it
+        self._make_faculty_login(c, t)
+        fc = self._faculty_client()
+        mine = page(fc, "/my")
+        self.assertNotIn(">Clear</button>", mine); self.assertNotIn("data-copy", mine); self.assertNotIn("/funding/", mine)
 
     def test_staff_view_of_a_faculty_member_has_advisee_and_committee_tables(self):
         from unittest import mock

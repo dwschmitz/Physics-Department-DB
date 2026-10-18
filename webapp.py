@@ -492,7 +492,7 @@ def create_app(db_path=None):
         prev_season, prev_year = physdb.previous_term(season, year)
         next_season, next_year = physdb.next_term(season, year)
         return dict(
-            advisees=advisees, committee=committee, year=year, season=season,
+            advisees=advisees, committee=committee, year=year, season=season, here=request.full_path.rstrip("?"),
             prev_url=step(prev_season, prev_year), next_url=step(next_season, next_year),
             prev_label=f"{prev_season} {prev_year}", next_label=f"{next_season} {next_year}",
             total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]),
