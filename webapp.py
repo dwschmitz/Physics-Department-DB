@@ -37,7 +37,7 @@ OUTCOMES = ["pending", "passed", "conditional", "failed"]
 FUNDING_KINDS = ["TA", "RA", "fellowship", "supplement", "other"]
 DISPLAY_NAMES = {"gde_classical_mechanics": "GDE Classical Mechanics", "gde_quantum_mechanics": "GDE Quantum Mechanics",
                  "gde_electrodynamics": "GDE Electrodynamics", "gde_statistical_mechanics": "GDE Statistical Mechanics",
-                 "candidacy": "Candidacy", "committee_formed": "Committee Formed", "pre_oral": "Pre-Oral",
+                 "candidacy": "Candidacy", "ms_degree": "MS Degree", "committee_formed": "Committee Formed", "pre_oral": "Pre-Oral",
                  "thesis_defense": "Thesis Defense", "qualifying_exam": "Qualifying Exam",
                  "thesis_proposal": "Thesis Proposal", "citizen": "Citizen",
                  "permanent_resident": "Permanent Resident", "international": "International"}

@@ -18,7 +18,7 @@ CITIZENSHIP = ["citizen", "permanent_resident", "international"]
 # Milestone types offered for new entries, in menu order. The retired two are no longer offered, but entries that
 # already use them are kept (and still shown, with their old names) rather than deleted or silently relabeled.
 MILESTONE_KINDS = ["gde_classical_mechanics", "gde_quantum_mechanics", "gde_electrodynamics",
-                   "gde_statistical_mechanics", "candidacy", "committee_formed", "pre_oral", "thesis_defense", "other"]
+                   "gde_statistical_mechanics", "candidacy", "ms_degree", "committee_formed", "pre_oral", "thesis_defense", "other"]
 RETIRED_MILESTONE_KINDS = ["qualifying_exam", "thesis_proposal"]
 SEASONS = ["Autumn", "Winter", "Spring", "Summer"]
 # SQL expression giving chronological position of a season within its calendar year.
@@ -163,9 +163,9 @@ def _table_exists(conn, name):
 
 def _stash_old_milestones(conn):
     """The milestone types are a CHECK rule SQLite can't change in place, so a table that predates a newly
-    allowed type (the latest being 'pre_oral') is set aside, recreated from schema.sql, and its rows copied back."""
+    allowed type (the latest being 'ms_degree') is set aside, recreated from schema.sql, and its rows copied back."""
     row = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'milestones'").fetchone()
-    if row is None or "'pre_oral'" in row[0]:
+    if row is None or "'ms_degree'" in row[0]:
         return False
     conn.executescript("DROP INDEX IF EXISTS idx_milestones_student;"
                        "ALTER TABLE milestones RENAME TO milestones_old;")

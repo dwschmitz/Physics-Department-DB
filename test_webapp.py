@@ -1126,10 +1126,10 @@ class WebTests(unittest.TestCase):
         form = c.get("/students/1/milestones/new").get_data(as_text=True)
         options = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', form.split('name="kind"')[1].split("</select>")[0])
         self.assertEqual([v for v, _ in options], ["gde_classical_mechanics", "gde_quantum_mechanics", "gde_electrodynamics",
-                                                   "gde_statistical_mechanics", "candidacy", "committee_formed", "pre_oral",
+                                                   "gde_statistical_mechanics", "candidacy", "ms_degree", "committee_formed", "pre_oral",
                                                    "thesis_defense", "other"])
         self.assertEqual([l for _, l in options], ["GDE Classical Mechanics", "GDE Quantum Mechanics", "GDE Electrodynamics",
-                                                   "GDE Statistical Mechanics", "Candidacy", "Committee Formed", "Pre-Oral",
+                                                   "GDE Statistical Mechanics", "Candidacy", "MS Degree", "Committee Formed", "Pre-Oral",
                                                    "Thesis Defense", "Other"])
         self.assertIn(("committee_formed", "Committee Formed"), options)
         self.assertIn("Committee Formed", c.get("/students/1").get_data(as_text=True))

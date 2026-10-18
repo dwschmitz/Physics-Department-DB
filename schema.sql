@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS milestones (
                 -- 'qualifying_exam' and 'thesis_proposal' are retired: no longer offered for new entries, but still
                 -- allowed here so entries saved earlier keep their meaning (see physdb.RETIRED_MILESTONE_KINDS).
                 CHECK (kind IN ('gde_classical_mechanics', 'gde_quantum_mechanics', 'gde_electrodynamics',
-                                'gde_statistical_mechanics', 'candidacy', 'committee_formed', 'pre_oral',
+                                'gde_statistical_mechanics', 'candidacy', 'ms_degree', 'committee_formed', 'pre_oral',
                                 'thesis_defense', 'other', 'qualifying_exam', 'thesis_proposal')),
     date        TEXT NOT NULL,
     outcome     TEXT NOT NULL DEFAULT 'pending'

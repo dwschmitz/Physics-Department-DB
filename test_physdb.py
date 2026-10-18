@@ -265,7 +265,7 @@ class PhysDBTests(unittest.TestCase):
         rows = [tuple(r) for r in conn.execute("SELECT id, student_id, kind, date, outcome, notes FROM milestones ORDER BY id")]
         self.assertEqual(rows, [(5, 1, "qualifying_exam", "2022-05-01", "passed", "kept note"),
                                 (6, 1, "thesis_defense", "2026-05-01", "pending", None)])
-        for kind in ("gde_quantum_mechanics", "pre_oral"):                                       # the new types are accepted
+        for kind in ("gde_quantum_mechanics", "pre_oral", "ms_degree"):                                       # the new types are accepted
             physdb.add_milestone(conn, "U1", kind, "2023-03-01", "passed")
         for kind in ("bogus", "qualifying_exam", "thesis_proposal"):                            # others (and retired ones) aren't
             with self.assertRaises(ValueError):
@@ -273,7 +273,7 @@ class PhysDBTests(unittest.TestCase):
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
         self.assertNotIn("milestones_old", names); self.assertIn("idx_milestones_student", names)
         physdb.connect(path)                                                                    # a second start changes nothing
-        self.assertEqual(conn.execute("SELECT count(*) FROM milestones").fetchone()[0], 4)
+        self.assertEqual(conn.execute("SELECT count(*) FROM milestones").fetchone()[0], 5)
         # deleting the student still removes their milestones (the foreign key survived the rebuild)
         conn.execute("DELETE FROM students WHERE id = 1"); conn.commit()
         self.assertEqual(conn.execute("SELECT count(*) FROM milestones").fetchone()[0], 0)
