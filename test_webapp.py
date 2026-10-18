@@ -1142,6 +1142,11 @@ class WebTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200); self.assertIn('<option value="committee_formed" selected>Committee Formed</option>', r.get_data(as_text=True))
         self.assertNotIn("Lovelace", re.sub(r"\s+", " ", r.get_data(as_text=True)).split("<table")[1])   # they have one (passed)
 
+    def test_child_edit_heading_names_the_student(self):
+        c, t = self._faculty_world()
+        self.assertIn("<h1>Edit: funding for Stu Aa</h1>", c.get("/students/1/funding/1/edit").get_data(as_text=True))
+        self.assertIn("<h1>Add: funding for Stu Aa</h1>", c.get("/students/1/funding/new").get_data(as_text=True))
+
     def test_staff_view_of_a_faculty_member_has_funding_buttons(self):
         from unittest import mock
         c, t = self._faculty_world()

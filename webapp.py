@@ -700,8 +700,8 @@ def create_app(db_path=None):
     def child_edit(sid, table, rid):
         require_editor()
         table = child_table(table)
-        row = get_or_404(table, rid, student_id=sid)
-        return form_page(table, f"Edit: {CHILD_TABLES[table].lower()}", row,
+        s, row = get_or_404("students", sid), get_or_404(table, rid, student_id=sid)
+        return form_page(table, f"Edit: {CHILD_TABLES[table].lower()} for {s['first_name']} {s['last_name']}", row,
                          url_for("student", sid=sid), rid=rid, extra={"student_id": sid})
 
     @app.post("/students/<int:sid>/<table>/<int:rid>/delete")
