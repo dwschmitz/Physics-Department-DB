@@ -1659,6 +1659,14 @@ class WebTests(unittest.TestCase):
         self.assertEqual(rows["Bohr"], ["1", "2"])    # 1 advisee; 2 distinct students on committees
         self.assertEqual(rows["Curie"], ["0", "1"])
         self.assertIn("Committees", html)
+        # only active students are tallied: once student 2 graduates, their committee seats stop counting
+        conn = physdb.connect(os.path.join(self.tmp, "t.db"))
+        conn.execute("UPDATE students SET status = 'graduated' WHERE id IN (1, 2)"); conn.commit(); conn.close()
+        html = c.get("/faculty").get_data(as_text=True)
+        rows = {m.group(1): re.findall(r"<td>(\d+)</td>", m.group(2)) for m in
+                re.finditer(r"<tr><td><a [^>]*>([^<,]+),[^<]*</a></td>(.*?)</tr>", html, re.S)}
+        self.assertEqual(rows["Bohr"], ["0", "0"])
+        self.assertEqual(rows["Curie"], ["0", "0"])
 
     def test_supplement_funding_type(self):
         c = self.client("ed"); self.add_student(c); t = self.token(c)

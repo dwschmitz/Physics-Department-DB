@@ -715,10 +715,12 @@ def create_app(db_path=None):
     # ---- faculty ---------------------------------------------------------------
     @app.route("/faculty")
     def faculty_list():
-        rows = db().execute("""SELECT f.*, (SELECT count(*) FROM advising a WHERE a.faculty_id = f.id
+        rows = db().execute("""SELECT f.*,
+                  (SELECT count(DISTINCT a.student_id) FROM advising a JOIN students s ON s.id = a.student_id
+                  WHERE a.faculty_id = f.id AND s.status = 'active'
                   AND a.end_date IS NULL AND a.role IN ('advisor','co-advisor')) AS n_advisees,
-                  (SELECT count(DISTINCT a.student_id) FROM advising a WHERE a.faculty_id = f.id
-                  AND a.end_date IS NULL) AS n_committees
+                  (SELECT count(DISTINCT a.student_id) FROM advising a JOIN students s ON s.id = a.student_id
+                  WHERE a.faculty_id = f.id AND s.status = 'active' AND a.end_date IS NULL) AS n_committees
                   FROM faculty f""").fetchall()
         name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
         rows, sort, sdir = sort_rows([dict(r) for r in rows], {
