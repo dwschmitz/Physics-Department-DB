@@ -1,7 +1,7 @@
 {# The two tables of a faculty member's students. Shared by a faculty member's own page and the staff view of them.
    Expects: advisees, committee, season, year, prev_url/next_url + labels, total, n_active_advisees, n_active_committee,
    and staff_view (True: names link to the staff student pages; False: the faculty member's own read-only pages). #}
-{% from "_macros.html" import funding_cell with context %}
+{% from "_macros.html" import funding_cell, sort_th with context %}
 {% set editing = staff_view and can_edit %}
 <h2>{{ 'Advisees' if staff_view else 'Students I advise' }} <span class="muted">({{ n_active_advisees }} active)</span></h2>
 <div class="copy-stepper">
@@ -10,7 +10,8 @@
   {% if next_url %}<a class="btn secondary small" href="{{ next_url }}" title="{{ next_label }}">Next &rsaquo;</a>{% else %}<span class="btn secondary small disabled">Next &rsaquo;</span>{% endif %}
   {% if advisees %}<span class="muted">total ${{ '{:,.0f}'.format(total) }}</span>{% endif %}
 </div>
-<table><tr><th>Name</th><th>Status</th><th>Clock</th><th>Expected graduation</th><th>Research area</th><th>Funding, {{ season }} {{ year }}</th></tr>
+<style>main{max-width:96rem}table.nowrap td,table.nowrap th{white-space:nowrap}</style>
+<table class="nowrap"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir) }}{{ sort_th("Expected graduation", "expected_grad_year", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Funding, " ~ season ~ " " ~ year, "funding", sort, sdir, "Sorts by the total for the term") }}</tr>
 {% for s in advisees %}
 <tr><td style="white-space:nowrap"><a href="{{ url_for('student', sid=s.id) if staff_view else url_for('faculty_student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a></td>
 <td><span class="badge {{ s.status }}">{{ s.status|label }}</span></td>

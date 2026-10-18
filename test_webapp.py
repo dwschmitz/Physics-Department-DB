@@ -1298,6 +1298,37 @@ class WebTests(unittest.TestCase):
         self.assertIn("<h1>Edit: funding for Stu Aa</h1>", c.get("/students/1/funding/1/edit").get_data(as_text=True))
         self.assertIn("<h1>Add: funding for Stu Aa</h1>", c.get("/students/1/funding/new").get_data(as_text=True))
 
+    def test_faculty_advisee_table_sorts_and_does_not_wrap(self):
+        from unittest import mock
+        c, t = self._faculty_world()
+        def who(path, client=c):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                html = client.get(path).get_data(as_text=True)
+            return re.findall(r'/students/\d+">(\w+), Stu', html.split("<h2>Thesis Committees")[0]), html
+        # Aa: $3,000 (RA)   Bb: $250 (supplement)   both advisees of Bohr
+        self.assertEqual(who("/faculty/1")[0], ["Aa", "Bb"])
+        self.assertEqual(who("/faculty/1?sort=name&dir=desc")[0], ["Bb", "Aa"])
+        self.assertEqual(who("/faculty/1?sort=funding")[0], ["Bb", "Aa"])
+        self.assertEqual(who("/faculty/1?sort=funding&dir=desc")[0], ["Aa", "Bb"])
+        self.assertEqual(who("/faculty/1?sort=research_area&dir=desc")[0], ["Bb", "Aa"])
+        self.assertEqual(who("/faculty/1?sort=bogus")[0], ["Aa", "Bb"])
+        for key in ("status", "clock", "expected_grad_year"):
+            self.assertEqual(sorted(who(f"/faculty/1?sort={key}")[0]), ["Aa", "Bb"], key)
+        # a blank sorts last whichever way: with Aa's funding cleared for the term, Aa is last in both directions
+        c.post("/students/1/funding/1/delete", data={"csrf_token": t})
+        self.assertEqual(who("/faculty/1?sort=funding")[0], ["Bb", "Aa"]); self.assertEqual(who("/faculty/1?sort=funding&dir=desc")[0], ["Bb", "Aa"])
+        _, html = who("/faculty/1?sort=funding&dir=desc")
+        head = html.split('<table class="nowrap">')[1].split("</tr>")[0]
+        self.assertEqual(head.count('class="sortlink'), 6)                                    # every heading sorts
+        self.assertIn("table.nowrap td", html)
+        self.assertIn("sort=funding&amp;dir=desc", html.split("Prev")[0].rsplit("<a ", 1)[1])      # Prev / Next keep the sort
+        self.assertIn("sort=funding&amp;dir=desc", html.split("Next")[0].rsplit("<a ", 1)[1])
+        # the faculty member's own page sorts the same way
+        self._make_faculty_login(c, t); fc = self._faculty_client()
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            own = fc.get("/my?sort=name&dir=desc").get_data(as_text=True)
+        self.assertEqual(re.findall(r"<tr><td[^>]*><a [^>]*>(\w+), Stu</a>", own.split("Students whose committee")[0]), ["Bb", "Aa"])
+
     def test_staff_view_of_a_faculty_member_has_funding_buttons(self):
         from unittest import mock
         c, t = self._faculty_world()
@@ -1335,7 +1366,8 @@ class WebTests(unittest.TestCase):
         self.assertIn('<h2>Thesis Committees <span class="muted">(2 active)</span></h2>', html)
         self.assertNotIn("Current students", html)                                         # replaced by the two tables
         adv, com = html.split("<h2>Thesis Committees")
-        headers = lambda h: re.findall(r"<th>([^<]*)</th>", h.split("</tr>")[0].split("<table>")[-1])
+        headers = lambda h: [re.sub(r"\s+", " ", re.sub(r"<[^>]+>|[▲▼↕]", "", x)).strip() for x in
+                             re.findall(r"<th[^>]*>(.*?)</th>", h.split("</tr>")[0].split("<table")[-1], re.S)]
         self.assertEqual(headers(adv), ["Name", "Status", "Clock", "Expected graduation", "Research area", "Funding, Autumn 2026"])
         self.assertEqual(headers(com), ["Name", "Role", "Status", "Clock", "Research area", "Advisor"])
         # the right people, linked to the staff student pages (committee names too: staff can open any student)
@@ -1448,7 +1480,8 @@ class WebTests(unittest.TestCase):
                 return f.get("/my").get_data(as_text=True)
         html = page()
         adv, com = html.split("Students whose committee I am on")
-        headers = lambda h: re.findall(r"<th>([^<]*)</th>", h.split("</tr>")[0].split("<table>")[-1])
+        headers = lambda h: [re.sub(r"\s+", " ", re.sub(r"<[^>]+>|[▲▼↕]", "", x)).strip() for x in
+                             re.findall(r"<th[^>]*>(.*?)</th>", h.split("</tr>")[0].split("<table")[-1], re.S)]
         self.assertEqual(headers(adv), ["Name", "Status", "Clock", "Expected graduation", "Research area",
                                         "Funding, Autumn 2026"])                                  # no CNET, no Matriculation
         self.assertEqual(headers(com), ["Name", "My role", "Status", "Clock", "Research area", "Advisor"])

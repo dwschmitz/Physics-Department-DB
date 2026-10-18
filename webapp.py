@@ -540,23 +540,39 @@ def create_app(db_path=None):
                     prev_url=step(prev_season, prev_year), next_url=step(next_season, next_year),
                     prev_label=f"{prev_season} {prev_year}", next_label=f"{next_season} {next_year}")
 
+    def sort_advisees(students):
+        """Sort a student table by the clicked heading (?sort=&dir=); used by the faculty and FSR overviews. Needs each
+        student's clock_terms and funding (this term's entries). Returns (students, sort, dir)."""
+        for a in students:
+            amounts = [e["amount"] for e in a["funding"] if e["amount"] is not None]
+            a["funded"] = sum(amounts) if amounts else None                      # blank sorts last
+        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
+        return sort_rows(students, {
+            "name": name, "advisor": lambda r: _text(r.get("advisors")), "status": lambda r: STATUSES.index(r["status"]),
+            "clock": lambda r: r["clock_terms"], "expected_grad_year": lambda r: r["expected_grad_year"],
+            "research_area": lambda r: _text(r["research_area"]), "funding": lambda r: r["funded"],
+        }, request.args.get("sort"), request.args.get("dir"), "name")
+
     def faculty_overview(faculty_id, endpoint, **url_args):
         """Everything the two-table faculty overview needs, for one faculty member: their advisees (with funding for a
         term and the clock) and the students whose committee they are on. Used for a faculty member's own page and for
         the staff view of a faculty member, so the two always look alike. `endpoint` is the page that the term
         Prev / Next links point back to."""
-        term = term_stepper(endpoint, **url_args)
+        keep = {k: request.args[k] for k in ("sort", "dir") if k in request.args}     # Prev / Next keep the sorting
+        term = term_stepper(endpoint, **url_args, **keep)
         year, season, now = term["year"], term["season"], term["now"]
         advisees = physdb.faculty_advisees(db(), faculty_id)
         funding = physdb.funding_for_term(db(), [a["id"] for a in advisees], year, season)
         for a in advisees:
             a["clock"] = physdb.clock_label(a, now)
+            a["clock_terms"] = physdb.clock_terms(a, now)
             a["funding"] = funding[a["id"]]
+        advisees, sort, sdir = sort_advisees(advisees)
         committee = physdb.faculty_committee_students(db(), faculty_id)
         for c in committee:
             c["clock"] = physdb.clock_label(c, now)
         return dict(
-            advisees=advisees, committee=committee, **term,
+            advisees=advisees, committee=committee, sort=sort, sdir=sdir, **term,
             total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]),
             n_active_advisees=sum(a["status"] == "active" for a in advisees),        # the headings count active students
             n_active_committee=sum(c["status"] == "active" for c in committee))
@@ -599,13 +615,7 @@ def create_app(db_path=None):
             a["clock"] = physdb.clock_label(a, term["now"])
             a["clock_terms"] = physdb.clock_terms(a, term["now"])
             a["funding"] = funding[a["id"]]
-            a["funded"] = sum(e["amount"] or 0 for e in a["funding"]) if any(e["amount"] is not None for e in a["funding"]) else None
-        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
-        students, sort, sdir = sort_rows(students, {
-            "name": name, "advisor": lambda r: _text(r["advisors"]), "status": lambda r: STATUSES.index(r["status"]),
-            "clock": lambda r: r["clock_terms"], "expected_grad_year": lambda r: r["expected_grad_year"],
-            "research_area": lambda r: _text(r["research_area"]), "funding": lambda r: r["funded"],
-        }, request.args.get("sort"), request.args.get("dir"), "name")
+        students, sort, sdir = sort_advisees(students)
         return dict(
             advisees=students, sort=sort, sdir=sdir, **term,
             total=sum(e["amount"] or 0 for a in students for e in a["funding"]),
