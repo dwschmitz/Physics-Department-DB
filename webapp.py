@@ -32,10 +32,14 @@ ROLE_ORDER = ACCOUNT_ROLES + ["faculty"]              # faculty logins are made 
 FACULTY_ENDPOINTS = {"faculty_home", "faculty_student", "account", "logout", "login", "static", "home"}
 MIN_PASSWORD = 10
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
-MILESTONE_KINDS = ["qualifying_exam", "candidacy", "thesis_proposal", "thesis_defense", "committee_formed", "other"]
+MILESTONE_KINDS = physdb.MILESTONE_KINDS
 OUTCOMES = ["pending", "passed", "conditional", "failed"]
 FUNDING_KINDS = ["TA", "RA", "fellowship", "supplement", "other"]
-DISPLAY_NAMES = {"committee_formed": "Committee Formed", "citizen": "Citizen",
+DISPLAY_NAMES = {"gde_classical_mechanics": "GDE Classical Mechanics", "gde_quantum_mechanics": "GDE Quantum Mechanics",
+                 "gde_electrodynamics": "GDE Electrodynamics", "gde_statistical_mechanics": "GDE Statistical Mechanics",
+                 "candidacy": "Candidacy", "committee_formed": "Committee Formed", "pre_oral": "Pre-Oral",
+                 "thesis_defense": "Thesis Defense", "qualifying_exam": "Qualifying Exam",
+                 "thesis_proposal": "Thesis Proposal", "citizen": "Citizen",
                  "permanent_resident": "Permanent Resident", "international": "International"}
 
 CHILD_TABLES = {
@@ -73,7 +77,7 @@ def term_years():
     return [(y, y) for y in range(this_year + 6, 1999, -1)]
 
 
-def fields_for(table, conn):
+def fields_for(table, conn, row=None):
     """Form definition for a table. Choices are (value, label) pairs."""
     enum = lambda vals: [(v, label(v)) for v in vals]
     if table == "students":
@@ -108,7 +112,11 @@ def fields_for(table, conn):
             F("end_date", "End date", "date", help="Leave blank if ongoing."),
         ]
     if table == "milestones":
-        return [F("kind", "Milestone", "select", True, enum(MILESTONE_KINDS)),
+        kinds = enum(MILESTONE_KINDS)
+        if row is not None and row["kind"] in physdb.RETIRED_MILESTONE_KINDS:
+            # an entry saved under a retired type keeps it (selected) so editing it can't change it by accident
+            kinds.insert(0, (row["kind"], f"{label(row['kind'])} (retired)"))
+        return [F("kind", "Milestone", "select", True, kinds),
                 F("date", "Date", "date", True),
                 F("outcome", "Outcome", "select", True, enum(OUTCOMES)),
                 F("notes", "Notes", "textarea")]
@@ -557,7 +565,7 @@ def create_app(db_path=None):
 
     def form_page(table, title, row, back, post_extra=None, extra=None, rid=None):
         back = _safe_path(request.args.get("next")) or back     # ?next=... returns the user to where they came from
-        fields = fields_for(table, db())
+        fields = fields_for(table, db(), row)
         if request.method == "POST":
             values, errors = parse_form(fields, request.form)
             if "start_date" in values and "end_date" in values and not errors and \
@@ -753,9 +761,9 @@ def create_app(db_path=None):
     # ---- reports / export ------------------------------------------------------
     @app.route("/reports")
     def reports():
-        kind = request.args.get("kind", "qualifying_exam")
+        kind = request.args.get("kind", MILESTONE_KINDS[0])
         if kind not in MILESTONE_KINDS:
-            kind = "qualifying_exam"
+            kind = MILESTONE_KINDS[0]
         try:
             years = float(request.args.get("years", 2))                  # fractions like 0.25 are fine
             if not math.isfinite(years):

@@ -53,9 +53,9 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(physdb.list_students(self.conn, advisor="curie@uni.edu", committee="curie@uni.edu"), [])
 
     def test_missing_milestone(self):
-        self.assertEqual(len(physdb.missing_milestone(self.conn, "qualifying_exam")), 1)
-        physdb.add_milestone(self.conn, "U1001", "qualifying_exam", "2022-05-01", "passed")
-        self.assertEqual(physdb.missing_milestone(self.conn, "qualifying_exam"), [])
+        self.assertEqual(len(physdb.missing_milestone(self.conn, "gde_classical_mechanics")), 1)
+        physdb.add_milestone(self.conn, "U1001", "gde_classical_mechanics", "2022-05-01", "passed")
+        self.assertEqual(physdb.missing_milestone(self.conn, "gde_classical_mechanics"), [])
 
     def test_status_and_check_constraints(self):
         physdb.set_status(self.conn, "U1001", "graduated")
@@ -265,13 +265,15 @@ class PhysDBTests(unittest.TestCase):
         rows = [tuple(r) for r in conn.execute("SELECT id, student_id, kind, date, outcome, notes FROM milestones ORDER BY id")]
         self.assertEqual(rows, [(5, 1, "qualifying_exam", "2022-05-01", "passed", "kept note"),
                                 (6, 1, "thesis_defense", "2026-05-01", "pending", None)])
-        physdb.add_milestone(conn, "U1", "committee_formed", "2023-03-01", "passed")          # the new type is accepted
-        with self.assertRaises(sqlite3.IntegrityError):                                         # others still aren't
-            physdb.add_milestone(conn, "U1", "bogus", "2023-03-01")
+        for kind in ("gde_quantum_mechanics", "pre_oral"):                                       # the new types are accepted
+            physdb.add_milestone(conn, "U1", kind, "2023-03-01", "passed")
+        for kind in ("bogus", "qualifying_exam", "thesis_proposal"):                            # others (and retired ones) aren't
+            with self.assertRaises(ValueError):
+                physdb.add_milestone(conn, "U1", kind, "2023-03-01")
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
         self.assertNotIn("milestones_old", names); self.assertIn("idx_milestones_student", names)
         physdb.connect(path)                                                                    # a second start changes nothing
-        self.assertEqual(conn.execute("SELECT count(*) FROM milestones").fetchone()[0], 3)
+        self.assertEqual(conn.execute("SELECT count(*) FROM milestones").fetchone()[0], 4)
         # deleting the student still removes their milestones (the foreign key survived the rebuild)
         conn.execute("DELETE FROM students WHERE id = 1"); conn.commit()
         self.assertEqual(conn.execute("SELECT count(*) FROM milestones").fetchone()[0], 0)
@@ -308,17 +310,17 @@ class PhysDBTests(unittest.TestCase):
         add("A", "Autumn", 2025); add("B", "Spring", 2026); add("C", "Summer", 2026); add("D", "Autumn", 2026)
         add("E", "Winter", 2027)                       # hasn't matriculated yet: no clock
         add("F", "Autumn", 2020, "graduated"); add("G", "Autumn", 2020, "on_leave"); add("H", "Autumn", 2020)
-        physdb.add_milestone(self.conn, "H", "qualifying_exam", "2022-05-01", "passed")     # already has it
-        physdb.add_milestone(self.conn, "A", "qualifying_exam", "2025-12-01", "failed")     # a failure doesn't count as done
+        physdb.add_milestone(self.conn, "H", "gde_classical_mechanics", "2022-05-01", "passed")     # already has it
+        physdb.add_milestone(self.conn, "A", "gde_classical_mechanics", "2025-12-01", "failed")     # a failure doesn't count as done
         physdb.add_milestone(self.conn, "B", "candidacy", "2026-05-01", "passed")           # a different milestone
 
     def test_missing_milestone_uses_the_clock_and_accepts_fractions(self):
         self._milestone_check_students()
         now = ("Autumn", 2026)
         # (the fixture's own student U1001, matriculated Autumn 2020, has clock 6.0 and no qualifying exam)
-        everyone = lambda years, kind="qualifying_exam": [r["university_id"] for r in
+        everyone = lambda years, kind="gde_classical_mechanics": [r["university_id"] for r in
                                                            physdb.missing_milestone(self.conn, kind, years, now)]
-        who = lambda years, kind="qualifying_exam": [u for u in everyone(years, kind) if u != "U1001"]
+        who = lambda years, kind="gde_classical_mechanics": [u for u in everyone(years, kind) if u != "U1001"]
         self.assertIn("U1001", everyone(6)); self.assertNotIn("U1001", everyone(6.25))      # 6.0 qualifies for 6, not 6.25
         # H (passed), F (graduated), G (on leave) and E (not matriculated yet) are never listed
         self.assertEqual(who(0), ["A", "B", "C", "D"])                # oldest matriculation first
@@ -340,7 +342,7 @@ class PhysDBTests(unittest.TestCase):
             physdb.assign_advisor(self.conn, sid, f, role, "2025-01-01")
         self.conn.execute("UPDATE advising SET end_date = '2025-06-01' WHERE student_id = (SELECT id FROM students WHERE university_id = 'C')")
         self.conn.commit()
-        adv = {r["university_id"]: r["advisors"] for r in physdb.missing_milestone(self.conn, "qualifying_exam", 0, now)}
+        adv = {r["university_id"]: r["advisors"] for r in physdb.missing_milestone(self.conn, "gde_classical_mechanics", 0, now)}
         self.assertEqual(set(adv["A"].split(", ")), {"Bohr", "Curie"})
         self.assertIsNone(adv["B"])                                   # committee only: not an advisor
         self.assertIsNone(adv["C"])                                   # ended

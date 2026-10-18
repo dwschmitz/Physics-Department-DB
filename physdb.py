@@ -15,6 +15,11 @@ SCHEMA = Path(__file__).with_name("schema.sql")
 
 # Terms in calendar order within a year (the university year runs Autumn, Winter, Spring, Summer).
 CITIZENSHIP = ["citizen", "permanent_resident", "international"]
+# Milestone types offered for new entries, in menu order. The retired two are no longer offered, but entries that
+# already use them are kept (and still shown, with their old names) rather than deleted or silently relabeled.
+MILESTONE_KINDS = ["gde_classical_mechanics", "gde_quantum_mechanics", "gde_electrodynamics",
+                   "gde_statistical_mechanics", "candidacy", "committee_formed", "pre_oral", "thesis_defense", "other"]
+RETIRED_MILESTONE_KINDS = ["qualifying_exam", "thesis_proposal"]
 SEASONS = ["Autumn", "Winter", "Spring", "Summer"]
 # SQL expression giving chronological position of a season within its calendar year.
 SEASON_RANK_SQL = ("CASE term_season WHEN 'Winter' THEN 1 WHEN 'Spring' THEN 2 "
@@ -158,9 +163,9 @@ def _table_exists(conn, name):
 
 def _stash_old_milestones(conn):
     """The milestone types are a CHECK rule SQLite can't change in place, so a table that predates a newly
-    allowed type ('committee_formed') is set aside, recreated from schema.sql, and its rows copied back."""
+    allowed type (the latest being 'pre_oral') is set aside, recreated from schema.sql, and its rows copied back."""
     row = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'milestones'").fetchone()
-    if row is None or "'committee_formed'" in row[0]:
+    if row is None or "'pre_oral'" in row[0]:
         return False
     conn.executescript("DROP INDEX IF EXISTS idx_milestones_student;"
                        "ALTER TABLE milestones RENAME TO milestones_old;")
@@ -397,6 +402,9 @@ def assign_advisor(conn, student, faculty, role="advisor", start_date=None):
 
 
 def add_milestone(conn, student, kind, date, outcome="pending", notes=None):
+    if kind not in MILESTONE_KINDS:
+        retired = " (that type has been retired)" if kind in RETIRED_MILESTONE_KINDS else ""
+        raise ValueError(f"unknown milestone type '{kind}'{retired}; choose one of: {', '.join(MILESTONE_KINDS)}")
     s = _find(conn, "students", student)
     conn.execute(
         "INSERT INTO milestones (student_id, kind, date, outcome, notes) VALUES (?,?,?,?,?)",
@@ -632,8 +640,7 @@ def build_parser():
 
     a = sub.add_parser("add-milestone")
     a.add_argument("student")
-    a.add_argument("kind", choices=["qualifying_exam", "candidacy", "thesis_proposal",
-                                    "thesis_defense", "committee_formed", "other"])
+    a.add_argument("kind", choices=MILESTONE_KINDS)
     a.add_argument("date", help="YYYY-MM-DD")
     a.add_argument("--outcome", default="pending",
                    choices=["pending", "passed", "conditional", "failed"])

@@ -7,13 +7,13 @@ SQLite database plus a command-line tool (Python 3, standard library only).
 python3 physdb.py add-faculty Niels Bohr bohr@uni.edu --research-area Atomic
 python3 physdb.py add-student U1001 Ada Lovelace ada@uni.edu --matriculation-year 2022 --matriculation-term Autumn --research-area "Quantum optics"
 python3 physdb.py assign-advisor U1001 bohr@uni.edu            # --role co-advisor|committee|committee_chair
-python3 physdb.py add-milestone U1001 qualifying_exam 2024-05-01 --outcome passed
+python3 physdb.py add-milestone U1001 gde_classical_mechanics 2024-05-01 --outcome passed
 python3 physdb.py add-funding U1001 TA 2026 Autumn --source Dept --amount 12000 --poetaf-coa 1234567
 python3 physdb.py set-status U1001 on_leave
 python3 physdb.py list --status active --advisor bohr@uni.edu --year 2022   # students Bohr advises
 python3 physdb.py list --committee bohr@uni.edu                              # students where Bohr is only on the committee
 python3 physdb.py show U1001
-python3 physdb.py missing qualifying_exam --min-years 1.5      # milestone check: active students with clock >= 1.5 and no passed qualifier
+python3 physdb.py missing candidacy --min-years 1.5            # milestone check: active students with clock >= 1.5 and no passed candidacy
 python3 physdb.py export > students.csv
 ```
 Students and faculty can be referenced by row id, university id, or email.
