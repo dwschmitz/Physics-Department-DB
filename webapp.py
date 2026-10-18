@@ -591,14 +591,23 @@ def create_app(db_path=None):
     def fsr_overview(fsr_id, endpoint, **url_args):
         """The students of every faculty member this FSR is the FSR for, with funding for a term and the clock.
         Used for an FSR's own page and for the staff view of an FSR."""
-        term = term_stepper(endpoint, **url_args)
+        keep = {k: request.args[k] for k in ("sort", "dir") if k in request.args}     # Prev / Next keep the sorting
+        term = term_stepper(endpoint, **url_args, **keep)
         students = physdb.fsr_advisees(db(), fsr_id)
         funding = physdb.funding_for_term(db(), [a["id"] for a in students], term["year"], term["season"])
         for a in students:
             a["clock"] = physdb.clock_label(a, term["now"])
+            a["clock_terms"] = physdb.clock_terms(a, term["now"])
             a["funding"] = funding[a["id"]]
+            a["funded"] = sum(e["amount"] or 0 for e in a["funding"]) if any(e["amount"] is not None for e in a["funding"]) else None
+        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
+        students, sort, sdir = sort_rows(students, {
+            "name": name, "advisor": lambda r: _text(r["advisors"]), "status": lambda r: STATUSES.index(r["status"]),
+            "clock": lambda r: r["clock_terms"], "expected_grad_year": lambda r: r["expected_grad_year"],
+            "research_area": lambda r: _text(r["research_area"]), "funding": lambda r: r["funded"],
+        }, request.args.get("sort"), request.args.get("dir"), "name")
         return dict(
-            advisees=students, **term, with_advisor=True, link_students=False,
+            advisees=students, sort=sort, sdir=sdir, **term,
             total=sum(e["amount"] or 0 for a in students for e in a["funding"]),
             n_active_advisees=sum(a["status"] == "active" for a in students))
 

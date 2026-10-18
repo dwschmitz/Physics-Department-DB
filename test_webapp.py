@@ -1224,8 +1224,10 @@ class WebTests(unittest.TestCase):
                 return client.get("/fsr" + q).get_data(as_text=True)
         html = page()
         self.assertIn("<h1>My students</h1>", html); self.assertIn("Niels Bohr", html)
-        headers = re.findall(r"<th>([^<]*)</th>", html.split("</tr>")[0].split("<table>")[-1])
+        head = html.split("</tr>")[0].split('<table class="nowrap">')[-1]
+        headers = [re.sub(r"\s+", " ", re.sub(r"<[^>]+>|[▲▼↕]", "", h)).strip() for h in re.findall(r"<th[^>]*>(.*?)</th>", head, re.S)]
         self.assertEqual(headers, ["Name", "Advisor", "Status", "Clock", "Expected graduation", "Research area", "Funding, Autumn 2026"])
+        self.assertEqual(head.count('class="sortlink'), 7)                                 # every heading sorts
         who = lambda h: re.findall(r"<tr><td[^>]*>(\w+), Stu</td>", h)
         self.assertEqual(who(html), ["Aa", "Bb"])        # Bohr's advisor/co-advisor students; not committee-only, not the ended one
         self.assertIn("RA · NSF grant · 1234567-ABC · $3,000", html); self.assertIn("Supplement · $250", html)
@@ -1242,6 +1244,26 @@ class WebTests(unittest.TestCase):
         self.assertEqual(who(html), ["Aa", "Bb", "Cc", "Dd", "Ee"])
         self.assertIn("Marie Curie", html); self.assertIn("NOT-BOHRS", html)
         self.assertIn("Winter 2026</strong>", page("?year=2026&season=Winter"))
+        # every column sorts (blank values last, whichever way), and Prev / Next keep the sorting
+        self.assertEqual(who(page("?sort=name&dir=desc")), ["Ee", "Dd", "Cc", "Bb", "Aa"])
+        adv = lambda q: [re.sub(r"<[^>]+>", "", m) for m in re.findall(r"</td>\n<td>([^<]*)</td>\n<td><span", page(q))]
+        self.assertEqual(adv("?sort=advisor"), ["Marie Curie"] * 3 + ["Niels Bohr"] * 2)
+        self.assertEqual(adv("?sort=advisor&dir=desc"), ["Niels Bohr"] * 2 + ["Marie Curie"] * 3)
+        total = lambda q: who(page(q))
+        # funding for Autumn 2026: Aa $3,000, Bb $250, Ee $999, Cc/Dd none -> blanks last both ways
+        self.assertEqual(total("?sort=funding")[:3], ["Bb", "Ee", "Aa"]); self.assertEqual(sorted(total("?sort=funding")[3:]), ["Cc", "Dd"])
+        self.assertEqual(total("?sort=funding&dir=desc")[:3], ["Aa", "Ee", "Bb"]); self.assertEqual(sorted(total("?sort=funding&dir=desc")[3:]), ["Cc", "Dd"])
+        self.assertEqual(sorted(who(page("?sort=clock"))), ["Aa", "Bb", "Cc", "Dd", "Ee"])
+        for key in ("status", "clock", "expected_grad_year", "research_area"):
+            self.assertEqual(sorted(who(page(f"?sort={key}&dir=desc"))), ["Aa", "Bb", "Cc", "Dd", "Ee"], key)
+        self.assertEqual(who(page("?sort=research_area&dir=desc")), ["Ee", "Dd", "Cc", "Bb", "Aa"])   # area-Ee ... area-Aa
+        self.assertEqual(who(page("?sort=bogus")), ["Aa", "Bb", "Cc", "Dd", "Ee"])               # unknown column: by name
+        stepped = page("?sort=funding&dir=desc")
+        self.assertRegex(stepped, r'href="/fsr\?year=2027&amp;season=Winter&amp;sort=funding&amp;dir=desc"')
+        self.assertIn('href="/fsr?sort=funding&amp;dir=asc"', stepped)                           # clicking the active heading reverses
+        self.assertIn('href="/fsr?year=2026&amp;season=Winter&amp;sort=advisor&amp;dir=asc"', page("?year=2026&season=Winter"))   # sorting keeps the term
+        # one funding entry per line, none wrapping
+        self.assertIn("table.nowrap td", stepped)
         # nothing else is reachable, and nothing can be changed
         for path in ("/students", "/students/1", "/faculty", "/faculty/1", "/fsrs", "/fsrs/1", "/users", "/reports", "/my",
                      "/my/students/1", "/students/1/funding/new", "/students/1/funding/copy", "/reports/funding", "/fsrs/new"):

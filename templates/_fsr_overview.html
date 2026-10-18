@@ -1,7 +1,7 @@
 {# The students of the faculty an FSR works with. Shared by an FSR's own page and the staff view of an FSR.
    Expects: advisees, season, year, prev_url/next_url + labels, total, n_active_advisees, here, and staff_view (True:
    names link to the staff student pages, and staff with edit rights get the funding buttons). #}
-{% from "_macros.html" import funding_cell with context %}
+{% from "_macros.html" import funding_cell, sort_th with context %}
 {% set editing = staff_view and can_edit %}
 <h2>{{ 'Students' if staff_view else 'Students I support' }} <span class="muted">({{ n_active_advisees }} active)</span></h2>
 <div class="copy-stepper">
@@ -10,7 +10,8 @@
   {% if next_url %}<a class="btn secondary small" href="{{ next_url }}" title="{{ next_label }}">Next &rsaquo;</a>{% else %}<span class="btn secondary small disabled">Next &rsaquo;</span>{% endif %}
   {% if advisees %}<span class="muted">total ${{ '{:,.0f}'.format(total) }}</span>{% endif %}
 </div>
-<table><tr><th>Name</th><th>Advisor</th><th>Status</th><th>Clock</th><th>Expected graduation</th><th>Research area</th><th>Funding, {{ season }} {{ year }}</th></tr>
+<style>main{max-width:96rem}table.nowrap td,table.nowrap th{white-space:nowrap}</style>
+<table class="nowrap"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir) }}{{ sort_th("Expected graduation", "expected_grad_year", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Funding, " ~ season ~ " " ~ year, "funding", sort, sdir, "Sorts by the total for the term") }}</tr>
 {% for s in advisees %}
 <tr><td style="white-space:nowrap">{% if staff_view %}<a href="{{ url_for('student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a>{% else %}{{ s.last_name }}, {{ s.first_name }}{% endif %}</td>
 <td>{{ s.advisors or '' }}</td>
