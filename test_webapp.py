@@ -317,7 +317,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Funding for Autumn 2026", page("year=1800"))
         # tabs and a visible link from the Reports page
         self.assertIn("Funding by term", c.get("/reports").get_data(as_text=True))
-        self.assertIn("Behind schedule", html)
+        self.assertIn("Milestone Check", html)
         # CSV: the screen drops University ID, but the file carries the full student record
         c.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", csrf_token=t))
         c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
@@ -1181,6 +1181,61 @@ class WebTests(unittest.TestCase):
         for who in ("ed", "vw"):
             self.assertIn("<h2>Advisees", page(client=self.client(who)))
         self.assertEqual(f.get("/faculty/1").status_code, 403)
+
+    def test_milestone_check_tab(self):
+        from unittest import mock
+        c = self.client("ad"); t = self.token(c)
+        # at Autumn 2026: Mc_A clock 1.0, Mc_B 0.5, Mc_C 0.25, Mc_D 0.0
+        for uid, last, term, year in (("U1", "Mc_A", "Autumn", "2025"), ("U2", "Mc_B", "Spring", "2026"),
+                                      ("U3", "Mc_C", "Summer", "2026"), ("U4", "Mc_D", "Autumn", "2026")):
+            self.add_student(c, university_id=uid, email=f"{uid}@u.edu", last_name=last, matriculation_term=term,
+                             matriculation_year=year, research_area=f"area-{last}")
+        for first, last in (("Niels", "Bohr"), ("Marie", "Curie")):
+            c.post("/faculty/new", data=dict(first_name=first, last_name=last, email=f"{last}@u.edu", csrf_token=t))
+        for sid, fid, role in ((1, 1, "advisor"), (1, 2, "co-advisor"), (2, 2, "advisor"), (3, 1, "committee")):
+            c.post(f"/students/{sid}/advising/new", data=dict(faculty_id=fid, role=role, start_date="2025-01-01", csrf_token=t))
+        def page(qs=""):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return c.get("/reports?" + qs).get_data(as_text=True)
+        names = lambda h: re.findall(r">(Mc_\w), Ada</a>", h)
+        html = page("kind=qualifying_exam&years=0.25")
+        # 1) the tab and page are called "Milestone Check"
+        self.assertIn(">Milestone Check</a>", html); self.assertIn("<h1>Milestone Check</h1>", html)
+        self.assertNotIn("Behind schedule", html); self.assertNotIn("behind schedule", html)
+        # 2) the time box takes fractions, and the filter works on them (clock >= 0.25: A, B, C but not D)
+        self.assertRegex(html, r'<input type="number" name="years" min="0" max="15" step="0.25" value="0.25">')
+        self.assertEqual(names(html), ["Mc_A", "Mc_B", "Mc_C"])
+        self.assertEqual(names(page("kind=qualifying_exam&years=0.3")), ["Mc_A", "Mc_B"])
+        self.assertEqual(names(page("kind=qualifying_exam&years=1")), ["Mc_A"])
+        self.assertEqual(names(page("kind=qualifying_exam&years=1.25")), [])
+        self.assertEqual(sorted(names(page("kind=qualifying_exam&years=0"))), ["Mc_A", "Mc_B", "Mc_C", "Mc_D"])
+        for typed, shown in (("2", "2"), ("1.5", "1.5"), ("0.75", "0.75"), ("", "2"), ("abc", "2"), ("nan", "2"), ("inf", "2"),
+                             ("-3", "0"), ("99", "15")):                                       # sensible handling of any input
+            self.assertIn(f'step="0.25" value="{shown}">', page(f"years={typed}"), typed)
+        self.assertIn('step="0.25" value="2">', page())                                       # default stays 2 years
+        # 3) a Clock column right of Matriculation, 4) an Advisor column at the far right
+        sect = html.split("<table>")[1]
+        self.assertEqual(re.findall(r"<th[^>]*>\s*<a [^>]*>([^<]*?)\s*<span", sect.split("</tr>")[0]),
+                         ["Name", "Matriculation", "Clock", "Research area", "Advisor"])
+        rows = [re.findall(r"<td[^>]*>(.*?)</td>", r, re.S) for r in re.findall(r"<tr><td>.*?</tr>", sect, re.S)]
+        cells = [[re.sub(r"<[^>]+>", "", x).strip() for x in row] for row in rows]
+        self.assertEqual(cells, [["Mc_A, Ada", "Autumn 2025", "1.0", "area-Mc_A", "Bohr, Curie"],
+                                 ["Mc_B, Ada", "Spring 2026", "0.5", "area-Mc_B", "Curie"],
+                                 ["Mc_C, Ada", "Summer 2026", "0.25", "area-Mc_C", ""]])   # committee-only: no advisor listed
+        # both new columns sort (blanks last either way), and the links keep the milestone and the years
+        self.assertEqual(names(page("kind=qualifying_exam&years=0&sort=clock")), ["Mc_D", "Mc_C", "Mc_B", "Mc_A"])
+        self.assertEqual(names(page("kind=qualifying_exam&years=0&sort=clock&dir=desc")), ["Mc_A", "Mc_B", "Mc_C", "Mc_D"])
+        self.assertEqual(names(page("kind=qualifying_exam&years=0&sort=advisor"))[:2], ["Mc_A", "Mc_B"])
+        self.assertEqual(names(page("kind=qualifying_exam&years=0&sort=advisor&dir=desc"))[:2], ["Mc_B", "Mc_A"])
+        self.assertEqual(sorted(names(page("kind=qualifying_exam&years=0&sort=advisor"))[2:]), ["Mc_C", "Mc_D"])
+        link_page = page("kind=candidacy&years=0.25&sort=clock&dir=asc")
+        self.assertIn("kind=candidacy&amp;years=0.25&amp;sort=clock&amp;dir=desc", link_page)
+        self.assertIn("kind=candidacy&amp;years=0.25&amp;sort=advisor&amp;dir=asc", link_page)
+        self.assertIn('name="sort" value="clock"', link_page)
+        # the page still exists for everyone who could open it before (view-only too), and the other tab is intact
+        with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+            self.assertEqual(self.client("vw").get("/reports").status_code, 200)
+        self.assertIn("Funding by term", html)
 
     def test_faculty_summary_columns_and_active_counts(self):
         c, t = self._faculty_world(); self._make_faculty_login(c, t)

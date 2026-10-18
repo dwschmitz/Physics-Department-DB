@@ -13,7 +13,7 @@ python3 physdb.py set-status U1001 on_leave
 python3 physdb.py list --status active --advisor bohr@uni.edu --year 2022   # students Bohr advises
 python3 physdb.py list --committee bohr@uni.edu                              # students where Bohr is only on the committee
 python3 physdb.py show U1001
-python3 physdb.py missing qualifying_exam --min-years 2        # students behind schedule
+python3 physdb.py missing qualifying_exam --min-years 1.5      # milestone check: active students with clock >= 1.5 and no passed qualifier
 python3 physdb.py export > students.csv
 ```
 Students and faculty can be referenced by row id, university id, or email.
@@ -51,6 +51,9 @@ person's password and role (for example, to regain admin access if no admin can 
   copy. If something else is using port 8123 it picks the next free port and prints the address.
   To stop a stray copy: close the window it runs in, or on Mac/Linux use `pkill -f "webapp.py run"`,
   on Windows end "python" in Task Manager.
+- **Milestone Check** (Reports tab): pick a milestone and a minimum clock in years (fractions such as 0.25 are fine) to
+  list the active students at or past that clock who have no passed or conditional entry for it, with matriculation,
+  clock, research area and advisor; every heading sorts.
 - **Funding report** (Reports → *Funding by term*): pick a year and term (or step with **‹ Prev** / **Next ›**) to list every *active* student with
   their funding for that term (type, source, POETAF/COA, amount, notes). Active students with nothing
   recorded still appear, with empty fields; a student with several entries gets one row per entry.

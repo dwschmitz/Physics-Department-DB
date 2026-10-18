@@ -537,14 +537,24 @@ def undated_funding_count(conn):
            WHERE f.term_year IS NULL AND s.status = 'active'""").fetchone()[0]
 
 
-def missing_milestone(conn, kind, min_years=2):
-    """Active students who matriculated >= min_years ago and have no passed `kind`."""
-    cutoff = datetime.date.today().year - min_years
-    return conn.execute(
-        """SELECT * FROM students s WHERE s.status = 'active' AND s.matriculation_year <= ?
+def missing_milestone(conn, kind, min_years=2, now=None):
+    """Active students whose clock is at least `min_years` (fractions such as 0.25 are fine) and who have no
+    passed or conditional milestone of this kind. Each row includes `advisors` (current advisors' last names).
+    The clock is the same term count shown on the Students tab, so this filter and that column always agree."""
+    now = now or current_term()
+    rows = conn.execute(
+        """SELECT s.*,
+                  (SELECT group_concat(fa.last_name, ', ') FROM advising a JOIN faculty fa ON fa.id = a.faculty_id
+                    WHERE a.student_id = s.id AND a.end_date IS NULL
+                      AND a.role IN ('advisor', 'co-advisor')) AS advisors
+           FROM students s WHERE s.status = 'active'
            AND NOT EXISTS (SELECT 1 FROM milestones m WHERE m.student_id = s.id
                            AND m.kind = ? AND m.outcome IN ('passed','conditional'))
-           ORDER BY s.matriculation_year, CASE s.matriculation_term WHEN 'Winter' THEN 1 WHEN 'Spring' THEN 2 WHEN 'Summer' THEN 3 ELSE 4 END, s.last_name""", (cutoff, kind)).fetchall()
+           ORDER BY s.matriculation_year,
+                    CASE s.matriculation_term WHEN 'Winter' THEN 1 WHEN 'Spring' THEN 2 WHEN 'Summer' THEN 3 ELSE 4 END,
+                    s.last_name""", (kind,)).fetchall()
+    return [r for r in rows
+            if (terms := clock_terms(r, now)) is not None and terms / len(TERM_STARTS) >= min_years]
 
 
 def show_student(conn, key):
@@ -647,7 +657,8 @@ def build_parser():
     a = sub.add_parser("show"); a.add_argument("student")
 
     a = sub.add_parser("missing", help="active students lacking a passed milestone")
-    a.add_argument("kind"); a.add_argument("--min-years", type=int, default=2)
+    a.add_argument("kind"); a.add_argument("--min-years", type=float, default=2,
+                   help="minimum clock in years, e.g. 1.5 (default 2)")
 
     sub.add_parser("export", help="write all students as CSV to stdout")
     return p

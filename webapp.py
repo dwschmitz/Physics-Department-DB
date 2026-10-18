@@ -4,6 +4,7 @@ import argparse
 import datetime
 import getpass
 import hmac
+import math
 import os
 import re
 import secrets
@@ -756,14 +757,22 @@ def create_app(db_path=None):
         if kind not in MILESTONE_KINDS:
             kind = "qualifying_exam"
         try:
-            years = max(0, min(15, int(request.args.get("years", 2))))
+            years = float(request.args.get("years", 2))                  # fractions like 0.25 are fine
+            if not math.isfinite(years):
+                raise ValueError
         except ValueError:
-            years = 2
+            years = 2.0
+        years = max(0.0, min(15.0, years))
+        now = physdb.current_term()
         name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
-        rows, sort, sdir = sort_rows([dict(r) for r in physdb.missing_milestone(db(), kind, years)], {
+        rows, sort, sdir = sort_rows(
+            [{**dict(r), "clock": physdb.clock_label(r, now), "clock_terms": physdb.clock_terms(r, now)}
+             for r in physdb.missing_milestone(db(), kind, years, now)], {
             "name": name,
             "matriculation": lambda r: physdb.term_index(r["matriculation_term"], r["matriculation_year"]),
+            "clock": lambda r: r["clock_terms"],
             "research_area": lambda r: _text(r["research_area"]),
+            "advisor": lambda r: _text(r["advisors"]),
         }, request.args.get("sort"), request.args.get("dir"), "matriculation", tiebreak=name)
         return render_template("reports.html", rows=rows, kind=kind, years=years, kinds=MILESTONE_KINDS,
                                sort=sort, sdir=sdir)

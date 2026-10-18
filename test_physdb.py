@@ -298,6 +298,54 @@ class PhysDBTests(unittest.TestCase):
                          [(5, "qualifying_exam", "kept note"), (6, "thesis_defense", None)])
         self.assertEqual(conn.execute("SELECT count(*) FROM sqlite_master WHERE name = 'milestones_old'").fetchone()[0], 0)
 
+    def _milestone_check_students(self):
+        """At Autumn 2026: A clock 1.0, B 0.5, C 0.25, D 0.0 -- plus people who must never appear."""
+        def add(uid, term, year, status="active"):
+            sid = physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=uid, email=f"{uid}@m.o",
+                                     matriculation_year=year, matriculation_term=term, expected_grad_year=None,
+                                     research_area=None, notes=None)
+            self.conn.execute("UPDATE students SET status = ? WHERE id = ?", (status, sid)); self.conn.commit()
+        add("A", "Autumn", 2025); add("B", "Spring", 2026); add("C", "Summer", 2026); add("D", "Autumn", 2026)
+        add("E", "Winter", 2027)                       # hasn't matriculated yet: no clock
+        add("F", "Autumn", 2020, "graduated"); add("G", "Autumn", 2020, "on_leave"); add("H", "Autumn", 2020)
+        physdb.add_milestone(self.conn, "H", "qualifying_exam", "2022-05-01", "passed")     # already has it
+        physdb.add_milestone(self.conn, "A", "qualifying_exam", "2025-12-01", "failed")     # a failure doesn't count as done
+        physdb.add_milestone(self.conn, "B", "candidacy", "2026-05-01", "passed")           # a different milestone
+
+    def test_missing_milestone_uses_the_clock_and_accepts_fractions(self):
+        self._milestone_check_students()
+        now = ("Autumn", 2026)
+        # (the fixture's own student U1001, matriculated Autumn 2020, has clock 6.0 and no qualifying exam)
+        everyone = lambda years, kind="qualifying_exam": [r["university_id"] for r in
+                                                           physdb.missing_milestone(self.conn, kind, years, now)]
+        who = lambda years, kind="qualifying_exam": [u for u in everyone(years, kind) if u != "U1001"]
+        self.assertIn("U1001", everyone(6)); self.assertNotIn("U1001", everyone(6.25))      # 6.0 qualifies for 6, not 6.25
+        # H (passed), F (graduated), G (on leave) and E (not matriculated yet) are never listed
+        self.assertEqual(who(0), ["A", "B", "C", "D"])                # oldest matriculation first
+        self.assertEqual(sorted(who(0)), ["A", "B", "C", "D"])
+        self.assertEqual(who(0.25), ["A", "B", "C"])                  # clock >= 0.25
+        self.assertEqual(who(0.3), ["A", "B"])                        # 0.25 is not enough for 0.3
+        self.assertEqual(who(0.5), ["A", "B"])
+        self.assertEqual(who(0.75), ["A"])
+        self.assertEqual(who(1), ["A"])                               # exactly 1.0 qualifies
+        self.assertEqual(who(1.25), [])
+        self.assertEqual(who(2), [])
+        # integers still behave (the old inputs keep working), and other milestone kinds are independent
+        self.assertEqual(who(1, "candidacy"), ["H", "A"])             # B has a passed candidacy; H passed a different milestone
+        self.assertEqual(sorted(who(0, "candidacy")), ["A", "C", "D", "H"])        # B is the only one who is done
+        # each row names the current advisor(s) by last name
+        fa = physdb.add_faculty(self.conn, "Niels", "Bohr", "bohr@u.edu")
+        fb = physdb.add_faculty(self.conn, "Marie", "Curie", "curie@u.edu")
+        for sid, f, role in (("A", fa, "advisor"), ("A", fb, "co-advisor"), ("B", fb, "committee"), ("C", fa, "advisor")):
+            physdb.assign_advisor(self.conn, sid, f, role, "2025-01-01")
+        self.conn.execute("UPDATE advising SET end_date = '2025-06-01' WHERE student_id = (SELECT id FROM students WHERE university_id = 'C')")
+        self.conn.commit()
+        adv = {r["university_id"]: r["advisors"] for r in physdb.missing_milestone(self.conn, "qualifying_exam", 0, now)}
+        self.assertEqual(set(adv["A"].split(", ")), {"Bohr", "Curie"})
+        self.assertIsNone(adv["B"])                                   # committee only: not an advisor
+        self.assertIsNone(adv["C"])                                   # ended
+        self.assertIsNone(adv["D"])
+
     def test_funding_report(self):
         def add(uid, last, status="active"):
             sid = physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=last,

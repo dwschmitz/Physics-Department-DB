@@ -1,15 +1,15 @@
 {% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
 {% set tab = 'behind' %}{% include "_report_tabs.html" %}
-<h1>Students who may be behind schedule</h1>
+<h1>Milestone Check</h1>
 <form class="filters" method="get">
   <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ sdir }}">
   <label>Active students without a passed or conditional<select name="kind">
     {% for k in kinds %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ k|label }}</option>{% endfor %}</select></label>
-  <label>who matriculated at least (years ago)<input type="number" name="years" min="0" max="15" value="{{ years }}"></label>
+  <label title="The same clock shown on the Students tab, in years (0.25 per term)">whose clock is at least (years)<input type="number" name="years" min="0" max="15" step="0.25" value="{{ '%g' % years }}"></label>
   <button class="btn">Show</button>
 </form>
 <p class="muted">{{ rows|length }} student{{ '' if rows|length == 1 else 's' }}</p>
-<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Matriculation", "matriculation", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}</tr>
+<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Matriculation", "matriculation", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir, "Years since matriculation, counted in terms (0.25 per term), up to the current term") }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Advisor", "advisor", sort, sdir) }}</tr>
 {% for r in rows %}<tr><td><a href="{{ url_for('student', sid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
-<td>{{ r|matric }}</td><td>{{ r.research_area or '' }}</td></tr>
-{% else %}<tr><td colspan="3" class="muted">Nobody — everyone is on track.</td></tr>{% endfor %}</table>{% endblock %}
+<td>{{ r|matric }}</td><td>{{ r.clock }}</td><td>{{ r.research_area or '' }}</td><td>{{ r.advisors or '' }}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">Nobody — everyone is on track.</td></tr>{% endfor %}</table>{% endblock %}
