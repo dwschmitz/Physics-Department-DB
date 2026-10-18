@@ -21,7 +21,7 @@
 </table>
 
 <h2>{{ 'Thesis Committees' if staff_view else 'Students whose committee I am on' }} <span class="muted">({{ n_active_committee }} active)</span></h2>
-<table><tr><th>Name</th><th>{{ 'Role' if staff_view else 'My role' }}</th><th>Status</th><th>Clock</th><th>Research area</th><th>Advisor</th></tr>
+<table class="nowrap"><tr>{{ sort_th("Name", "name", csort, csdir, prefix="c") }}{{ sort_th("Role" if staff_view else "My role", "role", csort, csdir, prefix="c") }}{{ sort_th("Status", "status", csort, csdir, prefix="c") }}{{ sort_th("Clock", "clock", csort, csdir, prefix="c") }}{{ sort_th("Research area", "research_area", csort, csdir, prefix="c") }}{{ sort_th("Advisor", "advisor", csort, csdir, prefix="c") }}</tr>
 {% for s in committee %}
 <tr><td style="white-space:nowrap">{% if staff_view %}<a href="{{ url_for('student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a>{% else %}{{ s.last_name }}, {{ s.first_name }}{% endif %}</td>
 <td>{{ 'Committee chair' if s.committee_role == 'committee_chair' else 'Committee member' }}</td>

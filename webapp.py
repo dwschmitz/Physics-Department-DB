@@ -270,10 +270,11 @@ def create_app(db_path=None):
 
     @app.context_processor
     def sort_helpers():
-        def sort_url(key, cur_sort, cur_dir):
-            """Link for a column header: keeps the current filters, toggles direction on the active column."""
+        def sort_url(key, cur_sort, cur_dir, prefix=""):
+            """Link for a column header: keeps the current filters, toggles direction on the active column.
+            A page with two sortable tables gives the second a prefix (csort / cdir)."""
             args = request.args.to_dict(flat=True)
-            args.update(sort=key, dir="desc" if (cur_sort == key and cur_dir == "asc") else "asc")
+            args.update({prefix + "sort": key, prefix + "dir": "desc" if (cur_sort == key and cur_dir == "asc") else "asc"})
             return request.path + "?" + urlencode(args)
         return dict(sort_url=sort_url)
 
@@ -558,7 +559,7 @@ def create_app(db_path=None):
         term and the clock) and the students whose committee they are on. Used for a faculty member's own page and for
         the staff view of a faculty member, so the two always look alike. `endpoint` is the page that the term
         Prev / Next links point back to."""
-        keep = {k: request.args[k] for k in ("sort", "dir") if k in request.args}     # Prev / Next keep the sorting
+        keep = {k: request.args[k] for k in ("sort", "dir", "csort", "cdir") if k in request.args}     # Prev / Next keep the sorting
         term = term_stepper(endpoint, **url_args, **keep)
         year, season, now = term["year"], term["season"], term["now"]
         advisees = physdb.faculty_advisees(db(), faculty_id)
@@ -571,8 +572,15 @@ def create_app(db_path=None):
         committee = physdb.faculty_committee_students(db(), faculty_id)
         for c in committee:
             c["clock"] = physdb.clock_label(c, now)
+            c["clock_terms"] = physdb.clock_terms(c, now)
+        name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
+        committee, csort, csdir = sort_rows(committee, {
+            "name": name, "role": lambda r: 0 if r["committee_role"] == "committee_chair" else 1,
+            "status": lambda r: STATUSES.index(r["status"]), "clock": lambda r: r["clock_terms"],
+            "research_area": lambda r: _text(r["research_area"]), "advisor": lambda r: _text(r["advisors"]),
+        }, request.args.get("csort"), request.args.get("cdir"), "name")
         return dict(
-            advisees=advisees, committee=committee, sort=sort, sdir=sdir, **term,
+            advisees=advisees, committee=committee, sort=sort, sdir=sdir, csort=csort, csdir=csdir, **term,
             total=sum(e["amount"] or 0 for a in advisees for e in a["funding"]),
             n_active_advisees=sum(a["status"] == "active" for a in advisees),        # the headings count active students
             n_active_committee=sum(c["status"] == "active" for c in committee))
@@ -607,7 +615,7 @@ def create_app(db_path=None):
     def fsr_overview(fsr_id, endpoint, **url_args):
         """The students of every faculty member this FSR is the FSR for, with funding for a term and the clock.
         Used for an FSR's own page and for the staff view of an FSR."""
-        keep = {k: request.args[k] for k in ("sort", "dir") if k in request.args}     # Prev / Next keep the sorting
+        keep = {k: request.args[k] for k in ("sort", "dir", "csort", "cdir") if k in request.args}     # Prev / Next keep the sorting
         term = term_stepper(endpoint, **url_args, **keep)
         students = physdb.fsr_advisees(db(), fsr_id)
         funding = physdb.funding_for_term(db(), [a["id"] for a in students], term["year"], term["season"])

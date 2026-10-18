@@ -1329,6 +1329,31 @@ class WebTests(unittest.TestCase):
             own = fc.get("/my?sort=name&dir=desc").get_data(as_text=True)
         self.assertEqual(re.findall(r"<tr><td[^>]*><a [^>]*>(\w+), Stu</a>", own.split("Students whose committee")[0]), ["Bb", "Aa"])
 
+    def test_faculty_committee_table_sorts_independently(self):
+        from unittest import mock
+        c, t = self._faculty_world()
+        def page(q=""):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                html = c.get("/faculty/1" + q).get_data(as_text=True)
+            adv, com = html.split("<h2>Thesis Committees")
+            names = lambda h: re.findall(r'/students/\d+">(\w+), Stu', h)
+            return names(adv), names(com), html, com
+        self.assertEqual(page()[:2], (["Aa", "Bb"], ["Cc", "Dd"]))
+        self.assertEqual(page("?csort=name&cdir=desc")[:2], (["Aa", "Bb"], ["Dd", "Cc"]))           # advisees untouched
+        self.assertEqual(page("?csort=role")[1], ["Dd", "Cc"])                                      # chair first
+        self.assertEqual(page("?csort=role&cdir=desc")[1], ["Cc", "Dd"])
+        self.assertEqual(page("?sort=name&dir=desc&csort=role")[:2], (["Bb", "Aa"], ["Dd", "Cc"]))  # both at once
+        for key in ("status", "clock", "research_area", "advisor", "bogus"):
+            self.assertEqual(sorted(page(f"?csort={key}")[1]), ["Cc", "Dd"], key)
+        self.assertEqual(page("?csort=research_area&cdir=desc")[1], ["Dd", "Cc"])
+        _, _, html, com = page("?sort=funding&csort=role")
+        head = com.split("</tr>")[0]
+        self.assertEqual(head.count('class="sortlink'), 6)
+        self.assertIn("csort=name", head); self.assertIn("sort=funding", head)                      # keeps the other table's sort
+        self.assertNotIn("sort=name&amp;dir", head.replace("csort=name&amp;cdir", ""))              # ...but only changes its own
+        self.assertIn("csort=role", html.split("<h2>Thesis Committees")[0].split("Next")[0].rsplit("<a ", 1)[1])   # Prev/Next keep it
+        self.assertIn('<table class="nowrap"><tr>', com)
+
     def test_staff_view_of_a_faculty_member_has_funding_buttons(self):
         from unittest import mock
         c, t = self._faculty_world()
