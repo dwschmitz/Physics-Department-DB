@@ -1079,6 +1079,53 @@ class WebTests(unittest.TestCase):
         sect = html.split("<h2>Milestones")[1].split("<h2>Funding")[0]
         return [re.findall(r"<td[^>]*>([^<]*)</td>", row)[:4] for row in re.findall(r"<tr><td>.*?</tr>", sect, re.S)]
 
+    def test_milestones_table_is_a_snapshot_of_passed_milestones(self):
+        c, t = self._milestone_world()                # Lovelace: passed GDE CM, Candidacy, Committee; Defense only pending
+        for i, (last, status) in enumerate((("Bb", "active"), ("Cc", "graduated"), ("Dd", "active")), 2):
+            self.add_student(c, university_id=f"U{i}", email=f"s{i}@u.edu", first_name="Stu", last_name=last, status=status,
+                             matriculation_year="2022", matriculation_term="Autumn")
+        post = lambda sid, kind, outcome: c.post(f"/students/{sid}/milestones/new",
+                                                 data=dict(kind=kind, date="2024-01-01", outcome=outcome, csrf_token=t))
+        post(2, "pre_oral", "conditional"); post(2, "gde_quantum_mechanics", "failed"); post(2, "ms_degree", "pending")
+        for kind in physdb.MILESTONE_KINDS[:-1]:
+            post(3, kind, "passed")                   # graduated: must not be listed at all
+        from unittest import mock
+        def page(q=""):
+            with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
+                return c.get("/reports/milestones" + q).get_data(as_text=True)
+        html = page()
+        text = lambda h: re.sub(r"\s+", " ", re.sub(r"<[^>]+>|[▲▼↕]", "", h)).strip()
+        heads = [text(h) for h in re.findall(r"<th[^>]*>(.*?)</th>", html.split("</tr>")[0], re.S)]
+        self.assertEqual(heads, ["Name", "Clock", "Advisor", "GDE CM", "GDE QM", "GDE EM", "GDE SM", "Candidacy", "MS",
+                                 "Committee", "Pre-Oral", "Defense"])
+        def table(h):
+            out = {}
+            for row in re.findall(r"<tr><td><a [^>]*>(.*?)</a></td>(.*?)</tr>", h, re.S):
+                cells = re.findall(r"<td[^>]*>(.*?)</td>", row[1], re.S)
+                out[row[0]] = (cells[0], cells[1], [i for i, x in enumerate(cells[2:]) if "✓" in x or "&#10003;" in x])
+            return out
+        rows = table(html)
+        self.assertNotIn("Cc, Stu", rows)                                                    # graduated student left out
+        self.assertEqual(rows["Lovelace, Ada"], ("4.0", "Bohr", [0, 4, 6]))                  # GDE CM, Candidacy, Committee
+        self.assertEqual(rows["Bb, Stu"], ("4.0", "", [7]))                                  # conditional counts; failed/pending don't
+        self.assertEqual(rows["Dd, Stu"], ("4.0", "", []))                                   # blanks, not dashes
+        self.assertEqual(re.findall(r"<tr><td><a [^>]*>(.*?)</a>", html), ["Bb, Stu", "Dd, Stu", "Lovelace, Ada"])
+        # sorting: the checkmark columns put checks first, or last when reversed
+        order = lambda q: re.findall(r"<tr><td><a [^>]*>(\w+)", page(q))
+        self.assertEqual(order("?sort=candidacy"), ["Lovelace", "Bb", "Dd"])
+        self.assertEqual(order("?sort=candidacy&dir=desc"), ["Bb", "Dd", "Lovelace"])
+        self.assertEqual(order("?sort=advisor")[0], "Lovelace"); self.assertEqual(order("?sort=name&dir=desc")[0], "Lovelace")
+        self.assertEqual(sorted(order("?sort=clock")), ["Bb", "Dd", "Lovelace"]); self.assertEqual(order("?sort=bogus"), order(""))
+        # it is the first report tab, and the Reports link opens it
+        tabs = re.findall(r'<p class="tabs">(.*?)</p>', html, re.S)[0]
+        self.assertEqual(re.findall(r">([^<]+)</a>", tabs), ["Milestones Table", "Milestone Check", "Funding by term"])
+        self.assertIn('class="on" href="/reports/milestones"', tabs)
+        self.assertIn('<a href="/reports/milestones">Reports</a>', html)
+        for path in ("/reports", "/reports/funding"):
+            self.assertIn("Milestones Table", c.get(path).get_data(as_text=True))
+        # viewers can look; faculty and FSR logins cannot
+        self.assertEqual(self.client("vw").get("/reports/milestones").status_code, 200)
+
     def test_milestone_tables_show_the_clock_at_each_date(self):
         c, t = self._milestone_world()
         html = c.get("/students/1").get_data(as_text=True)
