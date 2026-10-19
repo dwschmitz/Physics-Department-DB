@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS students (
                         CHECK (status IN ('active', 'on_leave', 'graduated', 'withdrawn')),
     matriculation_year  INTEGER NOT NULL,
     matriculation_term  TEXT NOT NULL DEFAULT 'Autumn',  -- Autumn/Winter/Spring/Summer (checked by the app)
-    expected_grad_year  INTEGER,
+    graduation_year     INTEGER,  -- set when status is 'graduated': the term they graduated (year + season)
+    graduation_term     TEXT,     -- Autumn/Winter/Spring/Summer (checked by the app)
     research_area       TEXT,
     notes               TEXT
 );

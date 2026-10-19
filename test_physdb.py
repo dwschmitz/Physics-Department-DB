@@ -12,7 +12,7 @@ class PhysDBTests(unittest.TestCase):
         self.sid = physdb.add_student(
             self.conn, university_id="U1001", first_name="Ada", last_name="Lovelace",
             email="ada@uni.edu", matriculation_year=2020,
-            expected_grad_year=2026, research_area="Quantum optics", notes=None)
+            research_area="Quantum optics", notes=None)
         self.fid = physdb.add_faculty(self.conn, "Niels", "Bohr", "bohr@uni.edu", "Atomic")
 
     def test_lookup_by_id_email_university_id(self):
@@ -24,7 +24,7 @@ class PhysDBTests(unittest.TestCase):
             physdb.add_student(
                 self.conn, university_id="U2", first_name="X", last_name="Y",
                 email="ada@uni.edu", matriculation_year=2021,
-                expected_grad_year=None, research_area=None, notes=None)
+                research_area=None, notes=None)
 
     def test_advisor_filter_and_show(self):
         physdb.assign_advisor(self.conn, "U1001", "bohr@uni.edu", start_date="2021-01-01")
@@ -35,7 +35,7 @@ class PhysDBTests(unittest.TestCase):
         def add(uid):
             return physdb.add_student(self.conn, university_id=uid, first_name=uid, last_name=uid,
                                       email=f"{uid}@u.edu", matriculation_year=2022,
-                                      expected_grad_year=None, research_area=None, notes=None)
+                                      research_area=None, notes=None)
         physdb.add_faculty(self.conn, "Marie", "Curie", "curie@uni.edu")
         for uid in ("A", "B", "C", "D", "E"):
             add(uid)
@@ -58,7 +58,7 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(physdb.missing_milestone(self.conn, "gde_classical_mechanics"), [])
 
     def test_status_and_check_constraints(self):
-        physdb.set_status(self.conn, "U1001", "graduated")
+        physdb.set_status(self.conn, "U1001", "graduated", 2026, "Spring")
         self.assertEqual(physdb.list_students(self.conn, status="active"), [])
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("UPDATE students SET status='bogus'")
@@ -69,7 +69,7 @@ class PhysDBTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             physdb.add_student(self.conn, university_id="U11", first_name="N", last_name="M",
                                email="y@m.o", matriculation_year=2023, matriculation_term="Fall",
-                               expected_grad_year=None, research_area=None, notes=None)
+                               research_area=None, notes=None)
 
     def test_current_term_boundaries(self):
         d = datetime.date
@@ -174,7 +174,7 @@ class PhysDBTests(unittest.TestCase):
 
     def test_copy_funding_from_any_term(self):
         physdb.add_student(self.conn, university_id="C1", first_name="F", last_name="C1", email="c1@m.o",
-                           matriculation_year=2022, expected_grad_year=None, research_area=None, notes=None)
+                           matriculation_year=2022, research_area=None, notes=None)
         sid = physdb._find(self.conn, "students", "C1")["id"]
         physdb.add_funding(self.conn, "C1", "RA", 2025, "Spring", "Old", 111, "OLD-1", "two terms back")
         physdb.add_funding(self.conn, "C1", "TA", 2026, "Summer", "Recent", 222)
@@ -201,7 +201,7 @@ class PhysDBTests(unittest.TestCase):
     def test_copy_previous_funding(self):
         def add(uid):
             physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=uid, email=f"{uid}@m.o",
-                               matriculation_year=2022, expected_grad_year=None, research_area=None, notes=None)
+                               matriculation_year=2022, research_area=None, notes=None)
         add("S1"); add("S2")
         sid = lambda u: physdb._find(self.conn, "students", u)["id"]
         rows = lambda u, y, s: [tuple(r) for r in self.conn.execute(
@@ -304,8 +304,7 @@ class PhysDBTests(unittest.TestCase):
         """At Autumn 2026: A clock 1.0, B 0.5, C 0.25, D 0.0 -- plus people who must never appear."""
         def add(uid, term, year, status="active"):
             sid = physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=uid, email=f"{uid}@m.o",
-                                     matriculation_year=year, matriculation_term=term, expected_grad_year=None,
-                                     research_area=None, notes=None)
+                                     matriculation_year=year, matriculation_term=term, research_area=None, notes=None)
             self.conn.execute("UPDATE students SET status = ? WHERE id = ?", (status, sid)); self.conn.commit()
         add("A", "Autumn", 2025); add("B", "Spring", 2026); add("C", "Summer", 2026); add("D", "Autumn", 2026)
         add("E", "Winter", 2027)                       # hasn't matriculated yet: no clock
@@ -351,8 +350,7 @@ class PhysDBTests(unittest.TestCase):
     def test_funding_report(self):
         def add(uid, last, status="active"):
             sid = physdb.add_student(self.conn, university_id=uid, first_name="F", last_name=last,
-                                     email=f"{uid}@m.o", matriculation_year=2022, expected_grad_year=None,
-                                     research_area=None, notes=None)
+                                     email=f"{uid}@m.o", matriculation_year=2022, research_area=None, notes=None)
             self.conn.execute("UPDATE students SET status = ? WHERE id = ?", (status, sid))
             return uid
         add("A1", "Zed"); add("B1", "Yu"); add("C1", "Xi", "on_leave"); add("D1", "Wu", "graduated")
@@ -504,12 +502,45 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT count(*) FROM users WHERE role = 'fsr'").fetchone()[0], 0)   # the login goes
         physdb.connect(path)                                                                    # a second start changes nothing
 
+    def test_graduation_term(self):
+        conn = self.conn
+        physdb.set_status(conn, "U1001", "graduated", 2026, "Spring")
+        row = conn.execute("SELECT * FROM students").fetchone()
+        self.assertEqual((row["status"], physdb.graduation_label(row)), ("graduated", "Spring 2026"))
+        for bad in ((None, None), (2026, None), (None, "Spring"), (2026, "Fall")):
+            with self.assertRaises(ValueError, msg=bad):
+                physdb.set_status(conn, "U1001", "graduated", *bad)
+        self.assertEqual(conn.execute("SELECT graduation_year FROM students").fetchone()[0], 2026)     # refused: unchanged
+        physdb.set_status(conn, "U1001", "active", 2026, "Spring")                                    # not graduated: cleared
+        row = conn.execute("SELECT * FROM students").fetchone()
+        self.assertEqual((row["graduation_year"], row["graduation_term"], physdb.graduation_label(row)), (None, None, ""))
+        physdb.set_status(conn, "U1001", "graduated", 2027, "Winter")
+        self.assertIn("graduated Winter 2027", physdb.show_student(conn, "U1001"))
+
+    def test_expected_graduation_year_column_is_replaced(self):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "old.db")
+        conn = physdb.connect(path)
+        conn.executescript("""ALTER TABLE students DROP COLUMN graduation_year; ALTER TABLE students DROP COLUMN graduation_term;
+                              ALTER TABLE students ADD COLUMN expected_grad_year INTEGER;""")
+        conn.execute("INSERT INTO students (university_id, first_name, last_name, email, status, matriculation_year, expected_grad_year)"
+                     " VALUES ('U9', 'Old', 'Timer', 'o@u.edu', 'graduated', 2015, 2020)")
+        conn.commit(); conn.close()
+        conn = physdb.connect(path)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(students)")}
+        self.assertTrue({"graduation_year", "graduation_term"} <= cols)
+        if physdb.sqlite3.sqlite_version_info >= (3, 35):
+            self.assertNotIn("expected_grad_year", cols)
+        row = conn.execute("SELECT * FROM students WHERE university_id = 'U9'").fetchone()
+        self.assertEqual((row["status"], row["graduation_year"], row["graduation_term"]), ("graduated", None, None))   # kept, no term yet
+        physdb.connect(path)                                                                                          # idempotent
+
     def test_fsr_advisees(self):
         fsr = physdb.add_fsr(self.conn, "Xavier", "Xx", "xx@u.edu")
         other = physdb.add_faculty(self.conn, "Marie", "Curie", "curie@uni.edu")
         self.conn.execute("UPDATE faculty SET fsr_id = ? WHERE id = ?", (fsr, self.fid))
         s2 = physdb.add_student(self.conn, university_id="U2", first_name="B", last_name="B", email="b@u.edu", matriculation_year=2021,
-                                 expected_grad_year=None, research_area=None, notes=None)
+                                 research_area=None, notes=None)
         physdb.assign_advisor(self.conn, "U1001", self.fid, "co-advisor")
         physdb.assign_advisor(self.conn, "U2", other, "advisor")
         self.assertEqual([r["last_name"] for r in physdb.fsr_advisees(self.conn, fsr)], ["Lovelace"])
@@ -521,7 +552,7 @@ class PhysDBTests(unittest.TestCase):
     def test_faculty_views_only_return_their_own_students_and_safe_columns(self):
         def student(uid, last):
             return physdb.add_student(self.conn, university_id=uid, first_name="S", last_name=last, email=f"{uid}@m.o",
-                                      matriculation_year=2022, expected_grad_year=2028, research_area="optics",
+                                      matriculation_year=2022, research_area="optics",
                                       notes="PRIVATE ADMIN NOTE", cnet=f"c{uid}", citizenship="international")
         bohr = physdb.add_faculty(self.conn, "Niels", "Bohr", "bohr@u.edu", cnet="nbohr")
         curie = physdb.add_faculty(self.conn, "Marie", "Curie", "curie@u.edu", cnet="mcurie")
@@ -564,7 +595,7 @@ class PhysDBTests(unittest.TestCase):
 
     def test_cnet(self):
         sid = physdb.add_student(self.conn, university_id="U20", first_name="N", last_name="M", email="n@m.o",
-                                 matriculation_year=2023, expected_grad_year=None, research_area=None,
+                                 matriculation_year=2023, research_area=None,
                                  notes=None, cnet="  NMarie ")
         self.assertEqual(physdb._find(self.conn, "students", "nmarie")["id"], sid)     # look up by CNET
         self.assertIn("CNET nmarie", physdb.show_student(self.conn, sid))
@@ -573,21 +604,19 @@ class PhysDBTests(unittest.TestCase):
                             ({"cnet": "bad name", "email": "y@m.o", "university_id": "U22"}, ValueError)):
             with self.assertRaises(exc):
                 physdb.add_student(self.conn, first_name="N", last_name="M", matriculation_year=2023,
-                                   expected_grad_year=None, research_area=None, notes=None, **kwargs)
+                                   research_area=None, notes=None, **kwargs)
         for i in (30, 31):   # blank CNETs may repeat
             physdb.add_student(self.conn, university_id=f"U{i}", first_name="N", last_name="M", email=f"{i}@m.o",
-                               matriculation_year=2023, expected_grad_year=None, research_area=None, notes=None)
+                               matriculation_year=2023, research_area=None, notes=None)
 
     def test_citizenship(self):
         sid = physdb.add_student(self.conn, university_id="U9", first_name="N", last_name="M",
-                                 email="n@m.o", matriculation_year=2023, expected_grad_year=None,
-                                 research_area=None, notes=None, citizenship="permanent_resident")
+                                 email="n@m.o", matriculation_year=2023, research_area=None, notes=None, citizenship="permanent_resident")
         self.assertIn("Citizenship: permanent resident", physdb.show_student(self.conn, sid))
         self.assertIn("Citizenship: -", physdb.show_student(self.conn, "U1001"))
         with self.assertRaises(ValueError):
             physdb.add_student(self.conn, university_id="U10", first_name="N", last_name="M",
-                               email="x@m.o", matriculation_year=2023, expected_grad_year=None,
-                               research_area=None, notes=None, citizenship="alien")
+                               email="x@m.o", matriculation_year=2023, research_area=None, notes=None, citizenship="alien")
 
     def test_funding_and_term_parsing(self):
         physdb.add_funding(self.conn, "U1001", "TA", 2026, "Autumn", "Dept", 12000, "ACCT-1")
@@ -640,7 +669,7 @@ class PhysDBTests(unittest.TestCase):
             self.assertNotIn("program", cols)
         self.assertEqual(conn.execute("SELECT first_name FROM students").fetchone()[0], "A")
         physdb.add_student(conn, university_id="U2", first_name="C", last_name="D", email="c@d.e",
-                           matriculation_year=2021, expected_grad_year=None, research_area=None, notes=None)
+                           matriculation_year=2021, research_area=None, notes=None)
         physdb.connect(path)   # re-running on a migrated DB is a no-op
         self.assertEqual(conn.execute("SELECT count(*) FROM funding").fetchone()[0], 2)
 

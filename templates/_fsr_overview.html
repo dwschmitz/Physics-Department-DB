@@ -11,12 +11,12 @@
   {% if advisees %}<span class="muted">total ${{ '{:,.0f}'.format(total) }}</span>{% endif %}
 </div>
 <style>main{max-width:96rem}table.nowrap td,table.nowrap th{white-space:nowrap}</style>
-<table class="nowrap"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir) }}{{ sort_th("Expected graduation", "expected_grad_year", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Funding, " ~ season ~ " " ~ year, "funding", sort, sdir, "Sorts by the total for the term") }}</tr>
+<table class="nowrap"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir) }}{{ sort_th("Graduated", "graduated", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Funding, " ~ season ~ " " ~ year, "funding", sort, sdir, "Sorts by the total for the term") }}</tr>
 {% for s in advisees %}
 <tr><td style="white-space:nowrap">{% if staff_view %}<a href="{{ url_for('student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a>{% else %}{{ s.last_name }}, {{ s.first_name }}{% endif %}</td>
 <td>{{ s.advisors or '' }}</td>
 <td><span class="badge {{ s.status }}">{{ s.status|label }}</span></td>
-<td>{{ s.clock }}</td><td>{{ s.expected_grad_year or '' }}</td><td>{{ s.research_area or '' }}</td>
+<td>{{ s.clock }}</td><td>{{ s|grad }}</td><td>{{ s.research_area or '' }}</td>
 <td>{{ funding_cell(s, editing, here, year, season) }}</td></tr>
 {% else %}<tr><td colspan="7" class="muted">{{ 'No students: none of the faculty listed for this FSR currently advise anyone.' if staff_view else 'No students yet: none of the faculty you work with currently advise anyone.' }}</td></tr>{% endfor %}
 </table>

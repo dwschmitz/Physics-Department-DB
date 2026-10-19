@@ -3,10 +3,10 @@
 table.snapshot td.check{font-weight:700;color:#1b6e3a}</style>
 {% set tab = 'milestones' %}{% include "_report_tabs.html" %}
 <h1>Milestones Table</h1>
-<p class="muted">{{ rows|length }} active student{{ '' if rows|length == 1 else 's' }} &middot; a checkmark means the milestone is passed, and the GDE column lists the exams passed (a conditional pass counts).</p>
+<p class="muted">{{ n_active }} active student{{ '' if n_active == 1 else 's' }}, {{ n_graduated }} graduated &middot; a checkmark means the milestone is passed, and the GDE column lists the exams passed (a conditional pass counts).</p>
 <table class="snapshot"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir, "Years since matriculation, counted in terms (0.25 per term), up to the current term") }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("GDE", "gde", sort, sdir, "Graduate diagnostic exams passed: " ~ gde_title) }}
-{% for kind, short, full in columns %}{{ sort_th(short, kind, sort, sdir, full, "check") }}{% endfor %}</tr>
+{% for kind, short, full in columns %}{{ sort_th(short, kind, sort, sdir, full, "check") }}{% endfor %}{{ sort_th("Graduated", "graduated", sort, sdir, "The term they graduated") }}</tr>
 {% for r in rows %}<tr><td><a href="{{ url_for('student', sid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
 <td>{{ r.clock }}</td><td>{{ r.advisors or '' }}</td><td>{{ r.gde|join(', ') }}</td>
-{% for kind, short, full in columns %}<td class="check">{% if kind in r.done %}<span title="{{ full }}: passed" aria-label="{{ full }}: passed">&#10003;</span>{% endif %}</td>{% endfor %}</tr>
-{% else %}<tr><td colspan="{{ 4 + columns|length }}" class="muted">There are no active students.</td></tr>{% endfor %}</table>{% endblock %}
+{% for kind, short, full in columns %}<td class="check">{% if kind in r.done %}<span title="{{ full }}: passed" aria-label="{{ full }}: passed">&#10003;</span>{% endif %}</td>{% endfor %}<td>{{ r|grad }}</td></tr>
+{% else %}<tr><td colspan="{{ 5 + columns|length }}" class="muted">There are no active or graduated students.</td></tr>{% endfor %}</table>{% endblock %}

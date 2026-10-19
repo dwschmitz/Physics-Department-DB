@@ -54,6 +54,14 @@ person's password and role (for example, to regain admin access if no admin can 
 - **Milestone Check** (Reports tab): pick a milestone and a minimum clock in years (fractions such as 0.25 are fine) to
   list the active students at or past that clock who have no passed or conditional entry for it, with matriculation,
   clock, research area and advisor; every heading sorts.
+- **Graduation term:** when a student's Status is set to **Graduated**, the edit form asks for the graduation
+  **year and term** (both required); any other status clears them. (This replaced "Expected graduation year", which
+  was removed.) From the command line: `set-status STUDENT graduated --graduation-year 2026 --graduation-term spring`.
+  Students already marked graduated have no term until you edit them and enter it.
+- **Milestones Table** (Reports, first tab): a snapshot with one row per active or graduated student: name, clock,
+  advisor, a **GDE** column listing the exams passed (CM, QM, EM, SM), a ✓ for each of Candidacy, MS, Committee,
+  Pre-Oral and Defense passed (a conditional pass counts), and **Graduated** (the term, for graduated students).
+  Every column sorts.
 - **Funding report** (Reports → *Funding by term*): pick a year and term (or step with **‹ Prev** / **Next ›**) to list every *active* student with
   their funding for that term (type, source, POETAF/COA, amount, notes). Active students with nothing
   recorded still appear, with empty fields; a student with several entries gets one row per entry.
@@ -68,8 +76,8 @@ person's password and role (for example, to regain admin access if no admin can 
 - **Faculty accounts:** give each faculty member a **CNET** (Faculty → add/edit; it is also a column on the
   list). Then, on the **Accounts** page, **+ Add faculty account** creates a login whose username is their CNET
   (pick the person and set a temporary password; they choose their own at first sign-in). After signing in a
-  faculty member lands on **My students**: the students they advise (name, status, clock, expected
-  graduation, research area, and their funding for a term, with Prev / Next to change term; the heading counts the
+  faculty member lands on **My students**: the students they advise (name, status, clock, graduation
+  term, research area, and their funding for a term, with Prev / Next to change term; the heading counts the
   *active* ones), a read-only
   page for each advisee (milestones, advisors and committee, funding for every term), and the list of students
   whose committee they are on. They cannot see anything else: every other page is refused, and they cannot change
@@ -85,7 +93,7 @@ person's password and role (for example, to regain admin access if no admin can 
   **FSR accounts** work like faculty accounts: on the **Accounts** page, **+ Add FSR account** makes a login whose
   username is the FSR's CNET. An FSR who signs in lands on **My students**: every student currently advised
   (advisor or co-advisor) by any faculty member they are the FSR for, with the advisor's name, status, clock,
-  expected graduation, research area and funding for a term (Prev / Next to change term). That is all they can see
+  graduation term, research area and funding for a term (Prev / Next to change term). That is all they can see
   (no University IDs or notes, no student pages), and they cannot change anything. Staff see the same table on
   an FSR's page (FSRs → click a name).
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by

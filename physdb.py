@@ -156,6 +156,7 @@ def connect(path=DB_PATH):
     _add_student_citizenship(conn)
     _migrate_matriculation(conn)
     _add_student_cnet(conn)
+    _migrate_graduation(conn)
     return conn
 
 
@@ -200,6 +201,28 @@ def _migrate_matriculation(conn):
     if "matriculation_term" not in cols:
         conn.execute("ALTER TABLE students ADD COLUMN matriculation_term TEXT NOT NULL DEFAULT 'Autumn'")
     conn.commit()
+
+
+def _migrate_graduation(conn):
+    """'Expected graduation year' was replaced by the term a student actually graduated (year + season). Students
+    already marked graduated are left without a term until someone enters it."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(students)")}
+    for col, kind in (("graduation_year", "INTEGER"), ("graduation_term", "TEXT")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE students ADD COLUMN {col} {kind}")
+    if "expected_grad_year" in cols:
+        try:
+            conn.execute("ALTER TABLE students DROP COLUMN expected_grad_year")
+        except sqlite3.OperationalError:       # SQLite older than 3.35 can't drop columns; the unused one is harmless
+            pass
+    conn.commit()
+
+
+def graduation_label(row):
+    """e.g. 'Spring 2026' for a student with a graduation term, else ''."""
+    if row["graduation_year"] is None or not row["graduation_term"]:
+        return ""
+    return f"{row['graduation_term']} {row['graduation_year']}"
 
 
 def matriculation_label(row):
@@ -411,11 +434,12 @@ def add_student(conn, **f):
         raise ValueError(f"matriculation term must be one of {', '.join(SEASONS)}")
     if f["citizenship"] is not None and f["citizenship"] not in CITIZENSHIP:
         raise ValueError(f"citizenship must be one of {', '.join(CITIZENSHIP)}")
+    f["graduation_year"] = f["graduation_term"] = None          # new students are active; see set_status
     cur = conn.execute(
         """INSERT INTO students (university_id, cnet, first_name, last_name, email, citizenship,
-               matriculation_year, matriculation_term, expected_grad_year, research_area, notes)
+               matriculation_year, matriculation_term, graduation_year, graduation_term, research_area, notes)
            VALUES (:university_id, :cnet, :first_name, :last_name, :email, :citizenship,
-               :matriculation_year, :matriculation_term, :expected_grad_year, :research_area, :notes)""", f)
+               :matriculation_year, :matriculation_term, :graduation_year, :graduation_term, :research_area, :notes)""", f)
     conn.commit()
     return cur.lastrowid
 
@@ -470,9 +494,24 @@ def add_funding(conn, student, kind, year, season, source=None, amount=None, poe
     conn.commit()
 
 
-def set_status(conn, student, status):
+def _check_graduation(status, year, term):
+    """A graduated student needs the term they graduated; anyone else must not have one."""
+    if status == "graduated":
+        if year is None or term not in SEASONS:
+            raise ValueError("a graduated student needs a graduation year and term "
+                             f"(one of {', '.join(SEASONS)})")
+    elif year is not None or term is not None:
+        raise ValueError("only a graduated student has a graduation term")
+
+
+def set_status(conn, student, status, graduation_year=None, graduation_term=None):
+    """Change a student's status. Marking someone graduated needs the term they graduated; any other status clears it."""
     s = _find(conn, "students", student)
-    conn.execute("UPDATE students SET status = ? WHERE id = ?", (status, s["id"]))
+    if status != "graduated":
+        graduation_year = graduation_term = None
+    _check_graduation(status, graduation_year, graduation_term)
+    conn.execute("UPDATE students SET status = ?, graduation_year = ?, graduation_term = ? WHERE id = ?",
+                 (status, graduation_year, graduation_term, s["id"]))
     conn.commit()
 
 
@@ -515,7 +554,7 @@ def list_students(conn, status=None, advisor=None, year=None, committee=None):
 # What a faculty member may see about a student. Deliberately NOT included: University ID and the internal
 # admin notes. Every faculty-facing query below selects exactly these columns, so nothing else can leak.
 FACULTY_STUDENT_COLUMNS = ("id", "first_name", "last_name", "cnet", "email", "citizenship", "status",
-                           "matriculation_year", "matriculation_term", "expected_grad_year", "research_area")
+                           "matriculation_year", "matriculation_term", "graduation_year", "graduation_term", "research_area")
 _FSC = ", ".join(f"s.{c}" for c in FACULTY_STUDENT_COLUMNS)
 _ADVISOR_ROLES = "('advisor', 'co-advisor')"
 
@@ -584,7 +623,7 @@ def funding_report(conn, year, season):
     return [dict(r) for r in conn.execute(
         """SELECT s.id AS student_id, s.first_name, s.last_name, s.university_id, s.cnet, s.email,
                   s.citizenship, s.status, s.matriculation_year, s.matriculation_term,
-                  s.expected_grad_year, s.research_area, s.notes AS student_notes,
+                  s.research_area, s.notes AS student_notes,
                   (SELECT group_concat(fa.last_name, ', ') FROM advising a
                      JOIN faculty fa ON fa.id = a.faculty_id
                     WHERE a.student_id = s.id AND a.end_date IS NULL
@@ -628,14 +667,14 @@ def missing_milestone(conn, kind, min_years=2, now=None):
 
 
 def milestone_snapshot(conn):
-    """Every ACTIVE student with `advisors` (current advisors' last names) and `done`: the set of milestone kinds they
+    """Every ACTIVE or GRADUATED student with `advisors` (current advisors' last names) and `done`: the set of milestone kinds they
     have passed (a passed or conditional entry counts, as in missing_milestone)."""
     rows = [dict(r) for r in conn.execute(
         """SELECT s.*,
                   (SELECT group_concat(fa.last_name, ', ') FROM advising a JOIN faculty fa ON fa.id = a.faculty_id
                     WHERE a.student_id = s.id AND a.end_date IS NULL
                       AND a.role IN ('advisor', 'co-advisor')) AS advisors
-           FROM students s WHERE s.status = 'active' ORDER BY s.last_name, s.first_name, s.id""")]
+           FROM students s WHERE s.status IN ('active', 'graduated') ORDER BY s.last_name, s.first_name, s.id""")]
     done = {}
     for m in conn.execute("SELECT student_id, kind FROM milestones WHERE outcome IN ('passed', 'conditional')"):
         done.setdefault(m["student_id"], set()).add(m["kind"])
@@ -648,7 +687,8 @@ def show_student(conn, key):
     s = _find(conn, "students", key)
     out = [f"{s['first_name']} {s['last_name']}  <{s['email']}>",
            f"  ID {s['university_id']} | CNET {s['cnet'] or '-'} | {s['status']} | "
-           f"matriculated {matriculation_label(s)}, expected {s['expected_grad_year'] or '?'}",
+           f"matriculated {matriculation_label(s)}"
+           + (f", graduated {graduation_label(s) or '?'}" if s["status"] == "graduated" else ""),
            f"  Citizenship: {s['citizenship'].replace('_', ' ') if s['citizenship'] else '-'}",
            f"  Research: {s['research_area'] or '-'}"]
     if s["notes"]:
@@ -704,7 +744,6 @@ def build_parser():
     a.add_argument("--citizenship", choices=CITIZENSHIP)
     a.add_argument("--matriculation-year", type=int, default=datetime.date.today().year)
     a.add_argument("--matriculation-term", choices=SEASONS, type=str.capitalize, default="Autumn")
-    a.add_argument("--expected-grad-year", type=int)
     a.add_argument("--research-area"); a.add_argument("--notes")
 
     a = sub.add_parser("add-faculty")
@@ -737,6 +776,9 @@ def build_parser():
     a = sub.add_parser("set-status")
     a.add_argument("student"); a.add_argument("status",
                    choices=["active", "on_leave", "graduated", "withdrawn"])
+    a.add_argument("--graduation-year", type=int, help="required when the status is graduated")
+    a.add_argument("--graduation-term", choices=SEASONS, type=str.capitalize,
+                   help="required when the status is graduated")
 
     a = sub.add_parser("list")
     a.add_argument("--status"); a.add_argument("--year", type=int)
@@ -774,7 +816,10 @@ def main(argv=None):
             add_funding(conn, args.student, args.kind, args.year, args.season, args.source, args.amount,
                         args.poetaf_coa, args.notes)
         elif c == "set-status":
-            set_status(conn, args.student, args.status)
+            try:
+                set_status(conn, args.student, args.status, args.graduation_year, args.graduation_term)
+            except ValueError as e:
+                raise SystemExit(f"Error: {e}")
         elif c == "list":
             for r in list_students(conn, args.status, args.advisor, args.year, args.committee):
                 print(_row_line(r))

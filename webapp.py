@@ -95,7 +95,11 @@ def fields_for(table, conn, row=None):
             F("status", "Status", "select", True, enum(STATUSES)),
             F("matriculation_year", "Matriculation year", "year", True),
             F("matriculation_term", "Matriculation term", "select", True, [(s, s) for s in physdb.SEASONS]),
-            F("expected_grad_year", "Expected graduation year", "year"),
+            {**F("graduation_year", "Graduation year", "year", help="The year they graduated."),
+             "show_when": ("status", "graduated")},
+            {**F("graduation_term", "Graduation term", "select", False, [(s, s) for s in physdb.SEASONS],
+                 help="The term they graduated. Needed when the status is Graduated."),
+             "show_when": ("status", "graduated")},
             F("research_area", "Research area"),
             F("notes", "Notes", "textarea"),
         ]
@@ -199,6 +203,13 @@ def _safe_path(value):
     return None
 
 
+def _graduation_key(row):
+    """Sort key for a graduation term (chronological); None when the student has none."""
+    if row["graduation_year"] is None or row["graduation_term"] not in physdb.SEASONS:
+        return None
+    return physdb.term_index(row["graduation_term"], row["graduation_year"])
+
+
 def _text(value):
     """Case-insensitive sort key; blank values sort last."""
     value = (value or "").strip().lower()
@@ -229,6 +240,7 @@ def create_app(db_path=None):
     app.jinja_env.filters["label"] = label
     app.jinja_env.filters["term"] = physdb.term_label
     app.jinja_env.filters["matric"] = physdb.matriculation_label
+    app.jinja_env.filters["grad"] = physdb.graduation_label
 
     def db():
         if "db" not in g:
@@ -550,7 +562,7 @@ def create_app(db_path=None):
         name = lambda r: (_text(r["last_name"]), _text(r["first_name"]))
         return sort_rows(students, {
             "name": name, "advisor": lambda r: _text(r.get("advisors")), "status": lambda r: STATUSES.index(r["status"]),
-            "clock": lambda r: r["clock_terms"], "expected_grad_year": lambda r: r["expected_grad_year"],
+            "clock": lambda r: r["clock_terms"], "graduated": lambda r: _graduation_key(r),
             "research_area": lambda r: _text(r["research_area"]), "funding": lambda r: r["funded"],
         }, request.args.get("sort"), request.args.get("dir"), "name")
 
@@ -724,6 +736,14 @@ def create_app(db_path=None):
         fields = fields_for(table, db(), row)
         if request.method == "POST":
             values, errors = parse_form(fields, request.form)
+            if table == "students" and "status" not in errors:
+                if values["status"] == "graduated":          # a graduated student needs the term they graduated
+                    for name, text in (("graduation_term", "Choose the term they graduated."),
+                                       ("graduation_year", "Enter the year they graduated.")):
+                        if values[name] is None:
+                            errors[name] = text
+                else:                                        # anyone else has no graduation term
+                    values["graduation_term"] = values["graduation_year"] = None
             if "start_date" in values and "end_date" in values and not errors and \
                     values["end_date"] and values["end_date"] < values["start_date"]:
                 errors["end_date"] = "End date can't be before the start date."
@@ -927,7 +947,7 @@ def create_app(db_path=None):
 
     @app.route("/reports/milestones")
     def milestones_table():
-        """Snapshot: one row per active student, a checkmark in each milestone column they have passed."""
+        """Snapshot: one row per active or graduated student, a checkmark in each milestone column they have passed."""
         now = physdb.current_term()
         rows = [{**r, "clock": physdb.clock_label(r, now), "clock_terms": physdb.clock_terms(r, now)}
                 for r in physdb.milestone_snapshot(db())]
@@ -935,12 +955,15 @@ def create_app(db_path=None):
             r["gde"] = [abbr for kind, abbr in GDE_EXAMS if kind in r["done"]]
         keys = {"name": lambda r: (_text(r["last_name"]), _text(r["first_name"])),
                 "clock": lambda r: r["clock_terms"], "advisor": lambda r: _text(r["advisors"]),
-                "gde": lambda r: len(GDE_EXAMS) - len(r["gde"])}      # most exams passed first when ascending
+                "gde": lambda r: len(GDE_EXAMS) - len(r["gde"]),      # most exams passed first when ascending
+                "graduated": _graduation_key}
         for kind, _ in MILESTONE_COLUMNS:       # checkmarks first when ascending, blanks first when descending
             keys[kind] = lambda r, kind=kind: 0 if kind in r["done"] else 1
         rows, sort, sdir = sort_rows(rows, keys, request.args.get("sort"), request.args.get("dir"), "name",
                                      tiebreak=keys["name"])
         return render_template("milestones_table.html", rows=rows, sort=sort, sdir=sdir,
+                               n_active=sum(r["status"] == "active" for r in rows),
+                               n_graduated=sum(r["status"] == "graduated" for r in rows),
                                columns=[(k, h, label(k)) for k, h in MILESTONE_COLUMNS],
                                gde_title=", ".join(f"{abbr} = {label(kind)[4:]}" for kind, abbr in GDE_EXAMS))
 
@@ -1084,7 +1107,7 @@ def create_app(db_path=None):
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(["Last name", "First name", "University ID", "CNET", "Email", "Citizenship", "Status",
-                    "Matriculation term", "Matriculation year", "Clock (years)", "Expected graduation year",
+                    "Matriculation term", "Matriculation year", "Clock (years)",
                     "Research area", "Advisor", "Student notes",
                     "Funding term", "Funding type", "Source", "POETAF/COA", "Amount", "Funding notes"])
         now = physdb.current_term()
@@ -1094,7 +1117,7 @@ def create_app(db_path=None):
                 label(r["citizenship"]) if r["citizenship"] else None, label(r["status"]),
                 r["matriculation_term"], r["matriculation_year"],
                 None if physdb.clock_label(r, now) == "\u2014" else physdb.clock_label(r, now),
-                r["expected_grad_year"], r["research_area"], r["advisors_full"], r["student_notes"],
+                r["research_area"], r["advisors_full"], r["student_notes"],
                 f"{season} {year}", label(r["kind"]) if r["kind"] else None, r["source"], r["poetaf_coa"],
                 r["amount"], r["notes"])])
         return Response(buf.getvalue(), mimetype="text/csv", headers={
