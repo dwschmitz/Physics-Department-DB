@@ -1180,7 +1180,7 @@ class WebTests(unittest.TestCase):
         c.post("/faculty/3/edit", data=dict(first_name="Max", last_name="Planck", email="Planck@u.edu", cnet="", fsr_id="1", csrf_token=t))
         page = c.get("/fsrs").get_data(as_text=True)
         row = re.search(r"<tr><td><a [^>]*>Xx, Xavier</a></td>(.*?)</tr>", page, re.S).group(1)
-        self.assertEqual(re.findall(r'<a href="(/faculty/\d+)">([^<]*)</a>', row), [("/faculty/1", "Bohr, Niels"), ("/faculty/3", "Planck, Max")])
+        self.assertEqual(re.findall(r'<a href="(/faculty/\d+)">([^<]*)</a>', row), [("/faculty/1", "Bohr"), ("/faculty/3", "Planck")])
         self.assertIn("fsrx", row)
         names = lambda q: re.findall(r"<tr><td><a [^>]*>(\w+), \w+</a></td>", c.get("/fsrs" + q).get_data(as_text=True))
         self.assertEqual(names(""), ["Xx", "Yy"]); self.assertEqual(names("?sort=name&dir=desc"), ["Yy", "Xx"])
@@ -1223,7 +1223,7 @@ class WebTests(unittest.TestCase):
             with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
                 return client.get("/fsr" + q).get_data(as_text=True)
         html = page()
-        self.assertIn("<h1>My students</h1>", html); self.assertIn("Niels Bohr", html)
+        self.assertIn("<h1>My students</h1>", html); self.assertIn("faculty: Bohr</p>", html)
         head = html.split("</tr>")[0].split('<table class="nowrap">')[-1]
         headers = [re.sub(r"\s+", " ", re.sub(r"<[^>]+>|[▲▼↕]", "", h)).strip() for h in re.findall(r"<th[^>]*>(.*?)</th>", head, re.S)]
         self.assertEqual(headers, ["Name", "Advisor", "Status", "Clock", "Expected graduation", "Research area", "Funding, Autumn 2026"])
@@ -1242,13 +1242,13 @@ class WebTests(unittest.TestCase):
         c.post("/faculty/2/edit", data=dict(first_name="Marie", last_name="Curie", email="Curie@u.edu", cnet="mcurie", fsr_id="1", csrf_token=t))
         html = page()
         self.assertEqual(who(html), ["Aa", "Bb", "Cc", "Dd", "Ee"])
-        self.assertIn("Marie Curie", html); self.assertIn("NOT-BOHRS", html)
+        self.assertIn("faculty: Bohr, Curie</p>", html); self.assertIn("NOT-BOHRS", html)
         self.assertIn("Winter 2026</strong>", page("?year=2026&season=Winter"))
         # every column sorts (blank values last, whichever way), and Prev / Next keep the sorting
         self.assertEqual(who(page("?sort=name&dir=desc")), ["Ee", "Dd", "Cc", "Bb", "Aa"])
         adv = lambda q: [re.sub(r"<[^>]+>", "", m) for m in re.findall(r"</td>\n<td>([^<]*)</td>\n<td><span", page(q))]
-        self.assertEqual(adv("?sort=advisor"), ["Marie Curie"] * 3 + ["Niels Bohr"] * 2)
-        self.assertEqual(adv("?sort=advisor&dir=desc"), ["Niels Bohr"] * 2 + ["Marie Curie"] * 3)
+        self.assertEqual(adv("?sort=advisor"), ["Bohr"] * 2 + ["Curie"] * 3)
+        self.assertEqual(adv("?sort=advisor&dir=desc"), ["Curie"] * 3 + ["Bohr"] * 2)
         total = lambda q: who(page(q))
         # funding for Autumn 2026: Aa $3,000, Bb $250, Ee $999, Cc/Dd none -> blanks last both ways
         self.assertEqual(total("?sort=funding")[:3], ["Bb", "Ee", "Aa"]); self.assertEqual(sorted(total("?sort=funding")[3:]), ["Cc", "Dd"])

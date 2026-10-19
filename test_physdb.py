@@ -514,7 +514,7 @@ class PhysDBTests(unittest.TestCase):
         physdb.assign_advisor(self.conn, "U2", other, "advisor")
         self.assertEqual([r["last_name"] for r in physdb.fsr_advisees(self.conn, fsr)], ["Lovelace"])
         self.assertNotIn("university_id", physdb.fsr_advisees(self.conn, fsr)[0])
-        self.assertEqual(physdb.fsr_advisees(self.conn, fsr)[0]["advisors"], "Niels Bohr")
+        self.assertEqual(physdb.fsr_advisees(self.conn, fsr)[0]["advisors"], "Bohr")
         with self.assertRaises(ValueError):
             physdb.add_fsr(self.conn, "A", "B", "ab@u.edu", cnet="bad cnet")
 

@@ -536,10 +536,10 @@ def is_advisee(conn, faculty_id, student_id):
 
 def fsr_advisees(conn, fsr_id):
     """Students currently advised (advisor or co-advisor) by any faculty member this FSR is the FSR for, limited to
-    the same visible columns, plus `advisors`: those faculty members' names."""
+    the same visible columns, plus `advisors`: those faculty members' last names."""
     return [dict(r) for r in conn.execute(
         f"""SELECT {_FSC},
-                   (SELECT group_concat(fa.first_name || ' ' || fa.last_name, '; ') FROM advising x
+                   (SELECT group_concat(fa.last_name, ', ') FROM advising x
                       JOIN faculty fa ON fa.id = x.faculty_id
                      WHERE x.student_id = s.id AND x.end_date IS NULL AND x.role IN {_ADVISOR_ROLES}) AS advisors
             FROM students s
