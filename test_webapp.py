@@ -1296,6 +1296,46 @@ class WebTests(unittest.TestCase):
         conn = physdb.connect(self.app.config["DB_PATH"])
         self.assertEqual([x[0] for x in conn.execute("SELECT fsr_id FROM faculty ORDER BY id")], [None, 2, None]); conn.close()
 
+    def test_graduates_leave_fsr_pages_but_stay_on_faculty_pages(self):
+        from unittest import mock
+        c, t = self._fsr_world()                       # Aa, Bb are Bohr's advisees; Bohr's FSR is Xx
+        def grad(sid, last, year, term):
+            r = c.post(f"/students/{sid}/edit", data=dict(first_name="Stu", last_name=last, university_id=f"UID{sid}",
+                       cnet=f"stu{last.lower()}", email=f"s{sid}@u.edu", citizenship="citizen", status="graduated",
+                       matriculation_year="2022", matriculation_term="Autumn", graduation_year=year, graduation_term=term, csrf_token=t))
+            self.assertEqual(r.status_code, 302)
+        grad(1, "Aa", "2026", "Summer")
+        names = lambda path, now: re.findall(r'/students/\d+">(\w+), Stu', self._at(now, c, path).split("<h2>Thesis Committees")[0]) \
+            if path.startswith("/fsrs") or path.startswith("/faculty") else None
+        for now in (("Summer", 2026), ("Autumn", 2026)):
+            self.assertEqual(names("/fsrs/1", now), ["Aa", "Bb"], now)
+        self.assertEqual(names("/fsrs/1", ("Winter", 2027)), ["Bb"])               # gone at the start of Winter 2027
+        self.assertEqual(names("/faculty/1", ("Winter", 2027)), ["Aa", "Bb"])      # faculty pages keep graduates
+        self.assertEqual(names("/faculty/1", ("Autumn", 2040)), ["Aa", "Bb"])
+        # the FSR's own page behaves the same, and the heading and total ignore the one who left
+        self._make_fsr_login(c, t); f = self._fsr_client()
+        def mine(now):
+            with mock.patch.object(physdb, "current_term", return_value=now):
+                return f.get("/fsr").get_data(as_text=True)
+        self.assertIn("Aa, Stu", mine(("Autumn", 2026))); self.assertNotIn("Aa, Stu", mine(("Winter", 2027)))
+        self.assertIn('(1 active)', mine(("Winter", 2027)))
+
+    def _at(self, now, client, path):
+        from unittest import mock
+        with mock.patch.object(physdb, "current_term", return_value=now):
+            return client.get(path).get_data(as_text=True)
+
+    def _make_fsr_login(self, admin, t):
+        r = admin.post("/users/new-fsr", data=dict(fsr_id=1, password="temp-password-1", csrf_token=t))
+        self.assertEqual(r.status_code, 302)
+
+    def _fsr_client(self):
+        f = self.app.test_client()
+        f.post("/login", data={"username": "fsrx", "password": "temp-password-1"})
+        nt = self.token(f, "/account")
+        f.post("/account", data=dict(current_password="temp-password-1", new_password="fsr-new-pass-1", confirm="fsr-new-pass-1", csrf_token=nt))
+        return f
+
     def test_fsr_login_sees_only_their_faculty_advisees(self):
         from unittest import mock
         c, t = self._fsr_world()

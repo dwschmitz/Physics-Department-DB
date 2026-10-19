@@ -94,7 +94,10 @@ person's password and role (for example, to regain admin access if no admin can 
   username is the FSR's CNET. An FSR who signs in lands on **My students**: every student currently advised
   (advisor or co-advisor) by any faculty member they are the FSR for, with the advisor's name, status, clock,
   graduation term, research area and funding for a term (Prev / Next to change term). That is all they can see
-  (no University IDs or notes, no student pages), and they cannot change anything. Staff see the same table on
+  (no University IDs or notes, no student pages), and they cannot change anything. A graduated student stays on this
+  table for the graduation term and the term after it, and drops off from the start of the term after that (graduate in
+  Summer 2026 and you're listed through Autumn 2026, gone from Winter 2027); a graduate with no recorded term stays.
+  Faculty pages keep their graduates indefinitely. Staff see the same table on
   an FSR's page (FSRs → click a name).
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.

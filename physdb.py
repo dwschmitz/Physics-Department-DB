@@ -573,10 +573,24 @@ def is_advisee(conn, faculty_id, student_id):
             AND role IN {_ADVISOR_ROLES}""", (faculty_id, student_id)).fetchone() is not None
 
 
-def fsr_advisees(conn, fsr_id):
+GRADUATED_VISIBLE_TERMS = 2     # FSR tables keep a graduate this many terms after the graduation term
+
+
+def _graduated_long_ago(student, now):
+    if student["status"] != "graduated" or student["graduation_year"] is None or student["graduation_term"] not in SEASONS:
+        return False
+    return term_index(*now) - term_index(student["graduation_term"], student["graduation_year"]) >= GRADUATED_VISIBLE_TERMS
+
+
+def fsr_advisees(conn, fsr_id, now=None):
     """Students currently advised (advisor or co-advisor) by any faculty member this FSR is the FSR for, limited to
-    the same visible columns, plus `advisors`: those faculty members' last names."""
-    return [dict(r) for r in conn.execute(
+    the same visible columns, plus `advisors`: those faculty members' last names.
+
+    A graduated student drops off once GRADUATED_VISIBLE_TERMS terms have passed since their graduation term: with
+    two, someone who graduated in Summer 2026 is listed through Autumn 2026 and gone from the start of Winter 2027.
+    (A graduated student with no recorded term stays listed, since there is nothing to count from.)"""
+    now = now or current_term()
+    rows = [dict(r) for r in conn.execute(
         f"""SELECT {_FSC},
                    (SELECT group_concat(fa.last_name, ', ') FROM advising x
                       JOIN faculty fa ON fa.id = x.faculty_id
@@ -585,6 +599,7 @@ def fsr_advisees(conn, fsr_id):
             WHERE s.id IN (SELECT a.student_id FROM advising a JOIN faculty f ON f.id = a.faculty_id
                            WHERE f.fsr_id = ? AND a.end_date IS NULL AND a.role IN {_ADVISOR_ROLES})
             ORDER BY s.last_name, s.first_name, s.id""", (fsr_id,))]
+    return [r for r in rows if not _graduated_long_ago(r, now)]
 
 
 def faculty_committee_students(conn, faculty_id):
