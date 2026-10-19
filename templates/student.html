@@ -10,6 +10,7 @@
   <dt>Citizenship</dt><dd>{{ s.citizenship|label if s.citizenship else '—' }}</dd>
   <dt>Matriculation</dt><dd>{{ s|matric }}</dd>
   {% if s.status == 'graduated' %}<dt>Graduated</dt><dd>{{ s|grad or '—' }}</dd>{% endif %}
+  {% if s.status == 'withdrawn' %}<dt>Withdrew</dt><dd>{{ s|withdrawn or '—' }}</dd>{% endif %}
   <dt>Research area</dt><dd>{{ s.research_area or '—' }}</dd>
   <dt>Notes</dt><dd style="white-space:pre-wrap">{{ s.notes or '—' }}</dd>
 </dl>

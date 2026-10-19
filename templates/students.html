@@ -14,11 +14,11 @@
   <a class="btn secondary" href="{{ url_for('export') }}">Download CSV</a>
 </form>
 <p class="muted">{{ rows|length }} student{{ '' if rows|length == 1 else 's' }} &middot; current term: {{ now }}</p>
-<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("University ID", "university_id", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}{{ sort_th("Matriculation", "matriculation", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir, "Years since matriculation, counted in terms (0.25 per term) up to the current term. Blank for graduated or withdrawn students; blanks always sort last.") }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Graduated", "graduated", sort, sdir, "The term they graduated. Blank for students who haven't graduated.") }}</tr>
+<table><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("University ID", "university_id", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}{{ sort_th("Matriculation", "matriculation", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir, "Years since matriculation, counted in terms (0.25 per term) up to the current term. Blank for graduated or withdrawn students; blanks always sort last.") }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Graduated", "graduated", sort, sdir, "The term they graduated. Blank for students who haven't graduated.") }}{{ sort_th("Withdrawn", "withdrawn", sort, sdir, "The term they withdrew. Blank for students who haven't withdrawn.") }}</tr>
 {% for r in rows %}
 <tr><td><a href="{{ url_for('student', sid=r.id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
 <td>{{ r.university_id }}</td>
 <td><span class="badge {{ r.status }}">{{ r.status|label }}</span></td>
-<td>{{ r|matric }}</td><td>{{ r.clock }}</td><td>{{ r.advisors or '—' }}</td><td>{{ r.research_area or '' }}</td><td>{{ r|grad }}</td></tr>
-{% else %}<tr><td colspan="8" class="muted">No students match.</td></tr>{% endfor %}
+<td>{{ r|matric }}</td><td>{{ r.clock }}</td><td>{{ r.advisors or '—' }}</td><td>{{ r.research_area or '' }}</td><td>{{ r|grad }}</td><td>{{ r|withdrawn }}</td></tr>
+{% else %}<tr><td colspan="9" class="muted">No students match.</td></tr>{% endfor %}
 </table>{% endblock %}

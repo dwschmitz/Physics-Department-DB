@@ -553,13 +553,37 @@ class PhysDBTests(unittest.TestCase):
         self.assertEqual(listed(("Autumn", 2026)), ["Lovelace"]); self.assertEqual(listed(("Winter", 2027)), ["Lovelace"])
         self.assertEqual(listed(("Spring", 2027)), []); self.assertEqual(listed(("Summer", 2027)), [])
         # only graduates are affected; a graduate with no recorded term stays (nothing to count from)
-        physdb.set_status(self.conn, "U1001", "withdrawn")
-        self.assertEqual(listed(("Autumn", 2040)), ["Lovelace"])
         physdb.set_status(self.conn, "U1001", "graduated", 2020, "Spring")
         self.conn.execute("UPDATE students SET graduation_year = NULL, graduation_term = NULL"); self.conn.commit()
         self.assertEqual(listed(("Autumn", 2040)), ["Lovelace"])
         # faculty are not affected: their own list keeps graduates forever
         physdb.set_status(self.conn, "U1001", "graduated", 2020, "Spring")
+        self.assertEqual([r["last_name"] for r in physdb.faculty_advisees(self.conn, self.fid)], ["Lovelace"])
+
+    def test_withdrawn_students_drop_off_fsr_tables_like_graduates(self):
+        fsr = physdb.add_fsr(self.conn, "Xavier", "Xx", "xx@u.edu")
+        self.conn.execute("UPDATE faculty SET fsr_id = ? WHERE id = ?", (fsr, self.fid))
+        physdb.assign_advisor(self.conn, "U1001", self.fid)
+        listed = lambda now: [r["last_name"] for r in physdb.fsr_advisees(self.conn, fsr, now)]
+        with self.assertRaises(ValueError):                                       # needs the term they left
+            physdb.set_status(self.conn, "U1001", "withdrawn")
+        physdb.set_status(self.conn, "U1001", "withdrawn", 2026, "Winter")
+        row = self.conn.execute("SELECT * FROM students").fetchone()
+        self.assertEqual((row["status"], physdb.withdrawal_label(row), physdb.graduation_label(row)), ("withdrawn", "Winter 2026", ""))
+        self.assertEqual(listed(("Winter", 2026)), ["Lovelace"]); self.assertEqual(listed(("Spring", 2026)), ["Lovelace"])
+        self.assertEqual(listed(("Summer", 2026)), []); self.assertEqual(listed(("Autumn", 2030)), [])
+        self.assertIn("withdrew Winter 2026", physdb.show_student(self.conn, "U1001"))
+        # switching to graduated moves the term to the graduation columns; back to active clears everything
+        physdb.set_status(self.conn, "U1001", "graduated", 2026, "Autumn")
+        row = self.conn.execute("SELECT * FROM students").fetchone()
+        self.assertEqual((physdb.graduation_label(row), physdb.withdrawal_label(row)), ("Autumn 2026", ""))
+        physdb.set_status(self.conn, "U1001", "active")
+        row = self.conn.execute("SELECT * FROM students").fetchone()
+        self.assertEqual((physdb.graduation_label(row), physdb.withdrawal_label(row)), ("", ""))
+        # a withdrawn student with no recorded term (entered before terms were asked for) stays listed
+        self.conn.execute("UPDATE students SET status = 'withdrawn'"); self.conn.commit()
+        self.assertEqual(listed(("Autumn", 2040)), ["Lovelace"])
+        # faculty keep withdrawn students too
         self.assertEqual([r["last_name"] for r in physdb.faculty_advisees(self.conn, self.fid)], ["Lovelace"])
 
     def test_fsr_advisees(self):

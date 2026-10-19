@@ -43,6 +43,8 @@ class WebTests(unittest.TestCase):
                     csrf_token=self.token(c))
         if over.get("status") == "graduated":
             data.update(graduation_year="2025", graduation_term="Spring")      # a graduated student needs the term
+        if over.get("status") == "withdrawn":
+            data.update(withdrawal_year="2025", withdrawal_term="Winter")      # ...and so does a withdrawn one
         data.update(over)
         return c.post("/students/new", data=data)
 
@@ -273,10 +275,10 @@ class WebTests(unittest.TestCase):
         self.assertIn("current term: Autumn 2026", html)
         import re
         cells = {m.group(1): m.group(2) for m in re.finditer(
-            r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
+            r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
         self.assertEqual(cells, {"StuU1": "0.0", "StuU2": "1.0", "StuU3": "2.5", "StuU4": "—"})
         # the last column shows the graduation term (graduated students only) and sorts
-        grads = lambda q="": re.findall(r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td></tr>",
+        grads = lambda q="": re.findall(r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td></tr>",
                                         c.get("/students" + q).get_data(as_text=True), re.S)
         self.assertIn("Graduated", html.split("</tr>")[0])
         self.assertEqual(dict(grads()), {"StuU1": "", "StuU2": "", "StuU3": "", "StuU4": "Spring 2025"})
@@ -1320,6 +1322,41 @@ class WebTests(unittest.TestCase):
         self.assertIn("Aa, Stu", mine(("Autumn", 2026))); self.assertNotIn("Aa, Stu", mine(("Winter", 2027)))
         self.assertIn('(1 active)', mine(("Winter", 2027)))
 
+    def test_withdrawal_term_is_asked_for_shown_and_hides_students_on_fsr_pages(self):
+        c, t = self._fsr_world()
+        form = c.get("/students/1/edit").get_data(as_text=True)
+        self.assertIn('data-show-when="status=withdrawn"', form)
+        self.assertIn("Withdrawal term", form); self.assertIn("Withdrawal year", form)
+        base = dict(first_name="Stu", last_name="Aa", university_id="UID1", cnet="stuaa", email="s1@u.edu", citizenship="citizen",
+                    matriculation_year="2022", matriculation_term="Autumn", csrf_token=t)
+        post = lambda **kw: c.post("/students/1/edit", data={**base, **kw})
+        r = post(status="withdrawn"); html = r.get_data(as_text=True)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Choose the term they left.", html); self.assertIn("Enter the year they left.", html)
+        self.assertIn("Enter the year they left.", post(status="withdrawn", withdrawal_term="Winter").get_data(as_text=True))
+        # a graduation term does not satisfy a withdrawal, and is cleared
+        self.assertEqual(post(status="withdrawn", graduation_year="2026", graduation_term="Spring").status_code, 200)
+        self.assertEqual(post(status="withdrawn", withdrawal_year="2026", withdrawal_term="Winter",
+                              graduation_year="2020", graduation_term="Spring").status_code, 302)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(tuple(conn.execute("SELECT graduation_year, graduation_term, withdrawal_year, withdrawal_term FROM students WHERE id = 1").fetchone()),
+                         (None, None, 2026, "Winter")); conn.close()
+        self.assertIn("<dt>Withdrew</dt><dd>Winter 2026</dd>", c.get("/students/1").get_data(as_text=True))
+        # the Students tab has a Withdrawn column, which sorts
+        page = c.get("/students").get_data(as_text=True)
+        self.assertIn("Withdrawn", page.split("</tr>")[0])
+        rows = re.findall(r"<tr><td><a [^>]*>(\w+), Stu</a></td>.*?<td>([^<]*)</td></tr>", page, re.S)
+        self.assertEqual(dict(rows)["Aa"], "Winter 2026"); self.assertEqual(dict(rows)["Bb"], "")
+        self.assertEqual(re.findall(r"<tr><td><a [^>]*>(\w+), Stu", c.get("/students?sort=withdrawn&dir=desc").get_data(as_text=True))[0], "Aa")
+        # FSR pages: listed through Spring 2026 (two terms after Winter 2026 is Summer), faculty pages keep them
+        names = lambda path, now: re.findall(r'/students/\d+">(\w+), Stu', self._at(now, c, path).split("<h2>Thesis Committees")[0])
+        self.assertEqual(names("/fsrs/1", ("Spring", 2026)), ["Aa", "Bb"])
+        self.assertEqual(names("/fsrs/1", ("Summer", 2026)), ["Bb"])
+        self.assertEqual(names("/faculty/1", ("Autumn", 2040)), ["Aa", "Bb"])
+        # status back to active clears the term
+        self.assertEqual(post(status="active", withdrawal_year="2026", withdrawal_term="Winter").status_code, 302)
+        self.assertNotIn("<dt>Withdrew</dt>", c.get("/students/1").get_data(as_text=True))
+
     def _at(self, now, client, path):
         from unittest import mock
         with mock.patch.object(physdb, "current_term", return_value=now):
@@ -1668,7 +1705,7 @@ class WebTests(unittest.TestCase):
         for sid, last in ((1, "Aa"), (3, "Cc")):                                                  # nobody active left
             c.post(f"/students/{sid}/edit", data=dict(first_name="Stu", last_name=last, university_id=f"UID{sid}",
                    cnet=f"stu{last.lower()}", email=f"s{sid}@u.edu", citizenship="citizen", status="withdrawn",
-                   matriculation_year="2022", matriculation_term="Autumn", csrf_token=t))
+                   matriculation_year="2022", matriculation_term="Autumn", withdrawal_year="2026", withdrawal_term="Winter", csrf_token=t))
         html = page()
         self.assertEqual(html.count("(0 active)"), 2)
         self.assertEqual(f.get("/my/students/1").status_code, 200)                                # still reachable

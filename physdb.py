@@ -207,7 +207,8 @@ def _migrate_graduation(conn):
     """'Expected graduation year' was replaced by the term a student actually graduated (year + season). Students
     already marked graduated are left without a term until someone enters it."""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(students)")}
-    for col, kind in (("graduation_year", "INTEGER"), ("graduation_term", "TEXT")):
+    for col, kind in (("graduation_year", "INTEGER"), ("graduation_term", "TEXT"),
+                      ("withdrawal_year", "INTEGER"), ("withdrawal_term", "TEXT")):
         if col not in cols:
             conn.execute(f"ALTER TABLE students ADD COLUMN {col} {kind}")
     if "expected_grad_year" in cols:
@@ -216,6 +217,13 @@ def _migrate_graduation(conn):
         except sqlite3.OperationalError:       # SQLite older than 3.35 can't drop columns; the unused one is harmless
             pass
     conn.commit()
+
+
+def withdrawal_label(row):
+    """e.g. 'Winter 2026' for a student with a withdrawal term, else ''."""
+    if row["withdrawal_year"] is None or not row["withdrawal_term"]:
+        return ""
+    return f"{row['withdrawal_term']} {row['withdrawal_year']}"
 
 
 def graduation_label(row):
@@ -434,12 +442,14 @@ def add_student(conn, **f):
         raise ValueError(f"matriculation term must be one of {', '.join(SEASONS)}")
     if f["citizenship"] is not None and f["citizenship"] not in CITIZENSHIP:
         raise ValueError(f"citizenship must be one of {', '.join(CITIZENSHIP)}")
-    f["graduation_year"] = f["graduation_term"] = None          # new students are active; see set_status
+    f["graduation_year"] = f["graduation_term"] = f["withdrawal_year"] = f["withdrawal_term"] = None   # new students are active; see set_status
     cur = conn.execute(
         """INSERT INTO students (university_id, cnet, first_name, last_name, email, citizenship,
-               matriculation_year, matriculation_term, graduation_year, graduation_term, research_area, notes)
+               matriculation_year, matriculation_term, graduation_year, graduation_term, withdrawal_year, withdrawal_term,
+               research_area, notes)
            VALUES (:university_id, :cnet, :first_name, :last_name, :email, :citizenship,
-               :matriculation_year, :matriculation_term, :graduation_year, :graduation_term, :research_area, :notes)""", f)
+               :matriculation_year, :matriculation_term, :graduation_year, :graduation_term, :withdrawal_year, :withdrawal_term,
+               :research_area, :notes)""", f)
     conn.commit()
     return cur.lastrowid
 
@@ -494,24 +504,25 @@ def add_funding(conn, student, kind, year, season, source=None, amount=None, poe
     conn.commit()
 
 
-def _check_graduation(status, year, term):
-    """A graduated student needs the term they graduated; anyone else must not have one."""
-    if status == "graduated":
+def _check_exit_term(status, year, term):
+    """A graduated or withdrawn student needs the term it happened in; anyone else must not have one."""
+    if status in ("graduated", "withdrawn"):
         if year is None or term not in SEASONS:
-            raise ValueError("a graduated student needs a graduation year and term "
-                             f"(one of {', '.join(SEASONS)})")
+            raise ValueError(f"a {status} student needs a year and term (one of {', '.join(SEASONS)})")
     elif year is not None or term is not None:
-        raise ValueError("only a graduated student has a graduation term")
+        raise ValueError("only a graduated or withdrawn student has a graduation / withdrawal term")
 
 
-def set_status(conn, student, status, graduation_year=None, graduation_term=None):
-    """Change a student's status. Marking someone graduated needs the term they graduated; any other status clears it."""
+def set_status(conn, student, status, year=None, term=None):
+    """Change a student's status. Marking someone graduated or withdrawn needs the term it happened in (stored as their
+    graduation or withdrawal term); any other status clears both."""
     s = _find(conn, "students", student)
-    if status != "graduated":
-        graduation_year = graduation_term = None
-    _check_graduation(status, graduation_year, graduation_term)
-    conn.execute("UPDATE students SET status = ?, graduation_year = ?, graduation_term = ? WHERE id = ?",
-                 (status, graduation_year, graduation_term, s["id"]))
+    if status not in ("graduated", "withdrawn"):
+        year = term = None
+    _check_exit_term(status, year, term)
+    grad, wd = (year, term) if status == "graduated" else (None, None), (year, term) if status == "withdrawn" else (None, None)
+    conn.execute("""UPDATE students SET status = ?, graduation_year = ?, graduation_term = ?,
+                    withdrawal_year = ?, withdrawal_term = ? WHERE id = ?""", (status, *grad, *wd, s["id"]))
     conn.commit()
 
 
@@ -554,7 +565,8 @@ def list_students(conn, status=None, advisor=None, year=None, committee=None):
 # What a faculty member may see about a student. Deliberately NOT included: University ID and the internal
 # admin notes. Every faculty-facing query below selects exactly these columns, so nothing else can leak.
 FACULTY_STUDENT_COLUMNS = ("id", "first_name", "last_name", "cnet", "email", "citizenship", "status",
-                           "matriculation_year", "matriculation_term", "graduation_year", "graduation_term", "research_area")
+                           "matriculation_year", "matriculation_term", "graduation_year", "graduation_term",
+                           "withdrawal_year", "withdrawal_term", "research_area")
 _FSC = ", ".join(f"s.{c}" for c in FACULTY_STUDENT_COLUMNS)
 _ADVISOR_ROLES = "('advisor', 'co-advisor')"
 
@@ -573,22 +585,25 @@ def is_advisee(conn, faculty_id, student_id):
             AND role IN {_ADVISOR_ROLES}""", (faculty_id, student_id)).fetchone() is not None
 
 
-GRADUATED_VISIBLE_TERMS = 2     # FSR tables keep a graduate this many terms after the graduation term
+LEFT_VISIBLE_TERMS = 2     # FSR tables keep a graduate or withdrawn student this many terms after they left
 
 
-def _graduated_long_ago(student, now):
-    if student["status"] != "graduated" or student["graduation_year"] is None or student["graduation_term"] not in SEASONS:
+def _left_long_ago(student, now):
+    """True for a graduated / withdrawn student whose graduation / withdrawal term is LEFT_VISIBLE_TERMS or more
+    terms before `now`. Someone with no recorded term never counts as long ago (there is nothing to count from)."""
+    prefix = {"graduated": "graduation", "withdrawn": "withdrawal"}.get(student["status"])
+    if prefix is None or student[prefix + "_year"] is None or student[prefix + "_term"] not in SEASONS:
         return False
-    return term_index(*now) - term_index(student["graduation_term"], student["graduation_year"]) >= GRADUATED_VISIBLE_TERMS
+    return term_index(*now) - term_index(student[prefix + "_term"], student[prefix + "_year"]) >= LEFT_VISIBLE_TERMS
 
 
 def fsr_advisees(conn, fsr_id, now=None):
     """Students currently advised (advisor or co-advisor) by any faculty member this FSR is the FSR for, limited to
     the same visible columns, plus `advisors`: those faculty members' last names.
 
-    A graduated student drops off once GRADUATED_VISIBLE_TERMS terms have passed since their graduation term: with
-    two, someone who graduated in Summer 2026 is listed through Autumn 2026 and gone from the start of Winter 2027.
-    (A graduated student with no recorded term stays listed, since there is nothing to count from.)"""
+    A graduated or withdrawn student drops off once LEFT_VISIBLE_TERMS terms have passed since their graduation /
+    withdrawal term: with two, someone who graduated in Summer 2026 is listed through Autumn 2026 and gone from the
+    start of Winter 2027. (One with no recorded term stays listed, since there is nothing to count from.)"""
     now = now or current_term()
     rows = [dict(r) for r in conn.execute(
         f"""SELECT {_FSC},
@@ -599,7 +614,7 @@ def fsr_advisees(conn, fsr_id, now=None):
             WHERE s.id IN (SELECT a.student_id FROM advising a JOIN faculty f ON f.id = a.faculty_id
                            WHERE f.fsr_id = ? AND a.end_date IS NULL AND a.role IN {_ADVISOR_ROLES})
             ORDER BY s.last_name, s.first_name, s.id""", (fsr_id,))]
-    return [r for r in rows if not _graduated_long_ago(r, now)]
+    return [r for r in rows if not _left_long_ago(r, now)]
 
 
 def faculty_committee_students(conn, faculty_id):
@@ -703,7 +718,8 @@ def show_student(conn, key):
     out = [f"{s['first_name']} {s['last_name']}  <{s['email']}>",
            f"  ID {s['university_id']} | CNET {s['cnet'] or '-'} | {s['status']} | "
            f"matriculated {matriculation_label(s)}"
-           + (f", graduated {graduation_label(s) or '?'}" if s["status"] == "graduated" else ""),
+           + (f", graduated {graduation_label(s) or '?'}" if s["status"] == "graduated" else "")
+           + (f", withdrew {withdrawal_label(s) or '?'}" if s["status"] == "withdrawn" else ""),
            f"  Citizenship: {s['citizenship'].replace('_', ' ') if s['citizenship'] else '-'}",
            f"  Research: {s['research_area'] or '-'}"]
     if s["notes"]:
@@ -791,9 +807,9 @@ def build_parser():
     a = sub.add_parser("set-status")
     a.add_argument("student"); a.add_argument("status",
                    choices=["active", "on_leave", "graduated", "withdrawn"])
-    a.add_argument("--graduation-year", type=int, help="required when the status is graduated")
-    a.add_argument("--graduation-term", choices=SEASONS, type=str.capitalize,
-                   help="required when the status is graduated")
+    a.add_argument("--year", type=int, help="the year they graduated or withdrew (required for those statuses)")
+    a.add_argument("--term", choices=SEASONS, type=str.capitalize,
+                   help="the term they graduated or withdrew (required for those statuses)")
 
     a = sub.add_parser("list")
     a.add_argument("--status"); a.add_argument("--year", type=int)
@@ -832,7 +848,7 @@ def main(argv=None):
                         args.poetaf_coa, args.notes)
         elif c == "set-status":
             try:
-                set_status(conn, args.student, args.status, args.graduation_year, args.graduation_term)
+                set_status(conn, args.student, args.status, args.year, args.term)
             except ValueError as e:
                 raise SystemExit(f"Error: {e}")
         elif c == "list":

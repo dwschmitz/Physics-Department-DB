@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS students (
     matriculation_term  TEXT NOT NULL DEFAULT 'Autumn',  -- Autumn/Winter/Spring/Summer (checked by the app)
     graduation_year     INTEGER,  -- set when status is 'graduated': the term they graduated (year + season)
     graduation_term     TEXT,     -- Autumn/Winter/Spring/Summer (checked by the app)
+    withdrawal_year     INTEGER,  -- the same for status 'withdrawn': the term they left
+    withdrawal_term     TEXT,
     research_area       TEXT,
     notes               TEXT
 );

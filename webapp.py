@@ -100,6 +100,11 @@ def fields_for(table, conn, row=None):
             {**F("graduation_term", "Graduation term", "select", False, [(s, s) for s in physdb.SEASONS],
                  help="The term they graduated. Needed when the status is Graduated."),
              "show_when": ("status", "graduated")},
+            {**F("withdrawal_year", "Withdrawal year", "year", help="The year they left the program."),
+             "show_when": ("status", "withdrawn")},
+            {**F("withdrawal_term", "Withdrawal term", "select", False, [(s, s) for s in physdb.SEASONS],
+                 help="The term they left. Needed when the status is Withdrawn."),
+             "show_when": ("status", "withdrawn")},
             F("research_area", "Research area"),
             F("notes", "Notes", "textarea"),
         ]
@@ -203,11 +208,17 @@ def _safe_path(value):
     return None
 
 
-def _graduation_key(row):
-    """Sort key for a graduation term (chronological); None when the student has none."""
-    if row["graduation_year"] is None or row["graduation_term"] not in physdb.SEASONS:
-        return None
-    return physdb.term_index(row["graduation_term"], row["graduation_year"])
+def _exit_key(prefix):
+    """Sort key function for a graduation / withdrawal term (chronological); None when the student has none."""
+    def key(row):
+        if row[prefix + "_year"] is None or row[prefix + "_term"] not in physdb.SEASONS:
+            return None
+        return physdb.term_index(row[prefix + "_term"], row[prefix + "_year"])
+    return key
+
+
+_graduation_key = _exit_key("graduation")
+_withdrawal_key = _exit_key("withdrawal")
 
 
 def _text(value):
@@ -241,6 +252,7 @@ def create_app(db_path=None):
     app.jinja_env.filters["term"] = physdb.term_label
     app.jinja_env.filters["matric"] = physdb.matriculation_label
     app.jinja_env.filters["grad"] = physdb.graduation_label
+    app.jinja_env.filters["withdrawn"] = physdb.withdrawal_label
 
     def db():
         if "db" not in g:
@@ -737,13 +749,16 @@ def create_app(db_path=None):
         if request.method == "POST":
             values, errors = parse_form(fields, request.form)
             if table == "students" and "status" not in errors:
-                if values["status"] == "graduated":          # a graduated student needs the term they graduated
-                    for name, text in (("graduation_term", "Choose the term they graduated."),
-                                       ("graduation_year", "Enter the year they graduated.")):
+                prefix = {"graduated": "graduation", "withdrawn": "withdrawal"}.get(values["status"])
+                for kind in ("graduation", "withdrawal"):
+                    if kind != prefix:                       # anyone else has no such term
+                        values[kind + "_term"] = values[kind + "_year"] = None
+                if prefix:                                   # graduated / withdrawn: needs the term it happened
+                    verb = "graduated" if prefix == "graduation" else "left"
+                    for name, text in ((prefix + "_term", f"Choose the term they {verb}."),
+                                       (prefix + "_year", f"Enter the year they {verb}.")):
                         if values[name] is None:
                             errors[name] = text
-                else:                                        # anyone else has no graduation term
-                    values["graduation_term"] = values["graduation_year"] = None
             if "start_date" in values and "end_date" in values and not errors and \
                     values["end_date"] and values["end_date"] < values["start_date"]:
                 errors["end_date"] = "End date can't be before the start date."
@@ -820,7 +835,7 @@ def create_app(db_path=None):
             "clock": lambda r: r["clock_terms"],
             "advisor": lambda r: _text(r["advisors"]),
             "research_area": lambda r: _text(r["research_area"]),
-            "graduated": _graduation_key,
+            "graduated": _graduation_key, "withdrawn": _withdrawal_key,
         }, request.args.get("sort"), request.args.get("dir"), "name")
         faculty = db().execute("SELECT id, last_name, first_name FROM faculty ORDER BY last_name").fetchall()
         return render_template("students.html", rows=rows, faculty=faculty, q=q, status=status,

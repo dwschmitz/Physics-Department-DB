@@ -54,10 +54,12 @@ person's password and role (for example, to regain admin access if no admin can 
 - **Milestone Check** (Reports tab): pick a milestone and a minimum clock in years (fractions such as 0.25 are fine) to
   list the active students at or past that clock who have no passed or conditional entry for it, with matriculation,
   clock, research area and advisor; every heading sorts.
-- **Graduation term:** when a student's Status is set to **Graduated**, the edit form asks for the graduation
-  **year and term** (both required); any other status clears them. (This replaced "Expected graduation year", which
-  was removed.) From the command line: `set-status STUDENT graduated --graduation-year 2026 --graduation-term spring`.
-  Students already marked graduated have no term until you edit them and enter it.
+- **Graduation / withdrawal term:** when a student's Status is set to **Graduated** or **Withdrawn**, the edit form
+  asks for the **year and term** they graduated or left (both required); any other status clears them. (This replaced
+  "Expected graduation year", which was removed.) From the command line:
+  `set-status STUDENT graduated --year 2026 --term spring` (also for `withdrawn`). The Students tab has a
+  **Graduated** and a **Withdrawn** column. Students already marked graduated or withdrawn have no term until you
+  edit them and enter it.
 - **Milestones Table** (Reports, first tab): a snapshot with one row per active or on-leave student: name, clock,
   advisor, a **GDE** column listing the exams passed (CM, QM, EM, SM), and a ✓ for each of Candidacy, MS, Committee,
   Pre-Oral and Defense passed (a conditional pass counts). Every column sorts. Graduated and withdrawn students
@@ -94,10 +96,10 @@ person's password and role (for example, to regain admin access if no admin can 
   username is the FSR's CNET. An FSR who signs in lands on **My students**: every student currently advised
   (advisor or co-advisor) by any faculty member they are the FSR for, with the advisor's name, status, clock,
   graduation term, research area and funding for a term (Prev / Next to change term). That is all they can see
-  (no University IDs or notes, no student pages), and they cannot change anything. A graduated student stays on this
-  table for the graduation term and the term after it, and drops off from the start of the term after that (graduate in
-  Summer 2026 and you're listed through Autumn 2026, gone from Winter 2027); a graduate with no recorded term stays.
-  Faculty pages keep their graduates indefinitely. Staff see the same table on
+  (no University IDs or notes, no student pages), and they cannot change anything. A graduated or withdrawn student stays on
+  this table for the term they left and the term after it, and drops off from the start of the term after that
+  (graduate in Summer 2026 and you're listed through Autumn 2026, gone from Winter 2027); one with no recorded term
+  stays. Faculty pages keep graduated and withdrawn students indefinitely. Staff see the same table on
   an FSR's page (FSRs → click a name).
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
