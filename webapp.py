@@ -218,7 +218,6 @@ def _exit_key(prefix):
 
 
 _graduation_key = _exit_key("graduation")
-_withdrawal_key = _exit_key("withdrawal")
 
 
 def _text(value):
@@ -835,7 +834,7 @@ def create_app(db_path=None):
             "clock": lambda r: r["clock_terms"],
             "advisor": lambda r: _text(r["advisors"]),
             "research_area": lambda r: _text(r["research_area"]),
-            "graduated": _graduation_key, "withdrawn": _withdrawal_key,
+            "graduated": _graduation_key,
         }, request.args.get("sort"), request.args.get("dir"), "name")
         faculty = db().execute("SELECT id, last_name, first_name FROM faculty ORDER BY last_name").fetchall()
         return render_template("students.html", rows=rows, faculty=faculty, q=q, status=status,

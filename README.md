@@ -58,7 +58,7 @@ person's password and role (for example, to regain admin access if no admin can 
   asks for the **year and term** they graduated or left (both required); any other status clears them. (This replaced
   "Expected graduation year", which was removed.) From the command line:
   `set-status STUDENT graduated --year 2026 --term spring` (also for `withdrawn`). The Students tab has a
-  **Graduated** and a **Withdrawn** column. Students already marked graduated or withdrawn have no term until you
+  **Graduated** column (withdrawal terms show on the student's own page). Students already marked graduated or withdrawn have no term until you
   edit them and enter it.
 - **Milestones Table** (Reports, first tab): a snapshot with one row per active or on-leave student: name, clock,
   advisor, a **GDE** column listing the exams passed (CM, QM, EM, SM), and a ✓ for each of Candidacy, MS, Committee,

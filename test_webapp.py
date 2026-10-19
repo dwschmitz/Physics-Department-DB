@@ -275,10 +275,10 @@ class WebTests(unittest.TestCase):
         self.assertIn("current term: Autumn 2026", html)
         import re
         cells = {m.group(1): m.group(2) for m in re.finditer(
-            r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
+            r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
         self.assertEqual(cells, {"StuU1": "0.0", "StuU2": "1.0", "StuU3": "2.5", "StuU4": "—"})
         # the last column shows the graduation term (graduated students only) and sorts
-        grads = lambda q="": re.findall(r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td></tr>",
+        grads = lambda q="": re.findall(r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td></tr>",
                                         c.get("/students" + q).get_data(as_text=True), re.S)
         self.assertIn("Graduated", html.split("</tr>")[0])
         self.assertEqual(dict(grads()), {"StuU1": "", "StuU2": "", "StuU3": "", "StuU4": "Spring 2025"})
@@ -1342,12 +1342,10 @@ class WebTests(unittest.TestCase):
         self.assertEqual(tuple(conn.execute("SELECT graduation_year, graduation_term, withdrawal_year, withdrawal_term FROM students WHERE id = 1").fetchone()),
                          (None, None, 2026, "Winter")); conn.close()
         self.assertIn("<dt>Withdrew</dt><dd>Winter 2026</dd>", c.get("/students/1").get_data(as_text=True))
-        # the Students tab has a Withdrawn column, which sorts
+        # the Students tab has no Withdrawn column (rare), though the status itself shows
         page = c.get("/students").get_data(as_text=True)
-        self.assertIn("Withdrawn", page.split("</tr>")[0])
-        rows = re.findall(r"<tr><td><a [^>]*>(\w+), Stu</a></td>.*?<td>([^<]*)</td></tr>", page, re.S)
-        self.assertEqual(dict(rows)["Aa"], "Winter 2026"); self.assertEqual(dict(rows)["Bb"], "")
-        self.assertEqual(re.findall(r"<tr><td><a [^>]*>(\w+), Stu", c.get("/students?sort=withdrawn&dir=desc").get_data(as_text=True))[0], "Aa")
+        self.assertNotIn("Withdrawn</a>", page.split("</tr>")[0]); self.assertNotIn("sort=withdrawn", page)
+        self.assertIn("Withdrawn", re.search(r"<tr><td><a [^>]*>Aa, Stu</a>.*?</tr>", page, re.S).group(0))      # the status badge
         # FSR pages: listed through Spring 2026 (two terms after Winter 2026 is Summer), faculty pages keep them
         names = lambda path, now: re.findall(r'/students/\d+">(\w+), Stu', self._at(now, c, path).split("<h2>Thesis Committees")[0])
         self.assertEqual(names("/fsrs/1", ("Spring", 2026)), ["Aa", "Bb"])
