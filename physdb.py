@@ -207,7 +207,8 @@ def _migrate_graduation(conn):
     """'Expected graduation year' was replaced by the term a student actually graduated (year + season). Students
     already marked graduated are left without a term until someone enters it."""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(students)")}
-    for col, kind in (("graduation_year", "INTEGER"), ("graduation_term", "TEXT"),
+    for col, kind in (("transfer_year", "INTEGER"), ("transfer_term", "TEXT"),
+                      ("graduation_year", "INTEGER"), ("graduation_term", "TEXT"),
                       ("withdrawal_year", "INTEGER"), ("withdrawal_term", "TEXT")):
         if col not in cols:
             conn.execute(f"ALTER TABLE students ADD COLUMN {col} {kind}")
@@ -217,6 +218,13 @@ def _migrate_graduation(conn):
         except sqlite3.OperationalError:       # SQLite older than 3.35 can't drop columns; the unused one is harmless
             pass
     conn.commit()
+
+
+def transfer_label(row):
+    """e.g. 'Winter 2024' for a transfer student, else ''."""
+    if row["transfer_year"] is None or not row["transfer_term"]:
+        return ""
+    return f"{row['transfer_term']} {row['transfer_year']}"
 
 
 def withdrawal_label(row):
@@ -442,14 +450,18 @@ def add_student(conn, **f):
         raise ValueError(f"matriculation term must be one of {', '.join(SEASONS)}")
     if f["citizenship"] is not None and f["citizenship"] not in CITIZENSHIP:
         raise ValueError(f"citizenship must be one of {', '.join(CITIZENSHIP)}")
+    f.setdefault("transfer_year", None); f.setdefault("transfer_term", None)
+    if (f["transfer_year"] is None) != (f["transfer_term"] is None) or \
+            (f["transfer_term"] is not None and f["transfer_term"] not in SEASONS):
+        raise ValueError(f"a transfer student needs both a transfer year and a term (one of {', '.join(SEASONS)})")
     f["graduation_year"] = f["graduation_term"] = f["withdrawal_year"] = f["withdrawal_term"] = None   # new students are active; see set_status
     cur = conn.execute(
         """INSERT INTO students (university_id, cnet, first_name, last_name, email, citizenship,
-               matriculation_year, matriculation_term, graduation_year, graduation_term, withdrawal_year, withdrawal_term,
-               research_area, notes)
+               matriculation_year, matriculation_term, transfer_year, transfer_term, graduation_year, graduation_term,
+               withdrawal_year, withdrawal_term, research_area, notes)
            VALUES (:university_id, :cnet, :first_name, :last_name, :email, :citizenship,
-               :matriculation_year, :matriculation_term, :graduation_year, :graduation_term, :withdrawal_year, :withdrawal_term,
-               :research_area, :notes)""", f)
+               :matriculation_year, :matriculation_term, :transfer_year, :transfer_term, :graduation_year, :graduation_term,
+               :withdrawal_year, :withdrawal_term, :research_area, :notes)""", f)
     conn.commit()
     return cur.lastrowid
 
@@ -565,7 +577,7 @@ def list_students(conn, status=None, advisor=None, year=None, committee=None):
 # What a faculty member may see about a student. Deliberately NOT included: University ID and the internal
 # admin notes. Every faculty-facing query below selects exactly these columns, so nothing else can leak.
 FACULTY_STUDENT_COLUMNS = ("id", "first_name", "last_name", "cnet", "email", "citizenship", "status",
-                           "matriculation_year", "matriculation_term", "graduation_year", "graduation_term",
+                           "matriculation_year", "matriculation_term", "transfer_year", "transfer_term", "graduation_year", "graduation_term",
                            "withdrawal_year", "withdrawal_term", "research_area")
 _FSC = ", ".join(f"s.{c}" for c in FACULTY_STUDENT_COLUMNS)
 _ADVISOR_ROLES = "('advisor', 'co-advisor')"
@@ -718,6 +730,7 @@ def show_student(conn, key):
     out = [f"{s['first_name']} {s['last_name']}  <{s['email']}>",
            f"  ID {s['university_id']} | CNET {s['cnet'] or '-'} | {s['status']} | "
            f"matriculated {matriculation_label(s)}"
+           + (f" (transfer, {transfer_label(s)})" if transfer_label(s) else "")
            + (f", graduated {graduation_label(s) or '?'}" if s["status"] == "graduated" else "")
            + (f", withdrew {withdrawal_label(s) or '?'}" if s["status"] == "withdrawn" else ""),
            f"  Citizenship: {s['citizenship'].replace('_', ' ') if s['citizenship'] else '-'}",
@@ -775,6 +788,9 @@ def build_parser():
     a.add_argument("--citizenship", choices=CITIZENSHIP)
     a.add_argument("--matriculation-year", type=int, default=datetime.date.today().year)
     a.add_argument("--matriculation-term", choices=SEASONS, type=str.capitalize, default="Autumn")
+    a.add_argument("--transfer-year", type=int, help="for a transfer student: the year they transferred in")
+    a.add_argument("--transfer-term", choices=SEASONS, type=str.capitalize,
+                   help="for a transfer student: the term they transferred in (give both or neither)")
     a.add_argument("--research-area"); a.add_argument("--notes")
 
     a = sub.add_parser("add-faculty")

@@ -95,6 +95,12 @@ def fields_for(table, conn, row=None):
             F("status", "Status", "select", True, enum(STATUSES)),
             F("matriculation_year", "Matriculation year", "year", True),
             F("matriculation_term", "Matriculation term", "select", True, [(s, s) for s in physdb.SEASONS]),
+            F("is_transfer", "Transfer", "checkbox", help="Tick for a transfer student, then give the term they transferred."),
+            {**F("transfer_year", "Transfer year", "year", help="The year they transferred in."),
+             "show_when": ("is_transfer", "checked")},
+            {**F("transfer_term", "Transfer term", "select", False, [(s, s) for s in physdb.SEASONS],
+                 help="The term they transferred in (it can differ from the matriculation term)."),
+             "show_when": ("is_transfer", "checked")},
             {**F("graduation_year", "Graduation year", "year", help="The year they graduated."),
              "show_when": ("status", "graduated")},
             {**F("graduation_term", "Graduation term", "select", False, [(s, s) for s in physdb.SEASONS],
@@ -157,6 +163,9 @@ def parse_form(fields, form):
     values, errors = {}, {}
     for f in fields:
         name, kind = f["name"], f["type"]
+        if kind == "checkbox":                      # ticked or not; never "required" or invalid
+            values[name] = bool(form.get(name))
+            continue
         raw = form.get(name) or ""
         if kind not in ("password", "secret"):
             raw = raw.strip()
@@ -251,6 +260,7 @@ def create_app(db_path=None):
     app.jinja_env.filters["term"] = physdb.term_label
     app.jinja_env.filters["matric"] = physdb.matriculation_label
     app.jinja_env.filters["grad"] = physdb.graduation_label
+    app.jinja_env.filters["transfer"] = physdb.transfer_label
     app.jinja_env.filters["withdrawn"] = physdb.withdrawal_label
 
     def db():
@@ -747,6 +757,14 @@ def create_app(db_path=None):
         fields = fields_for(table, db(), row)
         if request.method == "POST":
             values, errors = parse_form(fields, request.form)
+            if table == "students":                          # the Transfer box decides whether a transfer term is kept
+                if values.pop("is_transfer", False):
+                    for name, text in (("transfer_term", "Choose the term they transferred."),
+                                       ("transfer_year", "Enter the year they transferred.")):
+                        if values[name] is None:
+                            errors[name] = text
+                else:
+                    values["transfer_term"] = values["transfer_year"] = None
             if table == "students" and "status" not in errors:
                 prefix = {"graduated": "graduation", "withdrawn": "withdrawal"}.get(values["status"])
                 for kind in ("graduation", "withdrawal"):
@@ -769,7 +787,8 @@ def create_app(db_path=None):
                 errors["_form"] = problem
             current = request.form
         else:
-            errors, current = {}, (row or {"status": "active",
+            errors, current = {}, (({**dict(row), "is_transfer": row["transfer_year"] is not None}
+                                    if table == "students" and row is not None else row) or {"status": "active",
                                    "matriculation_year": datetime.date.today().year,
                                    "matriculation_term": "Autumn",
                                    "start_date": datetime.date.today().isoformat(),

@@ -8,8 +8,13 @@
   {% for f in fields %}
   {% set v = '' if f.type in ('password', 'secret') else (values[f.name] if values[f.name] is not none else '') %}
   <div class="field"{% if f.show_when %} data-show-when="{{ f.show_when[0] }}={{ f.show_when[1] }}"{% endif %}>
+    {% if f.type == 'checkbox' %}
+      <label class="check"><input type="checkbox" id="{{ f.name }}" name="{{ f.name }}" value="1" {{ 'checked' if values[f.name] }}> {{ f.label }}</label>
+    {% else %}
     <label for="{{ f.name }}">{{ f.label }}{% if f.required %} <span class="req">*</span>{% endif %}</label>
-    {% if f.type == 'select' %}
+    {% endif %}
+    {% if f.type == 'checkbox' %}
+    {% elif f.type == 'select' %}
       <select id="{{ f.name }}" name="{{ f.name }}">
         {% if f.placeholder %}<option value="">&mdash; choose &mdash;</option>{% elif not f.required %}<option value=""></option>{% endif %}
         {% for val, text in f.choices %}<option value="{{ val }}" {{ 'selected' if v|string == val|string }}>{{ text }}</option>{% endfor %}
@@ -28,14 +33,14 @@
   <button class="btn">Save</button> <a class="btn secondary" href="{{ back }}">Cancel</a>
 </form>
 <script>
-/* Fields marked data-show-when="field=value" only appear while that field has that value (without scripting they
-   are always shown), e.g. the graduation term once Status is Graduated. */
+/* Fields marked data-show-when="field=value" only appear while that field has that value, or, for a checkbox,
+   while it is ticked (without scripting they are always shown), e.g. the graduation term once Status is Graduated. */
 (function () {
   var boxes = document.querySelectorAll('[data-show-when]');
   Array.prototype.forEach.call(boxes, function (box) {
     var rule = box.getAttribute('data-show-when').split('='), src = document.getElementById(rule[0]);
     if (!src) return;
-    var update = function () { box.hidden = src.value !== rule[1]; };
+    var update = function () { box.hidden = src.type === 'checkbox' ? !src.checked : src.value !== rule[1]; };
     src.addEventListener('change', update);
     update();
   });

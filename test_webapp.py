@@ -1153,7 +1153,7 @@ class WebTests(unittest.TestCase):
         self.assertNotIn("Expected graduation", form)
         self.assertIn('data-show-when="status=graduated"', form)                           # revealed only for Graduated
         labels = re.findall(r"<label for=\"(\w+)\">", form)
-        self.assertEqual(labels[labels.index("matriculation_term") + 1:][:2], ["graduation_year", "graduation_term"])
+        self.assertEqual(labels[labels.index("transfer_term") + 1:][:2], ["graduation_year", "graduation_term"])
         self.assertIn("Graduation term", form); self.assertIn("Graduation year", form)
         self.assertEqual(self.add_student(c).status_code, 302)
         base = dict(first_name="Ada", last_name="Lovelace", university_id="U1", email="ada@u.edu", citizenship="citizen",
@@ -1321,6 +1321,39 @@ class WebTests(unittest.TestCase):
                 return f.get("/fsr").get_data(as_text=True)
         self.assertIn("Aa, Stu", mine(("Autumn", 2026))); self.assertNotIn("Aa, Stu", mine(("Winter", 2027)))
         self.assertIn('(1 active)', mine(("Winter", 2027)))
+
+    def test_transfer_checkbox_with_year_and_term(self):
+        c = self.client("ed"); t = self.token(c)
+        form = c.get("/students/new").get_data(as_text=True)
+        self.assertRegex(form, r'<input type="checkbox" id="is_transfer" name="is_transfer" value="1" >? ?')
+        self.assertNotIn(" checked", form.split('id="is_transfer"')[1].split(">")[0])
+        self.assertEqual(form.count('data-show-when="is_transfer=checked"'), 2)         # year and term, shown when ticked
+        labels = re.findall(r"<label for=\"(\w+)\">|<label class=\"check\">.*?(Transfer)", form, re.S)
+        self.assertLess(form.index('id="is_transfer"'), form.index('id="transfer_year"'))
+        self.assertLess(form.index('id="matriculation_term"'), form.index('id="is_transfer"'))
+        base = dict(first_name="Ada", last_name="Lovelace", university_id="U1", email="ada@u.edu", citizenship="citizen",
+                    status="active", matriculation_year="2022", matriculation_term="Autumn", csrf_token=t)
+        # ticked without a term: refused, and the box stays ticked
+        r = c.post("/students/new", data={**base, "is_transfer": "1"}); html = r.get_data(as_text=True)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Choose the term they transferred.", html); self.assertIn("Enter the year they transferred.", html)
+        self.assertIn("checked", html.split('id="is_transfer"')[1].split(">")[0])
+        r = c.post("/students/new", data={**base, "is_transfer": "1", "transfer_year": "2023", "transfer_term": "Winter"})
+        self.assertEqual(r.status_code, 302)
+        page = c.get("/students/1").get_data(as_text=True)
+        self.assertIn("<dt>Transfer</dt><dd>Winter 2023</dd>", page)
+        self.assertIn("Autumn 2022", page)                                                    # matriculation is separate
+        edit = c.get("/students/1/edit").get_data(as_text=True)
+        self.assertIn("checked", edit.split('id="is_transfer"')[1].split(">")[0])
+        self.assertIn('<option value="Winter" selected>', edit.split('name="transfer_term"')[1]); self.assertIn('value="2023"', edit)
+        # unticked clears the term, even if the boxes still had values
+        post = lambda **kw: c.post("/students/1/edit", data={**base, **kw})
+        self.assertEqual(post(transfer_year="2023", transfer_term="Winter").status_code, 302)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(tuple(conn.execute("SELECT transfer_year, transfer_term FROM students").fetchone()), (None, None)); conn.close()
+        self.assertNotIn("<dt>Transfer</dt>", c.get("/students/1").get_data(as_text=True))
+        csv = c.get("/export.csv").get_data(as_text=True).splitlines()[0]
+        self.assertIn("transfer_year", csv); self.assertIn("transfer_term", csv)
 
     def test_withdrawal_term_is_asked_for_shown_and_hides_students_on_fsr_pages(self):
         c, t = self._fsr_world()

@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS students (
                         CHECK (status IN ('active', 'on_leave', 'graduated', 'withdrawn')),
     matriculation_year  INTEGER NOT NULL,
     matriculation_term  TEXT NOT NULL DEFAULT 'Autumn',  -- Autumn/Winter/Spring/Summer (checked by the app)
+    transfer_year       INTEGER,  -- set for a transfer student: the term they transferred in (year + season),
+    transfer_term       TEXT,     -- which can differ from the matriculation term; both empty otherwise
     graduation_year     INTEGER,  -- set when status is 'graduated': the term they graduated (year + season)
     graduation_term     TEXT,     -- Autumn/Winter/Spring/Summer (checked by the app)
     withdrawal_year     INTEGER,  -- the same for status 'withdrawn': the term they left

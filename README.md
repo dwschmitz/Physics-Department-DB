@@ -54,6 +54,9 @@ person's password and role (for example, to regain admin access if no admin can 
 - **Milestone Check** (Reports tab): pick a milestone and a minimum clock in years (fractions such as 0.25 are fine) to
   list the active students at or past that clock who have no passed or conditional entry for it, with matriculation,
   clock, research area and advisor; every heading sorts.
+- **Transfer students:** on the Add/Edit student form, tick **Transfer** and the **Transfer year** and **Transfer term**
+  boxes appear (both required); unticking clears them. The transfer term is separate from the matriculation term, shows
+  on the student's page, and is included in the CSV download.
 - **Graduation / withdrawal term:** when a student's Status is set to **Graduated** or **Withdrawn**, the edit form
   asks for the **year and term** they graduated or left (both required); any other status clears them. (This replaced
   "Expected graduation year", which was removed.) From the command line:

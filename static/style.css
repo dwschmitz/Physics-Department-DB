@@ -23,6 +23,7 @@ input,select,textarea{font:inherit;padding:.4rem;border:1px solid #aab2bd;border
 .form{background:#fff;border:1px solid #d5d9e0;padding:1.2rem;max-width:36rem}
 .form .field{margin-bottom:1rem}.form label{display:block;font-weight:600;margin-bottom:.2rem}
 .form input,.form select,.form textarea{width:100%;box-sizing:border-box}
+.form input[type=checkbox]{width:auto;margin-right:.4rem}
 .help{font-size:.85rem;color:#566}.err{color:#b00020;font-size:.9rem;margin-top:.2rem}
 .req{color:#b00020}
 .flash{padding:.6rem 1rem;border-radius:4px;margin-bottom:1rem}

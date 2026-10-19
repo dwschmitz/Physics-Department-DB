@@ -6,6 +6,7 @@
   <dt>Email</dt><dd>{{ s.email }}</dd>
   <dt>Citizenship</dt><dd>{{ s.citizenship|label if s.citizenship else '—' }}</dd>
   <dt>Matriculation</dt><dd>{{ s|matric }} <span class="muted">(clock {{ s.clock }})</span></dd>
+  {% if s|transfer %}<dt>Transfer</dt><dd>{{ s|transfer }}</dd>{% endif %}
   {% if s.status == 'graduated' %}<dt>Graduated</dt><dd>{{ s|grad or '—' }}</dd>{% endif %}
   {% if s.status == 'withdrawn' %}<dt>Withdrew</dt><dd>{{ s|withdrawn or '—' }}</dd>{% endif %}
   <dt>Research area</dt><dd>{{ s.research_area or '—' }}</dd>

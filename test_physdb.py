@@ -560,6 +560,21 @@ class PhysDBTests(unittest.TestCase):
         physdb.set_status(self.conn, "U1001", "graduated", 2020, "Spring")
         self.assertEqual([r["last_name"] for r in physdb.faculty_advisees(self.conn, self.fid)], ["Lovelace"])
 
+    def test_transfer_term(self):
+        sid = physdb.add_student(self.conn, university_id="U7", first_name="T", last_name="Rans", email="t@u.edu",
+                                 matriculation_year=2023, research_area=None, notes=None,
+                                 transfer_year=2024, transfer_term="Winter")
+        row = self.conn.execute("SELECT * FROM students WHERE id = ?", (sid,)).fetchone()
+        self.assertEqual((physdb.transfer_label(row), physdb.matriculation_label(row)), ("Winter 2024", "Autumn 2023"))
+        self.assertIn("(transfer, Winter 2024)", physdb.show_student(self.conn, "U7"))
+        plain = self.conn.execute("SELECT * FROM students WHERE university_id = 'U1001'").fetchone()
+        self.assertEqual(physdb.transfer_label(plain), "")
+        self.assertNotIn("transfer", physdb.show_student(self.conn, "U1001"))
+        for bad in (dict(transfer_year=2024), dict(transfer_term="Winter"), dict(transfer_year=2024, transfer_term="Fall")):
+            with self.assertRaises(ValueError, msg=bad):
+                physdb.add_student(self.conn, university_id="U8", first_name="B", last_name="B", email="b@u.edu",
+                                   matriculation_year=2023, research_area=None, notes=None, **bad)
+
     def test_withdrawn_students_drop_off_fsr_tables_like_graduates(self):
         fsr = physdb.add_fsr(self.conn, "Xavier", "Xx", "xx@u.edu")
         self.conn.execute("UPDATE faculty SET fsr_id = ? WHERE id = ?", (fsr, self.fid))
