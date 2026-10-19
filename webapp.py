@@ -918,10 +918,11 @@ def create_app(db_path=None):
         return redirect(url_for("faculty_list"))
 
     # ---- reports / export ------------------------------------------------------
-    # (milestone kind, short column heading) for the Milestones Table, in column order
-    MILESTONE_COLUMNS = [("gde_classical_mechanics", "GDE CM"), ("gde_quantum_mechanics", "GDE QM"),
-                         ("gde_electrodynamics", "GDE EM"), ("gde_statistical_mechanics", "GDE SM"),
-                         ("candidacy", "Candidacy"), ("ms_degree", "MS"), ("committee_formed", "Committee"),
+    # The four GDE exams share one column of the Milestones Table, listed by these abbreviations; the others get
+    # a column each as (milestone kind, short heading).
+    GDE_EXAMS = [("gde_classical_mechanics", "CM"), ("gde_quantum_mechanics", "QM"),
+                 ("gde_electrodynamics", "EM"), ("gde_statistical_mechanics", "SM")]
+    MILESTONE_COLUMNS = [("candidacy", "Candidacy"), ("ms_degree", "MS"), ("committee_formed", "Committee"),
                          ("pre_oral", "Pre-Oral"), ("thesis_defense", "Defense")]
 
     @app.route("/reports/milestones")
@@ -930,14 +931,18 @@ def create_app(db_path=None):
         now = physdb.current_term()
         rows = [{**r, "clock": physdb.clock_label(r, now), "clock_terms": physdb.clock_terms(r, now)}
                 for r in physdb.milestone_snapshot(db())]
+        for r in rows:
+            r["gde"] = [abbr for kind, abbr in GDE_EXAMS if kind in r["done"]]
         keys = {"name": lambda r: (_text(r["last_name"]), _text(r["first_name"])),
-                "clock": lambda r: r["clock_terms"], "advisor": lambda r: _text(r["advisors"])}
+                "clock": lambda r: r["clock_terms"], "advisor": lambda r: _text(r["advisors"]),
+                "gde": lambda r: len(GDE_EXAMS) - len(r["gde"])}      # most exams passed first when ascending
         for kind, _ in MILESTONE_COLUMNS:       # checkmarks first when ascending, blanks first when descending
             keys[kind] = lambda r, kind=kind: 0 if kind in r["done"] else 1
         rows, sort, sdir = sort_rows(rows, keys, request.args.get("sort"), request.args.get("dir"), "name",
                                      tiebreak=keys["name"])
         return render_template("milestones_table.html", rows=rows, sort=sort, sdir=sdir,
-                               columns=[(k, h, label(k)) for k, h in MILESTONE_COLUMNS])
+                               columns=[(k, h, label(k)) for k, h in MILESTONE_COLUMNS],
+                               gde_title=", ".join(f"{abbr} = {label(kind)[4:]}" for kind, abbr in GDE_EXAMS))
 
     @app.route("/reports")
     def reports():

@@ -1086,6 +1086,8 @@ class WebTests(unittest.TestCase):
                              matriculation_year="2022", matriculation_term="Autumn")
         post = lambda sid, kind, outcome: c.post(f"/students/{sid}/milestones/new",
                                                  data=dict(kind=kind, date="2024-01-01", outcome=outcome, csrf_token=t))
+        post(4, "gde_quantum_mechanics", "passed"); post(4, "gde_statistical_mechanics", "passed")
+        post(2, "gde_electrodynamics", "conditional"); post(2, "gde_classical_mechanics", "passed")
         post(2, "pre_oral", "conditional"); post(2, "gde_quantum_mechanics", "failed"); post(2, "ms_degree", "pending")
         for kind in physdb.MILESTONE_KINDS[:-1]:
             post(3, kind, "passed")                   # graduated: must not be listed at all
@@ -1096,22 +1098,24 @@ class WebTests(unittest.TestCase):
         html = page()
         text = lambda h: re.sub(r"\s+", " ", re.sub(r"<[^>]+>|[▲▼↕]", "", h)).strip()
         heads = [text(h) for h in re.findall(r"<th[^>]*>(.*?)</th>", html.split("</tr>")[0], re.S)]
-        self.assertEqual(heads, ["Name", "Clock", "Advisor", "GDE CM", "GDE QM", "GDE EM", "GDE SM", "Candidacy", "MS",
+        self.assertEqual(heads, ["Name", "Clock", "Advisor", "GDE", "Candidacy", "MS",
                                  "Committee", "Pre-Oral", "Defense"])
         def table(h):
             out = {}
             for row in re.findall(r"<tr><td><a [^>]*>(.*?)</a></td>(.*?)</tr>", h, re.S):
                 cells = re.findall(r"<td[^>]*>(.*?)</td>", row[1], re.S)
-                out[row[0]] = (cells[0], cells[1], [i for i, x in enumerate(cells[2:]) if "✓" in x or "&#10003;" in x])
+                out[row[0]] = (cells[0], cells[1], cells[2], [i for i, x in enumerate(cells[3:]) if "✓" in x or "&#10003;" in x])
             return out
         rows = table(html)
         self.assertNotIn("Cc, Stu", rows)                                                    # graduated student left out
-        self.assertEqual(rows["Lovelace, Ada"], ("4.0", "Bohr", [0, 4, 6]))                  # GDE CM, Candidacy, Committee
-        self.assertEqual(rows["Bb, Stu"], ("4.0", "", [7]))                                  # conditional counts; failed/pending don't
-        self.assertEqual(rows["Dd, Stu"], ("4.0", "", []))                                   # blanks, not dashes
+        self.assertEqual(rows["Lovelace, Ada"], ("4.0", "Bohr", "CM", [0, 2]))               # GDE: CM; Candidacy, Committee
+        self.assertEqual(rows["Bb, Stu"], ("4.0", "", "CM, EM", [3]))                        # conditional counts; failed/pending don't
+        self.assertEqual(rows["Dd, Stu"], ("4.0", "", "QM, SM", []))                         # abbreviations in exam order; blanks, not dashes
         self.assertEqual(re.findall(r"<tr><td><a [^>]*>(.*?)</a>", html), ["Bb, Stu", "Dd, Stu", "Lovelace, Ada"])
         # sorting: the checkmark columns put checks first, or last when reversed
         order = lambda q: re.findall(r"<tr><td><a [^>]*>(\w+)", page(q))
+        self.assertEqual(order("?sort=gde"), ["Bb", "Dd", "Lovelace"])                      # most exams passed first
+        self.assertEqual(order("?sort=gde&dir=desc"), ["Lovelace", "Bb", "Dd"])
         self.assertEqual(order("?sort=candidacy"), ["Lovelace", "Bb", "Dd"])
         self.assertEqual(order("?sort=candidacy&dir=desc"), ["Bb", "Dd", "Lovelace"])
         self.assertEqual(order("?sort=advisor")[0], "Lovelace"); self.assertEqual(order("?sort=name&dir=desc")[0], "Lovelace")
