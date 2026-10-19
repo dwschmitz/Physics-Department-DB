@@ -1322,6 +1322,151 @@ class WebTests(unittest.TestCase):
         self.assertIn("Aa, Stu", mine(("Autumn", 2026))); self.assertNotIn("Aa, Stu", mine(("Winter", 2027)))
         self.assertIn('(1 active)', mine(("Winter", 2027)))
 
+    # ---- importing students from a spreadsheet ---------------------------------------------------------
+    EXAMPLE = "examples/Incoming_Student_Data_Test.xlsx"
+
+    def _import_setup(self):
+        import tempfile
+        from unittest import mock
+        p = mock.patch.object(tempfile, "tempdir", self.tmp); p.start(); self.addCleanup(p.stop)   # uploads land in the test's folder
+        c = self.client("ed")
+        return c, self.token(c, "/students/import")
+
+    def _upload(self, c, t, data, name="f.xlsx"):
+        import io
+        return c.post("/students/import", data=dict(csrf_token=t, file=(io.BytesIO(data), name)), content_type="multipart/form-data")
+
+    def _count(self, sql="SELECT count(*) FROM students"):
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        try:
+            return conn.execute(sql).fetchone()[0]
+        finally:
+            conn.close()
+
+    def _example(self):
+        return open(self.EXAMPLE, "rb").read()
+
+    def test_import_students_preview_then_confirm(self):
+        import os
+        c, t = self._import_setup()
+        page = c.get("/students/import").get_data(as_text=True)
+        self.assertIn('type="file"', page); self.assertIn("exactly 8 digits", page)
+        self.assertIn("Import from file", c.get("/students").get_data(as_text=True))
+        # the preview saves nothing
+        r = self._upload(c, t, self._example()); html = r.get_data(as_text=True)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Nothing has been saved yet.", html); self.assertIn("7 new", html)
+        self.assertIn("Feynman, Richard", html); self.assertIn("Autumn 2026", html)
+        self.assertIn("Import 7 new students", html)
+        self.assertEqual(self._count(), 0)
+        # confirming adds them, all active, with the transfer terms
+        r = c.post("/students/import/confirm", data={"csrf_token": t}); html = r.get_data(as_text=True)
+        self.assertEqual(r.status_code, 200); self.assertIn("Imported 7 new students.", html)
+        self.assertEqual(self._count(), 7)
+        self.assertEqual(self._count("SELECT count(*) FROM students WHERE status = 'active'"), 7)
+        self.assertEqual(self._count("SELECT count(*) FROM students WHERE transfer_term = 'Autumn' AND transfer_year = 2026"), 3)
+        self.assertEqual(self._count("SELECT count(*) FROM students WHERE citizenship = 'international'"), 4)
+        self.assertEqual(self._count("SELECT count(*) FROM students WHERE cnet = 'wolf' AND matriculation_year = 2024"), 1)
+        self.assertEqual(os.listdir(os.path.join(self.tmp, "physdb_imports")), [])             # the uploaded copy is deleted
+        self.assertEqual(c.post("/students/import/confirm", data={"csrf_token": t}).status_code, 302)   # no double import
+        self.assertEqual(self._count(), 7)
+        self.assertIn("Dirac, Paul", c.get("/students").get_data(as_text=True))
+        # the same file again: everyone is already there, so nothing is offered and nothing changes
+        r = self._upload(c, t, self._example()); html = r.get_data(as_text=True)
+        self.assertIn("0 new", html); self.assertIn("7 already in the database", html)
+        self.assertIn("already in the database and so will not be imported", html)
+        self.assertIn("left exactly as they are", html); self.assertNotIn("Import 0", html); self.assertIn("nothing new to import", html)
+        self.assertNotIn("Import 7", html)
+        c.post("/students/import/cancel", data={"csrf_token": t})
+
+    def test_import_mixed_file_skips_duplicates_and_problems(self):
+        from test_import import HEADER, good, xlsx
+        c, t = self._import_setup()
+        self.add_student(c, university_id="10000001", first_name="Existing", last_name="Student", email="exist@u.edu", research_area="keep me")
+        rows = [HEADER, good(1, **{"First Name": "Changed"}), good(2), good(3, UCID=123), good(4, Email="exist@u.edu"),
+                good(5, Email="<b>x</b>@u.edu", **{"Last Name": "<script>alert(1)</script>"}), good(6)]
+        html = self._upload(c, t, xlsx(rows)).get_data(as_text=True)
+        self.assertIn("3 new", html); self.assertIn("1 already in the database", html); self.assertIn("2 with problems", html)
+        dup = html.split("Already in the database <")[1].split("<h2>")[0]
+        self.assertIn("Lovelace1, Changed", dup); self.assertIn("Student, Existing", dup)
+        self.assertIn("will be left exactly as they are", dup)
+        probs = html.split("Problems <")[1]
+        self.assertIn("UCID must be exactly 8 digits (found &#39;123&#39;)", probs)
+        self.assertIn("already belongs to a different student", probs); self.assertIn("Student, Existing", probs)
+        self.assertNotIn("<script>alert", html); self.assertIn("&lt;script&gt;", html)           # file contents are escaped
+        r = c.post("/students/import/confirm", data={"csrf_token": t}); html = r.get_data(as_text=True)
+        self.assertIn("Imported 3 new students.", html)
+        self.assertEqual(self._count(), 4)
+        self.assertEqual(self._count("SELECT count(*) FROM students WHERE first_name = 'Existing' AND research_area = 'keep me'"), 1)
+        self.assertEqual(self._count("SELECT count(*) FROM students WHERE first_name = 'Changed'"), 0)       # duplicates are not updated
+
+    def test_import_is_rechecked_at_confirm_and_all_or_nothing(self):
+        import sqlite3
+        from unittest import mock
+        from test_import import HEADER, good, xlsx
+        c, t = self._import_setup()
+        self._upload(c, t, xlsx([HEADER, good(1), good(2), good(3)]))
+        self.add_student(c, university_id="10000002", first_name="Late", last_name="Arrival", email="late@u.edu")   # appears meanwhile
+        html = c.post("/students/import/confirm", data={"csrf_token": t}).get_data(as_text=True)
+        self.assertIn("Imported 2 new students.", html); self.assertIn("1 was already in the database", html)
+        self.assertEqual(self._count(), 3)
+        # a failure part-way through leaves nothing behind
+        self._upload(c, t, xlsx([HEADER, good(4), good(5), good(6)]))
+        real = physdb.insert_student; calls = []
+        def flaky(conn, **f):
+            calls.append(1)
+            if len(calls) == 3:
+                raise sqlite3.IntegrityError("boom")
+            return real(conn, **f)
+        with mock.patch.object(physdb, "insert_student", flaky):
+            r = c.post("/students/import/confirm", data={"csrf_token": t})
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("Nothing was imported", c.get("/students/import").get_data(as_text=True))
+        self.assertEqual(self._count(), 3)
+
+    def test_import_cancel_expiry_and_bad_files(self):
+        import os
+        c, t = self._import_setup()
+        self.assertEqual(c.post("/students/import/confirm", data={"csrf_token": t}).status_code, 302)       # nothing uploaded
+        self.assertIn("expired", c.get("/students/import").get_data(as_text=True))
+        self._upload(c, t, self._example())
+        self.assertEqual(len(os.listdir(os.path.join(self.tmp, "physdb_imports"))), 1)
+        r = c.post("/students/import/cancel", data={"csrf_token": t}); self.assertEqual(r.status_code, 302)
+        self.assertEqual(os.listdir(os.path.join(self.tmp, "physdb_imports")), []); self.assertEqual(self._count(), 0)
+        self.assertEqual(c.post("/students/import/confirm", data={"csrf_token": t}).status_code, 302)       # cancelled: gone
+        # wrong kinds of file give a message, not an error page
+        for data, name, word in ((b"hello", "notes.txt.pdf", "upload an Excel"), (b"junk", "f.xlsx", "valid Excel"),
+                                 (b"a,b\n1,2\n", "f.csv", "were not found")):
+            r = self._upload(c, t, data, name)
+            self.assertEqual(r.status_code, 302, name)
+            self.assertIn(word, c.get("/students/import").get_data(as_text=True))
+        r = c.post("/students/import", data=dict(csrf_token=t)); self.assertEqual(r.status_code, 302)       # no file chosen
+        self.assertIn("Choose an Excel", c.get("/students/import").get_data(as_text=True))
+        big = self._upload(c, t, b"x" * (6 * 1024 * 1024), "big.csv")
+        self.assertEqual(big.status_code, 413); self.assertIn("too large", big.get_data(as_text=True))
+        template = c.get("/students/import/template.csv")
+        self.assertEqual(template.status_code, 200); self.assertIn("UCID", template.get_data(as_text=True))
+
+    def test_import_is_for_editors_and_needs_the_csrf_token(self):
+        import io
+        c, t = self._import_setup()
+        files = lambda: dict(file=(io.BytesIO(self._example()), "f.xlsx"))
+        r = c.post("/students/import", data=files(), content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 400)                                                                 # no CSRF token
+        v = self.client("vw"); vt = self.token(v)
+        for method, path in (("get", "/students/import"), ("get", "/students/import/template.csv")):
+            self.assertEqual(getattr(v, method)(path).status_code, 403, path)
+        for path in ("/students/import", "/students/import/confirm", "/students/import/cancel"):
+            self.assertEqual(v.post(path, data={"csrf_token": vt}).status_code, 403, path)
+        self.assertNotIn("Import from file", v.get("/students").get_data(as_text=True))
+        # faculty and FSR logins cannot reach it either
+        a, at = self._fsr_world()
+        self._make_faculty_login(a, at); fac = self._faculty_client()
+        self.assertEqual(fac.get("/students/import").status_code, 403)
+        self._make_fsr_login(a, at); fsr = self._fsr_client()
+        self.assertEqual(fsr.get("/students/import").status_code, 403)
+        self.assertEqual(self.app.test_client().get("/students/import").status_code, 302)                    # signed out: login page
+
     def test_transfer_checkbox_with_year_and_term(self):
         c = self.client("ed"); t = self.token(c)
         form = c.get("/students/new").get_data(as_text=True)

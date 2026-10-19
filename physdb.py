@@ -440,7 +440,8 @@ def _find(conn, table, key):
     return row
 
 
-def add_student(conn, **f):
+def insert_student(conn, **f):
+    """Validate and insert one student WITHOUT committing (so a batch can be all-or-nothing); returns the new id."""
     f.setdefault("citizenship", None)
     f["cnet"] = (f.get("cnet") or "").strip().lower() or None
     if f["cnet"] and not re.fullmatch(CNET_PATTERN, f["cnet"]):
@@ -462,8 +463,13 @@ def add_student(conn, **f):
            VALUES (:university_id, :cnet, :first_name, :last_name, :email, :citizenship,
                :matriculation_year, :matriculation_term, :transfer_year, :transfer_term, :graduation_year, :graduation_term,
                :withdrawal_year, :withdrawal_term, :research_area, :notes)""", f)
-    conn.commit()
     return cur.lastrowid
+
+
+def add_student(conn, **f):
+    sid = insert_student(conn, **f)
+    conn.commit()
+    return sid
 
 
 def add_faculty(conn, first_name, last_name, email, research_area=None, cnet=None):

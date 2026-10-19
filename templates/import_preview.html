@@ -1,0 +1,53 @@
+{% extends "base.html" %}{% block body %}
+<style>main{max-width:80rem}table.imp td,table.imp th{white-space:nowrap}table.imp td.why{white-space:normal}</style>
+<h1>{{ 'Import finished' if done else 'Import preview' }}</h1>
+<p class="muted">File: {{ filename }} &middot; {{ r.total }} row{{ '' if r.total == 1 else 's' }} read</p>
+{% if done %}
+<div class="flash ok">Imported {{ r.new|length }} new student{{ '' if r.new|length == 1 else 's' }}.
+  {% if r.duplicates %}{{ r.duplicates|length }} {{ 'was' if r.duplicates|length == 1 else 'were' }} already in the database and not imported.{% endif %}
+  {% if r.problems %}{{ r.problems|length }} row{{ '' if r.problems|length == 1 else 's' }} had problems and {{ 'was' if r.problems|length == 1 else 'were' }} not imported.{% endif %}</div>
+{% else %}
+<p><strong>Nothing has been saved yet.</strong>
+  {{ r.new|length }} new &middot; {{ r.duplicates|length }} already in the database &middot; {{ r.problems|length }} with problems.</p>
+{% endif %}
+{% if r.ignored %}<p class="muted">Columns that were not recognised and were ignored: {{ r.ignored|join(', ') }}.</p>{% endif %}
+
+{% if not done %}
+<form class="inline" method="post" action="{{ url_for('student_import_confirm') }}" style="margin-bottom:1rem">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if r.new %}<button class="btn">Import {{ r.new|length }} new student{{ '' if r.new|length == 1 else 's' }}</button>
+  {% else %}<span class="muted">There is nothing new to import.</span>{% endif %}
+</form>
+<form class="inline" method="post" action="{{ url_for('student_import_cancel') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn secondary">Cancel</button>
+</form>
+{% else %}
+<p><a class="btn" href="{{ url_for('students') }}">Go to the student list</a>
+  <a class="btn secondary" href="{{ url_for('student_import') }}">Import another file</a></p>
+{% endif %}
+
+{% if r.new %}
+<h2>{{ 'Imported' if done else 'New students to be added' }} <span class="muted">({{ r.new|length }})</span></h2>
+<table class="imp"><tr><th>Row</th><th>Name</th><th>UCID</th><th>CNET</th><th>Email</th><th>Citizenship</th><th>Matriculation</th><th>Transfer</th></tr>
+{% for x in r.new %}<tr><td>{{ x.row }}</td><td>{{ x.who }}</td><td>{{ x.v.university_id }}</td><td>{{ x.v.cnet or '' }}</td><td>{{ x.v.email }}</td>
+<td>{{ citizenship(x.v.citizenship) }}</td><td>{{ x.v.matriculation_term }} {{ x.v.matriculation_year }}</td>
+<td>{% if x.v.transfer_year %}{{ x.v.transfer_term }} {{ x.v.transfer_year }}{% endif %}</td></tr>{% endfor %}</table>
+{% endif %}
+
+{% if r.duplicates %}
+<h2>Already in the database <span class="muted">({{ r.duplicates|length }})</span></h2>
+<p>These students are already in the database and so {{ 'were' if done else 'will' }} not {{ '' if done else 'be ' }}imported.
+  Their existing records {{ 'were' if done else 'will be' }} left exactly as they are.</p>
+<table class="imp"><tr><th>Row</th><th>Name in the file</th><th>UCID</th><th>Existing record</th></tr>
+{% for x in r.duplicates %}<tr><td>{{ x.row }}</td><td>{{ x.who }}</td><td>{{ x.v.university_id }}</td>
+<td><a href="{{ url_for('student', sid=x.existing.id) }}">{{ x.existing.last_name }}, {{ x.existing.first_name }}</a></td></tr>{% endfor %}</table>
+{% endif %}
+
+{% if r.problems %}
+<h2>Problems <span class="muted">({{ r.problems|length }})</span></h2>
+<p>These rows can't be imported and {{ 'were' if done else 'will be' }} skipped. Fix them in the file and import it again
+  (students already added will simply show as already in the database).</p>
+<table class="imp"><tr><th>Row</th><th>Name</th><th>What's wrong</th></tr>
+{% for x in r.problems %}<tr><td>{{ x.row }}</td><td>{{ x.who }}</td><td class="why">{{ x.messages|join(' ') }}</td></tr>{% endfor %}</table>
+{% endif %}
+{% endblock %}

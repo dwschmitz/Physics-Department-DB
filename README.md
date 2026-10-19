@@ -54,6 +54,16 @@ person's password and role (for example, to regain admin access if no admin can 
 - **Milestone Check** (Reports tab): pick a milestone and a minimum clock in years (fractions such as 0.25 are fine) to
   list the active students at or past that clock who have no passed or conditional entry for it, with matriculation,
   clock, research area and advisor; every heading sorts.
+- **Importing students from a file:** on the Students tab, **Import from file** (editors and admins) takes an Excel
+  (.xlsx, first sheet) or CSV file with one student per row; `examples/Incoming_Student_Data_Test.xlsx` is a sample
+  and the page links a blank CSV template. Required columns: First Name, Last Name, UCID (exactly 8 digits), Email,
+  Citizenship, Matriculation Year, Matriculation Quarter; optional: CNET, Transfer / Transfer Year / Transfer Quarter,
+  Research Area, Notes. Headings are matched loosely and other columns are ignored. You get a **preview** first, and
+  nothing is saved until you press Import: **new students** that will be added; students **already in the database**
+  (same UCID), which are not imported and whose records are not changed; and **problems** (a bad UCID, a missing
+  field, an email or CNET used by someone else, a repeat within the file), which are skipped with the reason and row
+  number. The import is all-or-nothing and re-checks the database when you confirm. Imported students are Active.
+  (Excel support uses the `openpyxl` library, which `run.sh` installs.)
 - **Transfer students:** on the Add/Edit student form, tick **Transfer** and the **Transfer year** and **Transfer term**
   boxes appear (both required); unticking clears them. The transfer term is separate from the matriculation term, shows
   on the student's page, and is included in the CSV download.

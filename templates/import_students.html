@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% block body %}
+<h1>Import students from a file</h1>
+<p><a href="{{ url_for('students') }}">&larr; All students</a></p>
+<form class="form" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="field">
+    <label for="file">Excel (.xlsx) or CSV file</label>
+    <input id="file" type="file" name="file" accept=".xlsx,.csv" required>
+    <div class="help">Up to {{ max_mb }} MB. You will see a preview first; nothing is saved until you confirm.</div>
+  </div>
+  <button class="btn">Read file and preview</button> <a class="btn secondary" href="{{ url_for('students') }}">Cancel</a>
+</form>
+<h2>What the file should look like</h2>
+<p>The first row holds column headings, and each following row is one student. For an Excel file the first sheet is read.
+  Headings are matched loosely (capitalisation, spacing and notes in brackets are ignored), and other columns are ignored.</p>
+<table><tr><th>Column</th><th>Notes</th></tr>
+<tr><td>First Name, Last Name</td><td>Required.</td></tr>
+<tr><td>UCID</td><td>Required: the University ID, exactly 8 digits.</td></tr>
+<tr><td>CNET</td><td>Optional. Stored in lowercase.</td></tr>
+<tr><td>Email</td><td>Required. Each student needs a different email address.</td></tr>
+<tr><td>Citizenship</td><td>Required: Citizen, Permanent Resident or International.</td></tr>
+<tr><td>Matriculation Year, Matriculation Quarter</td><td>Required: a four-digit year, and Autumn, Winter, Spring or Summer.</td></tr>
+<tr><td>Transfer, Transfer Year, Transfer Quarter</td><td>Optional. Transfer is 1 (yes) or 0 (no); a transfer student also needs the year and quarter.</td></tr>
+<tr><td>Research Area, Notes</td><td>Optional.</td></tr></table>
+<p class="muted">Imported students are set to Active. A student whose UCID is already in the database is skipped, and the
+  existing record is left unchanged. Advisors and milestones are not imported.
+  <a href="{{ url_for('student_import_template') }}">Download a blank template (CSV)</a>.</p>
+{% endblock %}

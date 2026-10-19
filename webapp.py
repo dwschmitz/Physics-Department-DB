@@ -10,7 +10,9 @@ import re
 import secrets
 import socket
 import sqlite3
+import tempfile
 import threading
+import time
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -20,6 +22,7 @@ from flask import (Flask, Response, abort, flash, g, redirect, render_template,
                    request, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import importer
 import physdb
 
 STATUSES = ["active", "on_leave", "graduated", "withdrawn"]
@@ -253,7 +256,8 @@ def sort_rows(rows, keys, sort, sdir, default, tiebreak=None):
 def create_app(db_path=None):
     app = Flask(__name__)
     app.config["DB_PATH"] = db_path or physdb.DB_PATH
-    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+    app.config.update(MAX_CONTENT_LENGTH=importer.MAX_BYTES + 64 * 1024,      # the biggest upload: a student spreadsheet
+                      SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                       PERMANENT_SESSION_LIFETIME=datetime.timedelta(hours=8))
     app.config["SECRET_KEY"] = os.environ.get("PHYSDB_SECRET") or _persistent_secret()
     app.jinja_env.filters["label"] = label
@@ -353,8 +357,11 @@ def create_app(db_path=None):
     @app.errorhandler(400)
     @app.errorhandler(403)
     @app.errorhandler(404)
+    @app.errorhandler(413)
     def error_page(e):
-        titles = {400: "That didn't work", 403: "Not available", 404: "Page not found"}
+        titles = {400: "That didn't work", 403: "Not available", 404: "Page not found", 413: "File too large"}
+        if e.code == 413:
+            e.description = f"That file is too large to import (the limit is {importer.MAX_BYTES // 1024 // 1024} MB)."
         user = g.get("user")
         return render_template("error.html", code=e.code, title=titles[e.code], message=e.description,
                                home=(home_url() if user else url_for("login"))), e.code
@@ -864,6 +871,83 @@ def create_app(db_path=None):
     def student_new():
         require_editor()
         return form_page("students", "Add student", None, url_for("students"))
+
+    # ---- importing a spreadsheet of new students --------------------------------
+    def import_dir():
+        d = Path(tempfile.gettempdir()) / "physdb_imports"
+        d.mkdir(mode=0o700, exist_ok=True)
+        for old in d.glob("*.upload"):                       # uploads that were never confirmed or cancelled
+            if time.time() - old.stat().st_mtime > 6 * 3600:
+                old.unlink(missing_ok=True)
+        return d
+
+    def forget_import():
+        pending = session.pop("import", None)
+        if pending and re.fullmatch(r"[A-Za-z0-9_-]{20,}", pending.get("token", "")):
+            (import_dir() / f"{pending['token']}.upload").unlink(missing_ok=True)
+
+    @app.route("/students/import", methods=["GET", "POST"])
+    def student_import():
+        require_editor()
+        if request.method == "GET":
+            return render_template("import_students.html", columns=importer.TEMPLATE_HEADER, max_mb=importer.MAX_BYTES // 1024 // 1024)
+        upload = request.files.get("file")
+        if upload is None or not upload.filename:
+            flash("Choose an Excel (.xlsx) or CSV file first.", "error")
+            return redirect(url_for("student_import"))
+        data = upload.read(importer.MAX_BYTES + 1)
+        try:
+            if len(data) > importer.MAX_BYTES:
+                abort(413)
+            result = importer.analyse(db(), data, upload.filename)
+        except importer.ImportFileError as e:
+            flash(str(e), "error")
+            return redirect(url_for("student_import"))
+        forget_import()
+        token = secrets.token_urlsafe(24)
+        fd, path = tempfile.mkstemp(suffix=".upload", dir=import_dir())      # private (0600) copy until confirmed
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(path, import_dir() / f"{token}.upload")
+        session["import"] = {"token": token, "name": upload.filename[-100:]}    # (kept short: it lives in the cookie)
+        return render_template("import_preview.html", r=result, filename=upload.filename, done=False,
+                               citizenship=lambda c: label(c) if c else "")
+
+    @app.post("/students/import/confirm")
+    def student_import_confirm():
+        require_editor()
+        pending = session.get("import")
+        path = import_dir() / f"{pending['token']}.upload" if pending and re.fullmatch(
+            r"[A-Za-z0-9_-]{20,}", pending.get("token", "")) else None
+        if path is None or not path.exists():
+            flash("That upload has expired. Please choose the file again.", "error")
+            return redirect(url_for("student_import"))
+        name = pending["name"]
+        try:
+            result = importer.analyse(db(), path.read_bytes(), name)        # checked again: the database may have changed
+            for item in result["new"]:
+                physdb.insert_student(db(), **item["v"])
+            db().commit()                                                   # all of them, or none
+        except (importer.ImportFileError, sqlite3.Error, ValueError) as e:
+            db().rollback()
+            flash(f"Nothing was imported: {e}", "error")
+            return redirect(url_for("student_import"))
+        forget_import()
+        return render_template("import_preview.html", r=result, filename=name, done=True,
+                               citizenship=lambda c: label(c) if c else "")
+
+    @app.post("/students/import/cancel")
+    def student_import_cancel():
+        require_editor()
+        forget_import()
+        flash("Import cancelled. Nothing was changed.", "ok")
+        return redirect(url_for("students"))
+
+    @app.route("/students/import/template.csv")
+    def student_import_template():
+        require_editor()
+        return Response(importer.csv_template(), mimetype="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=student_import_template.csv"})
 
     @app.route("/students/<int:sid>")
     def student(sid):
