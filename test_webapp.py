@@ -273,8 +273,15 @@ class WebTests(unittest.TestCase):
         self.assertIn("current term: Autumn 2026", html)
         import re
         cells = {m.group(1): m.group(2) for m in re.finditer(
-            r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
+            r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td><td>[^<]*</td><td>[^<]*</td><td>[^<]*</td></tr>", html, re.S)}
         self.assertEqual(cells, {"StuU1": "0.0", "StuU2": "1.0", "StuU3": "2.5", "StuU4": "—"})
+        # the last column shows the graduation term (graduated students only) and sorts
+        grads = lambda q="": re.findall(r"<tr><td><a [^>]*>(Stu\w+),[^<]*</a></td>.*?<td>([^<]*)</td></tr>",
+                                        c.get("/students" + q).get_data(as_text=True), re.S)
+        self.assertIn("Graduated", html.split("</tr>")[0])
+        self.assertEqual(dict(grads()), {"StuU1": "", "StuU2": "", "StuU3": "", "StuU4": "Spring 2025"})
+        self.assertEqual(grads("?sort=graduated")[0], ("StuU4", "Spring 2025"))
+        self.assertEqual(grads("?sort=graduated&dir=desc")[0], ("StuU4", "Spring 2025"))               # blanks always last
 
     def test_funding_report_page(self):
         from unittest import mock
@@ -1095,7 +1102,7 @@ class WebTests(unittest.TestCase):
         post(2, "pre_oral", "conditional"); post(2, "gde_quantum_mechanics", "failed"); post(2, "ms_degree", "pending")
         for kind in physdb.MILESTONE_KINDS[:-1]:
             post(3, kind, "passed")                   # graduated: listed, with the term they graduated
-        post(5, "candidacy", "passed"); post(6, "candidacy", "passed")      # withdrawn / on leave: not listed
+        post(5, "candidacy", "passed"); post(6, "candidacy", "passed")      # withdrawn: not listed; on leave: listed
         from unittest import mock
         def page(q=""):
             with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
@@ -1104,31 +1111,30 @@ class WebTests(unittest.TestCase):
         text = lambda h: re.sub(r"\s+", " ", re.sub(r"<[^>]+>|[▲▼↕]", "", h)).strip()
         heads = [text(h) for h in re.findall(r"<th[^>]*>(.*?)</th>", html.split("</tr>")[0], re.S)]
         self.assertEqual(heads, ["Name", "Clock", "Advisor", "GDE", "Candidacy", "MS",
-                                 "Committee", "Pre-Oral", "Defense", "Graduated"])
+                                 "Committee", "Pre-Oral", "Defense"])
         def table(h):
             out = {}
             for row in re.findall(r"<tr><td><a [^>]*>(.*?)</a></td>(.*?)</tr>", h, re.S):
                 cells = re.findall(r"<td[^>]*>(.*?)</td>", row[1], re.S)
                 out[row[0]] = (cells[0], cells[1], cells[2],
-                                [i for i, x in enumerate(cells[3:8]) if "✓" in x or "&#10003;" in x], cells[8])
+                                [i for i, x in enumerate(cells[3:]) if "✓" in x or "&#10003;" in x])
             return out
         rows = table(html)
-        self.assertNotIn("Ee, Stu", rows); self.assertNotIn("Ff, Stu", rows)                # withdrawn / on leave left out
-        self.assertEqual(rows["Lovelace, Ada"], ("4.0", "Bohr", "CM", [0, 2], ""))           # GDE: CM; Candidacy, Committee
-        self.assertEqual(rows["Bb, Stu"], ("4.0", "", "CM, EM", [3], ""))                    # conditional counts; failed/pending don't
-        self.assertEqual(rows["Dd, Stu"], ("4.0", "", "QM, SM", [], ""))                     # abbreviations in exam order; blanks
-        self.assertEqual(rows["Cc, Stu"], ("—", "", "CM, QM, EM, SM", [0, 1, 2, 3, 4], "Winter 2025"))   # graduated: term shown
-        self.assertEqual(re.findall(r"<tr><td><a [^>]*>(.*?)</a>", html), ["Bb, Stu", "Cc, Stu", "Dd, Stu", "Lovelace, Ada"])
-        self.assertIn("3 active students, 1 graduated", html)
+        self.assertNotIn("Ee, Stu", rows); self.assertNotIn("Cc, Stu", rows)                # withdrawn and graduated left out
+        self.assertEqual(rows["Lovelace, Ada"], ("4.0", "Bohr", "CM", [0, 2]))               # GDE: CM; Candidacy, Committee
+        self.assertEqual(rows["Bb, Stu"], ("4.0", "", "CM, EM", [3]))                        # conditional counts; failed/pending don't
+        self.assertEqual(rows["Dd, Stu"], ("4.0", "", "QM, SM", []))                         # abbreviations in exam order; blanks
+        self.assertEqual(rows["Ff, Stu"], ("4.0", "", "", [0]))                              # on leave: listed
+        self.assertEqual(re.findall(r"<tr><td><a [^>]*>(.*?)</a>", html), ["Bb, Stu", "Dd, Stu", "Ff, Stu", "Lovelace, Ada"])
+        self.assertIn("3 active students, 1 on leave", html)
         # sorting: the checkmark columns put checks first, or last when reversed
         order = lambda q: re.findall(r"<tr><td><a [^>]*>(\w+)", page(q))
-        self.assertEqual(order("?sort=gde"), ["Cc", "Bb", "Dd", "Lovelace"])                # most exams passed first
-        self.assertEqual(order("?sort=gde&dir=desc"), ["Lovelace", "Bb", "Dd", "Cc"])
-        self.assertEqual(order("?sort=candidacy"), ["Cc", "Lovelace", "Bb", "Dd"])
+        self.assertEqual(order("?sort=gde"), ["Bb", "Dd", "Lovelace", "Ff"])                # most exams passed first
+        self.assertEqual(order("?sort=gde&dir=desc"), ["Ff", "Lovelace", "Bb", "Dd"])
+        self.assertEqual(order("?sort=candidacy"), ["Ff", "Lovelace", "Bb", "Dd"])
         self.assertEqual(sorted(order("?sort=candidacy&dir=desc")[:2]), ["Bb", "Dd"])           # blanks first when reversed
-        self.assertEqual(order("?sort=graduated")[0], "Cc"); self.assertEqual(order("?sort=graduated&dir=desc")[0], "Cc")   # blanks last
         self.assertEqual(order("?sort=advisor")[0], "Lovelace"); self.assertEqual(order("?sort=name&dir=desc")[0], "Lovelace")
-        self.assertEqual(sorted(order("?sort=clock")), ["Bb", "Cc", "Dd", "Lovelace"]); self.assertEqual(order("?sort=bogus"), order(""))
+        self.assertEqual(sorted(order("?sort=clock")), ["Bb", "Dd", "Ff", "Lovelace"]); self.assertEqual(order("?sort=bogus"), order(""))
         # it is the first report tab, and the Reports link opens it
         tabs = re.findall(r'<p class="tabs">(.*?)</p>', html, re.S)[0]
         self.assertEqual(re.findall(r">([^<]+)</a>", tabs), ["Milestones Table", "Milestone Check", "Funding by term"])

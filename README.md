@@ -58,10 +58,10 @@ person's password and role (for example, to regain admin access if no admin can 
   **year and term** (both required); any other status clears them. (This replaced "Expected graduation year", which
   was removed.) From the command line: `set-status STUDENT graduated --graduation-year 2026 --graduation-term spring`.
   Students already marked graduated have no term until you edit them and enter it.
-- **Milestones Table** (Reports, first tab): a snapshot with one row per active or graduated student: name, clock,
-  advisor, a **GDE** column listing the exams passed (CM, QM, EM, SM), a ✓ for each of Candidacy, MS, Committee,
-  Pre-Oral and Defense passed (a conditional pass counts), and **Graduated** (the term, for graduated students).
-  Every column sorts.
+- **Milestones Table** (Reports, first tab): a snapshot with one row per active or on-leave student: name, clock,
+  advisor, a **GDE** column listing the exams passed (CM, QM, EM, SM), and a ✓ for each of Candidacy, MS, Committee,
+  Pre-Oral and Defense passed (a conditional pass counts). Every column sorts. Graduated and withdrawn students
+  are not listed; the **Students** tab has a **Graduated** column with each graduate's term.
 - **Funding report** (Reports → *Funding by term*): pick a year and term (or step with **‹ Prev** / **Next ›**) to list every *active* student with
   their funding for that term (type, source, POETAF/COA, amount, notes). Active students with nothing
   recorded still appear, with empty fields; a student with several entries gets one row per entry.

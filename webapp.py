@@ -820,6 +820,7 @@ def create_app(db_path=None):
             "clock": lambda r: r["clock_terms"],
             "advisor": lambda r: _text(r["advisors"]),
             "research_area": lambda r: _text(r["research_area"]),
+            "graduated": _graduation_key,
         }, request.args.get("sort"), request.args.get("dir"), "name")
         faculty = db().execute("SELECT id, last_name, first_name FROM faculty ORDER BY last_name").fetchall()
         return render_template("students.html", rows=rows, faculty=faculty, q=q, status=status,
@@ -947,7 +948,7 @@ def create_app(db_path=None):
 
     @app.route("/reports/milestones")
     def milestones_table():
-        """Snapshot: one row per active or graduated student, a checkmark in each milestone column they have passed."""
+        """Snapshot: one row per active or on-leave student, a checkmark in each milestone column they have passed."""
         now = physdb.current_term()
         rows = [{**r, "clock": physdb.clock_label(r, now), "clock_terms": physdb.clock_terms(r, now)}
                 for r in physdb.milestone_snapshot(db())]
@@ -955,15 +956,14 @@ def create_app(db_path=None):
             r["gde"] = [abbr for kind, abbr in GDE_EXAMS if kind in r["done"]]
         keys = {"name": lambda r: (_text(r["last_name"]), _text(r["first_name"])),
                 "clock": lambda r: r["clock_terms"], "advisor": lambda r: _text(r["advisors"]),
-                "gde": lambda r: len(GDE_EXAMS) - len(r["gde"]),      # most exams passed first when ascending
-                "graduated": _graduation_key}
+                "gde": lambda r: len(GDE_EXAMS) - len(r["gde"])}      # most exams passed first when ascending
         for kind, _ in MILESTONE_COLUMNS:       # checkmarks first when ascending, blanks first when descending
             keys[kind] = lambda r, kind=kind: 0 if kind in r["done"] else 1
         rows, sort, sdir = sort_rows(rows, keys, request.args.get("sort"), request.args.get("dir"), "name",
                                      tiebreak=keys["name"])
         return render_template("milestones_table.html", rows=rows, sort=sort, sdir=sdir,
                                n_active=sum(r["status"] == "active" for r in rows),
-                               n_graduated=sum(r["status"] == "graduated" for r in rows),
+                               n_on_leave=sum(r["status"] == "on_leave" for r in rows),
                                columns=[(k, h, label(k)) for k, h in MILESTONE_COLUMNS],
                                gde_title=", ".join(f"{abbr} = {label(kind)[4:]}" for kind, abbr in GDE_EXAMS))
 

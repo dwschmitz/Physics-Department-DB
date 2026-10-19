@@ -667,14 +667,14 @@ def missing_milestone(conn, kind, min_years=2, now=None):
 
 
 def milestone_snapshot(conn):
-    """Every ACTIVE or GRADUATED student with `advisors` (current advisors' last names) and `done`: the set of milestone kinds they
+    """Every ACTIVE or ON-LEAVE student with `advisors` (current advisors' last names) and `done`: the set of milestone kinds they
     have passed (a passed or conditional entry counts, as in missing_milestone)."""
     rows = [dict(r) for r in conn.execute(
         """SELECT s.*,
                   (SELECT group_concat(fa.last_name, ', ') FROM advising a JOIN faculty fa ON fa.id = a.faculty_id
                     WHERE a.student_id = s.id AND a.end_date IS NULL
                       AND a.role IN ('advisor', 'co-advisor')) AS advisors
-           FROM students s WHERE s.status IN ('active', 'graduated') ORDER BY s.last_name, s.first_name, s.id""")]
+           FROM students s WHERE s.status IN ('active', 'on_leave') ORDER BY s.last_name, s.first_name, s.id""")]
     done = {}
     for m in conn.execute("SELECT student_id, kind FROM milestones WHERE outcome IN ('passed', 'conditional')"):
         done.setdefault(m["student_id"], set()).add(m["kind"])
