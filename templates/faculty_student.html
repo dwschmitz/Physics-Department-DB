@@ -19,9 +19,10 @@
 
 <h2>Milestones</h2>
 {% include "_core_courses.html" %}
-<table><tr><th>Milestone</th><th>Date</th><th title="Clock on that date: years since matriculation, counted in terms">Clock</th><th>Outcome</th></tr>
-{% for m in milestones %}<tr><td>{{ m.kind|label }}</td><td>{{ m.date }}</td><td>{{ m.clock }}</td><td>{{ m.outcome|label }}</td></tr>
-{% else %}<tr><td colspan="4" class="muted">None recorded.</td></tr>{% endfor %}</table>
+<table><tr><th>Milestone</th><th>Date</th><th title="Clock on that date: years since matriculation, counted in terms">Clock</th><th>Outcome</th><th>Form</th></tr>
+{% for m in milestones %}<tr><td>{{ m.kind|label }}</td><td>{{ m.date }}</td><td>{{ m.clock }}</td><td>{{ m.outcome|label }}</td>
+<td>{% if m.id in form_links %}<a href="{{ url_for('faculty_form_pdf', fid=form_links[m.id]) }}" target="_blank">Candidacy form (PDF)</a>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">None recorded.</td></tr>{% endfor %}</table>
 
 <h2>Funding</h2>
 <table><tr><th>Term</th><th>Type</th><th>Source</th><th>POETAF/COA</th><th>Amount</th><th>Notes</th></tr>

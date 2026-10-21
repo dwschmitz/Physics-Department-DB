@@ -122,6 +122,7 @@ def chair_sign(conn, form_id, actor, signature_png, today=None):
         raise WorkflowError("Upload your signature image first (the Signature link at the top).")
     student = conn.execute("SELECT * FROM students WHERE id = ?", (form["student_id"],)).fetchone()
     pdf = formfill.candidacy_pdf(student, signature_png, today)
+    advisor_copy = formfill.candidacy_pdf(student, signature_png, today, hide_id=True)     # what advisors may see
     try:
         existing = has_passed_candidacy(conn, form["student_id"])
         if existing:
@@ -131,8 +132,9 @@ def chair_sign(conn, form_id, actor, signature_png, today=None):
                 "INSERT INTO milestones (student_id, kind, date, outcome, notes) VALUES (?, 'candidacy', ?, 'passed', ?)",
                 (form["student_id"], today.isoformat(), "Admission to candidacy form signed.")).lastrowid
         cur = conn.execute(
-            "UPDATE forms SET status = 'complete', signed_at = ?, signed_by = ?, pdf = ?, pdf_sha256 = ?, milestone_id = ? "
-            "WHERE id = ? AND status = 'pending_chair'", (_now(), actor, pdf, formfill.sha256(pdf), milestone_id, form_id))
+            "UPDATE forms SET status = 'complete', signed_at = ?, signed_by = ?, pdf = ?, pdf_sha256 = ?, pdf_faculty = ?, "
+            "milestone_id = ? WHERE id = ? AND status = 'pending_chair'",
+            (_now(), actor, pdf, formfill.sha256(pdf), advisor_copy, milestone_id, form_id))
         if cur.rowcount != 1:
             raise WorkflowError("This form is no longer waiting for the chair's signature.")
         conn.commit()

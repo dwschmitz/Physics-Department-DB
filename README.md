@@ -69,6 +69,9 @@ person's password and role (for example, to regain admin access if no admin can 
   **+ Start candidacy form** on the student's page. A student's page lists every form with who approved and signed it and
   when. Approver and Chair accounts are created by an administrator on the **Accounts** page (they need a full name).
   They see only their approvals page (the Chair also has **My signature**, to upload a PNG/JPEG of their signature).
+  Once signed, the student's advisor sees a **Candidacy form (PDF)** link on the Candidacy line of their student's page;
+  it is the same signed form but with the University ID replaced by "(withheld)", since faculty never see University IDs
+  (only their current advisor, and only after the chair has signed).
   Everyone else with access can follow the **Forms** page and download the PDFs. A form is flattened when filled in,
   so it can't be edited afterwards. (PDF handling uses the `pypdf` and `Pillow` libraries, which `run.sh` installs.)
 - **Importing students from a file:** on the Students tab, **Import from file** (editors and admins) takes an Excel

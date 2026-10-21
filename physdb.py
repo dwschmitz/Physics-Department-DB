@@ -155,6 +155,7 @@ def connect(path=DB_PATH):
     _finish_interrupted_rebuilds(conn)
     _migrate_users(conn)
     _add_signatures(conn)
+    _add_forms_faculty_copy(conn)
     _add_faculty_fsr(conn)
     _add_faculty_accounts(conn)
     _add_fsr_accounts(conn)
@@ -396,6 +397,13 @@ def _migrate_users(conn):
         ALTER TABLE users_new RENAME TO users;
         COMMIT;""")
     conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _add_forms_faculty_copy(conn):
+    """forms.pdf_faculty (the advisor's copy of a signed form) was added after the forms table first appeared."""
+    if "pdf_faculty" not in {r[1] for r in conn.execute("PRAGMA table_info(forms)")}:
+        conn.execute("ALTER TABLE forms ADD COLUMN pdf_faculty BLOB")
+        conn.commit()
 
 
 def _add_signatures(conn):

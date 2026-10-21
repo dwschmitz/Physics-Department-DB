@@ -35,7 +35,7 @@ ROLE_ORDER = ACCOUNT_ROLES + ["faculty", "fsr"]       # faculty / FSR logins are
 APPROVAL_ROLES = ("approver", "chair")                # the two people who take a form through the approval process
 # The ONLY pages a faculty login may open (everything else is refused): their own page, a read-only page for each
 # of their advisees, changing their password, signing in/out, and the stylesheet.
-FACULTY_ENDPOINTS = {"faculty_home", "faculty_student", "account", "logout", "login", "static", "home"}
+FACULTY_ENDPOINTS = {"faculty_home", "faculty_student", "faculty_form_pdf", "account", "logout", "login", "static", "home"}
 # An FSR login gets just their own page (the advisees of the faculty they are FSR for) and the same basics.
 FSR_ENDPOINTS = {"fsr_home", "account", "logout", "login", "static", "home"}
 # Approvers and the chair see the approvals queue, the form PDFs, and (the chair) their own signature page.
@@ -679,11 +679,27 @@ def create_app(db_path=None):
                 JOIN faculty f ON f.id = a.faculty_id WHERE a.student_id = ? ORDER BY {physdb.ADVISING_ORDER_SQL}""",
             (sid,)).fetchall()
         milestones = [{**dict(m), "clock": physdb.clock_label_at(s, m["date"])} for m in db().execute(
-            "SELECT kind, date, outcome FROM milestones WHERE student_id = ? ORDER BY date", (sid,))]
+            "SELECT id, kind, date, outcome FROM milestones WHERE student_id = ? ORDER BY date", (sid,))]
         funding = db().execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
                                (sid,)).fetchall()
+        signed = db().execute("SELECT id, milestone_id FROM forms WHERE student_id = ? AND status = 'complete' "
+                              "AND pdf_faculty IS NOT NULL AND milestone_id IS NOT NULL", (sid,)).fetchall()
         return render_template("faculty_student.html", s=s, advising=advising, milestones=milestones, funding=funding,
-                               courses=physdb.CORE_COURSES, credited=physdb.course_credits(db(), sid))
+                               courses=physdb.CORE_COURSES, credited=physdb.course_credits(db(), sid),
+                               form_links={f["milestone_id"]: f["id"] for f in signed})
+
+    @app.route("/my/forms/<int:fid>.pdf")
+    def faculty_form_pdf(fid):
+        """A signed form of one of the signed-in faculty member's advisees, with the University ID left off."""
+        require_faculty()
+        row = db().execute("SELECT student_id, pdf_faculty FROM forms WHERE id = ? AND status = 'complete'", (fid,)).fetchone()
+        if row is None or row["pdf_faculty"] is None or not physdb.is_advisee(db(), g.user["faculty_id"], row["student_id"]):
+            abort(404)
+        last = db().execute("SELECT last_name FROM students WHERE id = ?", (row["student_id"],)).fetchone()["last_name"]
+        name = re.sub(r"[^A-Za-z0-9_-]+", "_", last) or "student"
+        return Response(row["pdf_faculty"], mimetype="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="Candidacy_Form_{name}.pdf"',
+            "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
     # ---- FSRs --------------------------------------------------------------------
     def fsr_overview(fsr_id, endpoint, **url_args):

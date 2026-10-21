@@ -16,6 +16,7 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)     # the blank form has a fe
 
 FORMS_DIR = Path(__file__).with_name("forms")
 CANDIDACY_TEMPLATE = "Candidacy_Form_2020-2021.pdf"
+ID_WITHHELD = "(withheld)"
 DEPARTMENT = "Physics"                       # written on the form as the candidate's department
 
 # Where the chair's signature goes on the candidacy form (PDF points from the bottom-left): x0, y0, x1, y1.
@@ -67,16 +68,17 @@ def _flatten(writer):
         del writer._root_object["/AcroForm"]
 
 
-def candidacy_pdf(student, signature_png=None, signed_on=None, flatten=True):
+def candidacy_pdf(student, signature_png=None, signed_on=None, flatten=True, hide_id=False):
     """The admission-to-candidacy form for `student` (a dict-like row with first_name, last_name, university_id).
     With a signature image and a date, Part II is completed as well. Returns the PDF bytes. (flatten=False leaves the
-    form fields in place, which is only useful for checking what was filled in.)"""
+    form fields in place, which is only useful for checking what was filled in. hide_id=True writes "(withheld)" in
+    place of the University ID: that is the copy advisors see, since faculty accounts never see University IDs.)"""
     reader = pypdf.PdfReader(str(FORMS_DIR / CANDIDACY_TEMPLATE))
     writer = pypdf.PdfWriter(clone_from=reader)
     page = writer.pages[0]
     values = {"Check Box2": "/Yes",                                           # Doctor of Philosophy
               "Text3": f"{student['first_name']} {student['last_name']}",
-              "Text4": DEPARTMENT, "Text5": str(student["university_id"])}
+              "Text4": DEPARTMENT, "Text5": ID_WITHHELD if hide_id else str(student["university_id"])}
     if signed_on:
         values["Date7_af_date"] = signed_on.strftime("%m/%d/%Y")
     writer.update_page_form_field_values(page, values, auto_regenerate=False, flatten=flatten)

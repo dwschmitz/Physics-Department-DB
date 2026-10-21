@@ -51,6 +51,12 @@ class FormFillTests(unittest.TestCase):
         signed = fields(formfill.candidacy_pdf(self.STUDENT, signature_png(), datetime.date(2026, 3, 9), flatten=False))
         self.assertEqual(signed["Date7_af_date"], "03/09/2026")
 
+    def test_the_advisors_copy_withholds_the_university_id(self):
+        ids = lambda **kw: {a.get_object()["/T"]: a.get_object().get("/V") for a in
+                            pypdf.PdfReader(io.BytesIO(formfill.candidacy_pdf(self.STUDENT, flatten=False, **kw))).pages[0]["/Annots"]}["Text5"]
+        self.assertEqual(ids(), "12345678"); self.assertEqual(ids(hide_id=True), formfill.ID_WITHHELD)
+        self.assertNotIn("12345678", formfill.ID_WITHHELD)
+
     def test_the_finished_pdf_is_flat_and_the_signature_is_drawn(self):
         plain = formfill.candidacy_pdf(self.STUDENT)
         signed = formfill.candidacy_pdf(self.STUDENT, formfill.prepare_signature(signature_png()), datetime.date(2026, 3, 9))

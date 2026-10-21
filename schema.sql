@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS forms (
     closed_at     TEXT, closed_by TEXT, closed_reason TEXT,        -- rejected or withdrawn
     milestone_id  INTEGER REFERENCES milestones(id) ON DELETE SET NULL,   -- the milestone recorded when it was signed
     pdf           BLOB NOT NULL,
-    pdf_sha256    TEXT NOT NULL
+    pdf_sha256    TEXT NOT NULL,
+    pdf_faculty   BLOB                  -- the signed form again with the University ID left off, for advisors to see
 );
 CREATE INDEX IF NOT EXISTS idx_forms_student ON forms(student_id);
 

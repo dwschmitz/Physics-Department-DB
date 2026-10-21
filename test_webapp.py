@@ -1199,7 +1199,7 @@ class WebTests(unittest.TestCase):
         f = self._faculty_client()
         fhtml = f.get("/my/students/1").get_data(as_text=True)
         fsect = fhtml.split("<h2>Milestones")[1].split("<h2>Funding")[0]
-        self.assertEqual(re.findall(r"<th[^>]*>([^<]*)</th>", fsect.split("</tr>")[0]), ["Milestone", "Date", "Clock", "Outcome"])
+        self.assertEqual(re.findall(r"<th[^>]*>([^<]*)</th>", fsect.split("</tr>")[0]), ["Milestone", "Date", "Clock", "Outcome", "Form"])
         self.assertEqual(self._milestone_rows(fhtml), [
             ["Candidacy", "2022-06-01", "—", "Passed"], ["Thesis Defense", "2022-10-17", "0.0", "Pending"],
             ["Committee Formed", "2023-03-01", "0.25", "Passed"], ["Pre-Oral", "2024-05-01", "1.5", "Passed"]])
@@ -1851,6 +1851,44 @@ class WebTests(unittest.TestCase):
         self.assertEqual(appr.get("/approvals").get_data(as_text=True).count("Nothing is waiting for you"), 1)
         self.assertEqual(c.post("/students/1/forms/candidacy", data={"csrf_token": t}, follow_redirects=True).get_data(as_text=True).count("all six core courses"), 1)
 
+    def test_advisors_see_the_signed_form_without_the_university_id(self):
+        c, t, appr, chair = self._approval_world()
+        for first, last, cnet in (("Niels", "Bohr", "nbohr"), ("Marie", "Curie", "mcurie")):
+            c.post("/faculty/new", data=dict(first_name=first, last_name=last, email=f"{last}@u.edu", cnet=cnet, csrf_token=t))
+        c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
+        self._make_faculty_login(c, t, fid=1); bohr = self._faculty_client("nbohr")
+        self._make_faculty_login(c, t, fid=2, password="temp-password-2"); curie = self._faculty_client("mcurie", "temp-password-2", "faculty-new-pass-2")
+        c.post("/students/1/courses", data={"course": self.ALL6, "csrf_token": t})
+        fid = self._forms()[0]["id"]
+        milestone_line = lambda k: k.get("/my/students/1").get_data(as_text=True).split("<h2>Milestones")[1].split("<h2>Funding")[0]
+        # nothing for the advisor until the chair has signed: no milestone yet, and the form is not reachable
+        self.assertNotIn("Candidacy form", milestone_line(bohr))
+        self.assertEqual(bohr.get(f"/my/forms/{fid}.pdf").status_code, 404)
+        appr.post(f"/forms/{fid}/approve", data={"csrf_token": self.token(appr, "/approvals")})
+        self.assertEqual(bohr.get(f"/my/forms/{fid}.pdf").status_code, 404)
+        self._sig_upload(chair)
+        chair.post(f"/forms/{fid}/sign", data={"csrf_token": self.token(chair, "/approvals")})
+        # now the Candidacy line has a link, and it opens the signed PDF
+        line = milestone_line(bohr)
+        self.assertRegex(line, r'(?s)<td>Candidacy</td>.*<a href="/my/forms/%d.pdf" target="_blank">Candidacy form \(PDF\)</a>' % fid)
+        pdf = bohr.get(f"/my/forms/{fid}.pdf")
+        self.assertEqual((pdf.status_code, pdf.mimetype), (200, "application/pdf")); self.assertTrue(pdf.data.startswith(b"%PDF"))
+        self.assertIn("no-store", pdf.headers["Cache-Control"])
+        # it is the copy without the University ID, not the one staff keep
+        f = self._forms()[0]
+        self.assertEqual(pdf.data, f["pdf_faculty"]); self.assertNotEqual(pdf.data, f["pdf"])
+        # a faculty member who is not the student's advisor cannot open it, and neither can anyone reach the staff copy
+        self.assertNotIn("Candidacy form", curie.get("/my").get_data(as_text=True))
+        self.assertEqual(curie.get(f"/my/forms/{fid}.pdf").status_code, 404)
+        self.assertEqual(bohr.get(f"/forms/{fid}.pdf").status_code, 403)
+        self.assertEqual(bohr.get("/my/forms/999.pdf").status_code, 404)
+        self.assertEqual(self.app.test_client().get(f"/my/forms/{fid}.pdf").status_code, 302)           # signed out: login page
+        self.assertEqual(appr.get(f"/my/forms/{fid}.pdf").status_code, 403)                              # only faculty logins use this address
+        # an advisor whose advising has ended loses access
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        conn.execute("UPDATE advising SET end_date = '2025-01-01'"); conn.commit(); conn.close()
+        self.assertEqual(bohr.get(f"/my/forms/{fid}.pdf").status_code, 404)
+
     def test_signature_upload_rules(self):
         import io
         c, t, appr, chair = self._approval_world()
@@ -2178,7 +2216,7 @@ class WebTests(unittest.TestCase):
                          "faculty_detail", "faculty_edit", "reports", "users", "user_new", "user_new_faculty",
                          "user_edit", "user_delete"):
             self.assertIn(endpoint, tested)
-        self.assertEqual(allowed, {"faculty_home", "faculty_student", "account", "logout", "login", "static", "home"})
+        self.assertEqual(allowed, {"faculty_home", "faculty_student", "faculty_form_pdf", "account", "logout", "login", "static", "home"})
         for path in ("/export.csv", "/students", "/students/1", "/faculty", "/reports", "/reports/funding", "/users",
                      "/students/1/funding/copy?year=2026&season=Autumn", "/nonexistent", "/static/../webapp.py"):
             self.assertIn(f.get(path).status_code, (403, 404), path)
