@@ -59,8 +59,9 @@ CREATE TABLE IF NOT EXISTS milestones (
     id          INTEGER PRIMARY KEY,
     student_id  INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     kind        TEXT NOT NULL
-                -- 'qualifying_exam' and 'thesis_proposal' are retired: no longer offered for new entries, but still
+                -- The two old exam types and the four GDE types are retired: no longer offered for new entries, but still
                 -- allowed here so entries saved earlier keep their meaning (see physdb.RETIRED_MILESTONE_KINDS).
+                -- (GDEs are now recorded as core course credits, see course_credits below.)
                 CHECK (kind IN ('gde_classical_mechanics', 'gde_quantum_mechanics', 'gde_electrodynamics',
                                 'gde_statistical_mechanics', 'candidacy', 'ms_degree', 'committee_formed', 'pre_oral',
                                 'thesis_defense', 'other', 'qualifying_exam', 'thesis_proposal')),
@@ -82,6 +83,14 @@ CREATE TABLE IF NOT EXISTS funding (
     amount      REAL,
     notes       TEXT,
     CHECK ((term_year IS NULL) = (term_season IS NULL))
+);
+
+-- The six core courses a student needs credit for before candidacy (by passing the course or testing out of it with
+-- a GDE). One row per course credited; the codes are listed in physdb.CORE_COURSES.
+CREATE TABLE IF NOT EXISTS course_credits (
+    student_id  INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    course      TEXT NOT NULL CHECK (course IN ('cm', 'qm1', 'qm2', 'em1', 'em2', 'sm')),
+    PRIMARY KEY (student_id, course)
 );
 
 CREATE INDEX IF NOT EXISTS idx_advising_student   ON advising(student_id);

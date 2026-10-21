@@ -649,7 +649,8 @@ def create_app(db_path=None):
             "SELECT kind, date, outcome FROM milestones WHERE student_id = ? ORDER BY date", (sid,))]
         funding = db().execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
                                (sid,)).fetchall()
-        return render_template("faculty_student.html", s=s, advising=advising, milestones=milestones, funding=funding)
+        return render_template("faculty_student.html", s=s, advising=advising, milestones=milestones, funding=funding,
+                               courses=physdb.CORE_COURSES, credited=physdb.course_credits(db(), sid))
 
     # ---- FSRs --------------------------------------------------------------------
     def fsr_overview(fsr_id, endpoint, **url_args):
@@ -961,7 +962,18 @@ def create_app(db_path=None):
         funding = d.execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
                             (sid,)).fetchall()
         return render_template("student.html", s=s, advising=advising, milestones=milestones,
-                               funding=funding, titles=CHILD_TABLES)
+                               funding=funding, titles=CHILD_TABLES, courses=physdb.CORE_COURSES,
+                               credited=physdb.course_credits(d, sid))
+
+    @app.post("/students/<int:sid>/courses")
+    def student_courses(sid):
+        """Save which of the six core courses the student has credit for (the checkboxes at the top of Milestones)."""
+        require_editor()
+        get_or_404("students", sid)
+        wanted = set(request.form.getlist("course")) & set(physdb.COURSE_CODES)      # anything else is ignored
+        physdb.set_course_credits(db(), sid, wanted)
+        flash("Core courses saved.", "ok")
+        return redirect(_safe_path(request.args.get("next")) or url_for("student", sid=sid))
 
     @app.route("/students/<int:sid>/edit", methods=["GET", "POST"])
     def student_edit(sid):
@@ -1056,10 +1068,8 @@ def create_app(db_path=None):
         return redirect(url_for("faculty_list"))
 
     # ---- reports / export ------------------------------------------------------
-    # The four GDE exams share one column of the Milestones Table, listed by these abbreviations; the others get
-    # a column each as (milestone kind, short heading).
-    GDE_EXAMS = [("gde_classical_mechanics", "CM"), ("gde_quantum_mechanics", "QM"),
-                 ("gde_electrodynamics", "EM"), ("gde_statistical_mechanics", "SM")]
+    # The core courses share one column of the Milestones Table (see physdb.CORE_COURSES); the milestones each get a
+    # column as (milestone kind, short heading).
     MILESTONE_COLUMNS = [("candidacy", "Candidacy"), ("ms_degree", "MS"), ("committee_formed", "Committee"),
                          ("pre_oral", "Pre-Oral"), ("thesis_defense", "Defense")]
 
@@ -1070,10 +1080,10 @@ def create_app(db_path=None):
         rows = [{**r, "clock": physdb.clock_label(r, now), "clock_terms": physdb.clock_terms(r, now)}
                 for r in physdb.milestone_snapshot(db())]
         for r in rows:
-            r["gde"] = [abbr for kind, abbr in GDE_EXAMS if kind in r["done"]]
+            r["course_list"] = physdb.courses_label(r["courses"])
         keys = {"name": lambda r: (_text(r["last_name"]), _text(r["first_name"])),
                 "clock": lambda r: r["clock_terms"], "advisor": lambda r: _text(r["advisors"]),
-                "gde": lambda r: len(GDE_EXAMS) - len(r["gde"])}      # most exams passed first when ascending
+                "courses": lambda r: len(physdb.CORE_COURSES) - len(r["courses"])}      # most courses first when ascending
         for kind, _ in MILESTONE_COLUMNS:       # checkmarks first when ascending, blanks first when descending
             keys[kind] = lambda r, kind=kind: 0 if kind in r["done"] else 1
         rows, sort, sdir = sort_rows(rows, keys, request.args.get("sort"), request.args.get("dir"), "name",
@@ -1082,7 +1092,7 @@ def create_app(db_path=None):
                                n_active=sum(r["status"] == "active" for r in rows),
                                n_on_leave=sum(r["status"] == "on_leave" for r in rows),
                                columns=[(k, h, label(k)) for k, h in MILESTONE_COLUMNS],
-                               gde_title=", ".join(f"{abbr} = {label(kind)[4:]}" for kind, abbr in GDE_EXAMS))
+                               courses_title=", ".join(f"{short} = {full}" for _, short, full in physdb.CORE_COURSES))
 
     @app.route("/reports")
     def reports():

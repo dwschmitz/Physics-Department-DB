@@ -7,7 +7,8 @@ SQLite database plus a command-line tool (Python 3, standard library only).
 python3 physdb.py add-faculty Niels Bohr bohr@uni.edu --research-area Atomic
 python3 physdb.py add-student U1001 Ada Lovelace ada@uni.edu --matriculation-year 2022 --matriculation-term Autumn --research-area "Quantum optics"
 python3 physdb.py assign-advisor U1001 bohr@uni.edu            # --role co-advisor|committee|committee_chair
-python3 physdb.py add-milestone U1001 gde_classical_mechanics 2024-05-01 --outcome passed
+python3 physdb.py add-milestone U1001 candidacy 2024-05-01 --outcome passed
+python3 physdb.py course-credit U1001 cm qm1 sm      # core-course credit (cm qm1 qm2 em1 em2 sm); --remove to clear
 python3 physdb.py add-funding U1001 TA 2026 Autumn --source Dept --amount 12000 --poetaf-coa 1234567
 python3 physdb.py set-status U1001 on_leave
 python3 physdb.py list --status active --advisor bohr@uni.edu --year 2022   # students Bohr advises
@@ -54,6 +55,11 @@ person's password and role (for example, to regain admin access if no admin can 
 - **Milestone Check** (Reports tab): pick a milestone and a minimum clock in years (fractions such as 0.25 are fine) to
   list the active students at or past that clock who have no passed or conditional entry for it, with matriculation,
   clock, research area and advisor; every heading sorts.
+- **Core courses (instead of GDE milestones):** candidacy requires credit for six courses: Classical Mechanics (CM),
+  Quantum Mechanics I and II (QM-1, QM-2), Electrodynamics I and II (EM-1, EM-2) and Statistical Mechanics (SM), whether
+  passed or tested out of with a GDE. At the top of **Milestones** on each student's page, editors tick the courses with
+  credit and press **Save** (faculty and viewers see a read-only list). The four GDE milestone types are no longer
+  offered; entries already saved under them are kept and shown as before ("retired").
 - **Importing students from a file:** on the Students tab, **Import from file** (editors and admins) takes an Excel
   (.xlsx, first sheet) or CSV file with one student per row; `examples/Incoming_Student_Data_Test.xlsx` is a sample
   and the page links a blank CSV template. Required columns: First Name, Last Name, UCID (exactly 8 digits), Email,
@@ -74,7 +80,7 @@ person's password and role (for example, to regain admin access if no admin can 
   **Graduated** column (withdrawal terms show on the student's own page). Students already marked graduated or withdrawn have no term until you
   edit them and enter it.
 - **Milestones Table** (Reports, first tab): a snapshot with one row per active or on-leave student: name, clock,
-  advisor, a **GDE** column listing the exams passed (CM, QM, EM, SM), and a ✓ for each of Candidacy, MS, Committee,
+  advisor, a **Courses** column listing the core courses with credit (CM, QM-1, QM-2, EM-1, EM-2, SM), and a ✓ for each of Candidacy, MS, Committee,
   Pre-Oral and Defense passed (a conditional pass counts). Every column sorts. Graduated and withdrawn students
   are not listed; the **Students** tab has a **Graduated** column with each graduate's term.
 - **Funding report** (Reports → *Funding by term*): pick a year and term (or step with **‹ Prev** / **Next ›**) to list every *active* student with

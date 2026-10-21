@@ -25,6 +25,7 @@
 {% else %}<tr><td colspan="5" class="muted">None recorded.</td></tr>{% endfor %}</table>
 
 <h2>Milestones {% if can_edit %}<a class="btn small" href="{{ url_for('child_new', sid=s.id, table='milestones') }}">+ Add</a>{% endif %}</h2>
+{% include "_core_courses.html" %}
 <table><tr><th>Milestone</th><th>Date</th><th title="Clock on that date: years since matriculation, counted in terms">Clock</th><th>Outcome</th><th>Notes</th><th></th></tr>
 {% for m in milestones %}<tr><td>{{ m.kind|label }}</td><td>{{ m.date }}</td><td>{{ m.clock }}</td><td>{{ m.outcome|label }}</td><td>{{ m.notes or '' }}</td>
 <td class="actions">{% if can_edit %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='milestones', rid=m.id) }}">Edit</a>

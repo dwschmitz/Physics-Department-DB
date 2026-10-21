@@ -1,0 +1,15 @@
+{# The six core courses a student needs credit for before candidacy. Editors get checkboxes; everyone else a read-only list.
+   Expects: s, courses (physdb.CORE_COURSES), credited (set of codes), can_edit. #}
+<div class="courses">
+  <strong title="Credit for these six courses is the requirement for candidacy. Tick a course if the student passed it or tested out of it with a GDE.">Core courses</strong>
+  {% if can_edit %}
+  <form class="inline" method="post" action="{{ url_for('student_courses', sid=s.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% for code, short, full in courses %}<label class="course" title="{{ full }}"><input type="checkbox" name="course" value="{{ code }}" {{ 'checked' if code in credited }}> {{ short }}</label>{% endfor %}
+    <button class="btn small">Save</button>
+  </form>
+  {% else %}
+  {% for code, short, full in courses %}<span class="course {{ 'done' if code in credited }}" title="{{ full }}">{{ '&#10003;'|safe if code in credited else '&#9744;'|safe }} {{ short }}</span>{% endfor %}
+  {% endif %}
+  <span class="muted">{{ credited|length }} of {{ courses|length }}</span>
+</div>

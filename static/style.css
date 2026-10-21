@@ -48,3 +48,7 @@ dialog::backdrop{background:rgba(0,0,0,.35)}
 .copy-stepper{display:flex;align-items:center;gap:.8rem;margin:.6rem 0 .8rem}.copy-source{min-width:8rem;text-align:center;font-size:1.1rem}
 .copy-actions{display:flex;gap:.6rem;margin-top:1rem}.copy-actions .btn[disabled]{opacity:.4;cursor:not-allowed}
 table.mini{font-size:.9rem}table.mini th,table.mini td{padding:.3rem .5rem}
+
+.courses{background:#fff;border:1px solid #d5d9e0;padding:.6rem 1rem;margin-bottom:.8rem;display:flex;flex-wrap:wrap;gap:.4rem 1.1rem;align-items:center}
+.courses form{display:contents}.courses label.course,.courses .course{display:inline-flex;align-items:center;gap:.3rem;margin:0;font-weight:600;white-space:nowrap}
+.courses .course.done{color:#1b6e3a}.courses input[type=checkbox]{width:auto}

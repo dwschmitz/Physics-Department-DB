@@ -192,14 +192,14 @@ class WebTests(unittest.TestCase):
         c.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", csrf_token=t))
         for table, data in {
             "advising": dict(faculty_id="1", role="advisor", start_date="2023-01-01"),
-            "milestones": dict(kind="gde_classical_mechanics", date="2024-05-01", outcome="passed"),
+            "milestones": dict(kind="pre_oral", date="2024-05-01", outcome="passed"),
             "funding": dict(kind="TA", term_year="2026", term_season="Autumn", poetaf_coa="1234567-ABC", amount="12000",
                            notes="Covers <i>half</i> of the term\nrenewal pending"),
         }.items():
             r = c.post(f"/students/1/{table}/new", data={**data, "csrf_token": t})
             self.assertEqual(r.status_code, 302, table)
         page = c.get("/students/1").get_data(as_text=True)
-        for needle in ("Bohr", "GDE Classical Mechanics", "$12,000", "Autumn 2026", "1234567-ABC",
+        for needle in ("Bohr", "Pre-Oral", "$12,000", "Autumn 2026", "1234567-ABC",
                        "Covers &lt;i&gt;half&lt;/i&gt; of the term", "renewal pending"):
             self.assertIn(needle, page)
         r = c.post("/students/1/advising/1/edit", data=dict(faculty_id="1", role="advisor",
@@ -951,7 +951,7 @@ class WebTests(unittest.TestCase):
                amount="500", csrf_token=t))
         c.post("/students/2/funding/new", data=dict(kind="supplement", term_year=2026, term_season="Autumn", amount="250", csrf_token=t))
         c.post("/students/5/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", source="NOT-BOHRS", amount="999", csrf_token=t))
-        c.post("/students/1/milestones/new", data=dict(kind="gde_classical_mechanics", date="2024-05-01", outcome="passed",
+        c.post("/students/1/milestones/new", data=dict(kind="pre_oral", date="2024-05-01", outcome="passed",
                notes="SECRET milestone note", csrf_token=t))
         return c, t
 
@@ -1080,7 +1080,7 @@ class WebTests(unittest.TestCase):
         self.add_student(c, matriculation_year="2022", matriculation_term="Autumn")          # student 1, matriculated Autumn 2022
         c.post("/faculty/new", data=dict(first_name="N", last_name="Bohr", email="b@u.edu", cnet="nbohr", csrf_token=t))
         c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2022-09-01", csrf_token=t))
-        for kind, date, outcome in (("committee_formed", "2023-03-01", "passed"), ("gde_classical_mechanics", "2024-05-01", "passed"),
+        for kind, date, outcome in (("committee_formed", "2023-03-01", "passed"), ("pre_oral", "2024-05-01", "passed"),
                                     ("candidacy", "2022-06-01", "passed"), ("thesis_defense", "2022-10-17", "pending")):
             r = c.post("/students/1/milestones/new", data=dict(kind=kind, date=date, outcome=outcome, csrf_token=t))
             self.assertEqual(r.status_code, 302, kind)
@@ -1091,7 +1091,7 @@ class WebTests(unittest.TestCase):
         return [re.findall(r"<td[^>]*>([^<]*)</td>", row)[:4] for row in re.findall(r"<tr><td>.*?</tr>", sect, re.S)]
 
     def test_milestones_table_is_a_snapshot_of_passed_milestones(self):
-        c, t = self._milestone_world()                # Lovelace: passed GDE CM, Candidacy, Committee; Defense only pending
+        c, t = self._milestone_world()                # Lovelace: passed Candidacy, Committee, Pre-Oral; Defense only pending
         for i, (last, status) in enumerate((("Bb", "active"), ("Cc", "graduated"), ("Dd", "active"), ("Ee", "withdrawn"),
                                             ("Ff", "on_leave")), 2):
             self.add_student(c, university_id=f"U{i}", email=f"s{i}@u.edu", first_name="Stu", last_name=last, status=status,
@@ -1099,9 +1099,9 @@ class WebTests(unittest.TestCase):
                              **(dict(graduation_year="2025", graduation_term="Winter") if status == "graduated" else {}))
         post = lambda sid, kind, outcome: c.post(f"/students/{sid}/milestones/new",
                                                  data=dict(kind=kind, date="2024-01-01", outcome=outcome, csrf_token=t))
-        post(4, "gde_quantum_mechanics", "passed"); post(4, "gde_statistical_mechanics", "passed")
-        post(2, "gde_electrodynamics", "conditional"); post(2, "gde_classical_mechanics", "passed")
-        post(2, "pre_oral", "conditional"); post(2, "gde_quantum_mechanics", "failed"); post(2, "ms_degree", "pending")
+        courses = lambda sid, *codes: c.post(f"/students/{sid}/courses", data={"course": list(codes), "csrf_token": t})
+        courses(1, "cm"); courses(2, "cm", "em1", "em2"); courses(4, "qm1", "qm2", "sm")
+        post(2, "pre_oral", "conditional"); post(2, "candidacy", "failed"); post(2, "ms_degree", "pending")
         for kind in physdb.MILESTONE_KINDS[:-1]:
             post(3, kind, "passed")                   # graduated: listed, with the term they graduated
         post(5, "candidacy", "passed"); post(6, "candidacy", "passed")      # withdrawn: not listed; on leave: listed
@@ -1112,7 +1112,7 @@ class WebTests(unittest.TestCase):
         html = page()
         text = lambda h: re.sub(r"\s+", " ", re.sub(r"<[^>]+>|[▲▼↕]", "", h)).strip()
         heads = [text(h) for h in re.findall(r"<th[^>]*>(.*?)</th>", html.split("</tr>")[0], re.S)]
-        self.assertEqual(heads, ["Name", "Clock", "Advisor", "GDE", "Candidacy", "MS",
+        self.assertEqual(heads, ["Name", "Clock", "Advisor", "Courses", "Candidacy", "MS",
                                  "Committee", "Pre-Oral", "Defense"])
         def table(h):
             out = {}
@@ -1123,16 +1123,16 @@ class WebTests(unittest.TestCase):
             return out
         rows = table(html)
         self.assertNotIn("Ee, Stu", rows); self.assertNotIn("Cc, Stu", rows)                # withdrawn and graduated left out
-        self.assertEqual(rows["Lovelace, Ada"], ("4.0", "Bohr", "CM", [0, 2]))               # GDE: CM; Candidacy, Committee
-        self.assertEqual(rows["Bb, Stu"], ("4.0", "", "CM, EM", [3]))                        # conditional counts; failed/pending don't
-        self.assertEqual(rows["Dd, Stu"], ("4.0", "", "QM, SM", []))                         # abbreviations in exam order; blanks
+        self.assertEqual(rows["Lovelace, Ada"], ("4.0", "Bohr", "CM", [0, 2, 3]))            # course CM; Candidacy, Committee, Pre-Oral
+        self.assertEqual(rows["Bb, Stu"], ("4.0", "", "CM, EM-1, EM-2", [3]))               # conditional counts; failed/pending don't
+        self.assertEqual(rows["Dd, Stu"], ("4.0", "", "QM-1, QM-2, SM", []))                # abbreviations in course order; blanks
         self.assertEqual(rows["Ff, Stu"], ("4.0", "", "", [0]))                              # on leave: listed
         self.assertEqual(re.findall(r"<tr><td><a [^>]*>(.*?)</a>", html), ["Bb, Stu", "Dd, Stu", "Ff, Stu", "Lovelace, Ada"])
         self.assertIn("3 active students, 1 on leave", html)
         # sorting: the checkmark columns put checks first, or last when reversed
         order = lambda q: re.findall(r"<tr><td><a [^>]*>(\w+)", page(q))
-        self.assertEqual(order("?sort=gde"), ["Bb", "Dd", "Lovelace", "Ff"])                # most exams passed first
-        self.assertEqual(order("?sort=gde&dir=desc"), ["Ff", "Lovelace", "Bb", "Dd"])
+        self.assertEqual(order("?sort=courses"), ["Bb", "Dd", "Lovelace", "Ff"])            # most courses with credit first
+        self.assertEqual(order("?sort=courses&dir=desc"), ["Ff", "Lovelace", "Bb", "Dd"])
         self.assertEqual(order("?sort=candidacy"), ["Ff", "Lovelace", "Bb", "Dd"])
         self.assertEqual(sorted(order("?sort=candidacy&dir=desc")[:2]), ["Bb", "Dd"])           # blanks first when reversed
         self.assertEqual(order("?sort=advisor")[0], "Lovelace"); self.assertEqual(order("?sort=name&dir=desc")[0], "Lovelace")
@@ -1187,13 +1187,13 @@ class WebTests(unittest.TestCase):
             ["Candidacy", "2022-06-01", "—", "Passed"],                # before Autumn 2022: not matriculated yet
             ["Thesis Defense", "2022-10-17", "0.0", "Pending"],        # in the matriculation term
             ["Committee Formed", "2023-03-01", "0.25", "Passed"],      # Winter 2023
-            ["GDE Classical Mechanics", "2024-05-01", "1.5", "Passed"]])       # Spring 2024: six terms in
+            ["Pre-Oral", "2024-05-01", "1.5", "Passed"]])       # Spring 2024: six terms in
         # a student who has since graduated keeps the clock the milestone had at the time
         c.post("/students/1/edit", data=dict(first_name="Ada", last_name="Lovelace", university_id="U1", cnet="stuaa",
                email="ada@u.edu", citizenship="citizen", status="graduated", matriculation_year="2022",
                matriculation_term="Autumn", csrf_token=t))
         self.assertEqual(self._milestone_rows(c.get("/students/1").get_data(as_text=True))[3],
-                         ["GDE Classical Mechanics", "2024-05-01", "1.5", "Passed"])
+                         ["Pre-Oral", "2024-05-01", "1.5", "Passed"])
         # the same column on a faculty member's read-only page
         self._make_faculty_login(c, t, fid=1)
         f = self._faculty_client()
@@ -1202,7 +1202,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(re.findall(r"<th[^>]*>([^<]*)</th>", fsect.split("</tr>")[0]), ["Milestone", "Date", "Clock", "Outcome"])
         self.assertEqual(self._milestone_rows(fhtml), [
             ["Candidacy", "2022-06-01", "—", "Passed"], ["Thesis Defense", "2022-10-17", "0.0", "Pending"],
-            ["Committee Formed", "2023-03-01", "0.25", "Passed"], ["GDE Classical Mechanics", "2024-05-01", "1.5", "Passed"]])
+            ["Committee Formed", "2023-03-01", "0.25", "Passed"], ["Pre-Oral", "2024-05-01", "1.5", "Passed"]])
         # a student with no milestones still renders (empty row spans the new column)
         c2 = self.client("ad"); t2 = self.token(c2)
         self.add_student(c2, university_id="U2", email="u2@u.edu", last_name="Empty")
@@ -1221,16 +1221,73 @@ class WebTests(unittest.TestCase):
         r = c.post("/students/1/milestones/new", data=dict(kind="thesis_proposal", date="2023-03-01", outcome="passed", csrf_token=t))
         self.assertNotEqual(r.status_code, 302)
 
+    def test_core_courses_checkboxes_on_the_student_page(self):
+        c, t = self._milestone_world()
+        page = lambda client=c, path="/students/1": client.get(path).get_data(as_text=True)
+        html = page()
+        box = html.split("<h2>Milestones")[1].split("<table>")[0]                         # at the top of the Milestones section
+        self.assertEqual(re.findall(r'name="course" value="(\w+)"', box), ["cm", "qm1", "qm2", "em1", "em2", "sm"])
+        self.assertEqual([x for x in re.findall(r'<label class="course" title="([^"]+)">', box)],
+                         ["Classical Mechanics", "Quantum Mechanics I", "Quantum Mechanics II", "Electrodynamics I",
+                          "Electrodynamics II", "Statistical Mechanics"])
+        self.assertEqual(re.findall(r"> (CM|QM-1|QM-2|EM-1|EM-2|SM)</label>", box), ["CM", "QM-1", "QM-2", "EM-1", "EM-2", "SM"])
+        self.assertNotIn(" checked", box); self.assertIn("0 of 6", box)
+        r = c.post("/students/1/courses", data={"course": ["cm", "qm2", "sm", "bogus"], "csrf_token": t})
+        self.assertEqual(r.status_code, 302)
+        box = page().split("<h2>Milestones")[1].split("<table>")[0]
+        self.assertEqual(re.findall(r'value="(\w+)" checked', box), ["cm", "qm2", "sm"]); self.assertIn("3 of 6", box)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(sorted(x[0] for x in conn.execute("SELECT course FROM course_credits")), ["cm", "qm2", "sm"]); conn.close()
+        # saving again replaces the set (unticking removes credit); an empty form clears it
+        c.post("/students/1/courses", data={"course": ["em1"], "csrf_token": t})
+        self.assertEqual(re.findall(r'value="(\w+)" checked', page().split("<h2>Milestones")[1].split("<table>")[0]), ["em1"])
+        c.post("/students/1/courses", data={"csrf_token": t})
+        self.assertIn("0 of 6", page())
+        c.post("/students/1/courses", data={"course": ["cm", "qm1", "qm2", "em1", "em2", "sm"], "csrf_token": t})
+        self.assertIn("6 of 6", page())
+        # viewers see a read-only list; they cannot save
+        v = self.client("vw"); vt = self.token(v)
+        ro = page(v).split("<h2>Milestones")[1].split("<table>")[0]
+        self.assertNotIn("<input", ro); self.assertIn("6 of 6", ro); self.assertIn("CM", ro)
+        self.assertEqual(v.post("/students/1/courses", data={"course": ["cm"], "csrf_token": vt}).status_code, 403)
+        self.assertEqual(c.post("/students/1/courses", data={"course": ["cm"]}).status_code, 400)       # needs the CSRF token
+        self.assertEqual(c.post("/students/99/courses", data={"csrf_token": t}).status_code, 404)
+        # the credits go with the student if they are deleted
+        c.post("/students/1/delete", data={"csrf_token": t})
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT count(*) FROM course_credits").fetchone()[0], 0); conn.close()
+
+    def test_core_courses_on_faculty_and_fsr_pages_are_read_only(self):
+        c, t = self._fsr_world()
+        c.post("/students/1/courses", data={"course": ["cm", "sm"], "csrf_token": t})
+        self._make_faculty_login(c, t); fac = self._faculty_client()
+        html = fac.get("/my/students/1").get_data(as_text=True)
+        box = html.split("<h2>Milestones")[1].split("<table>")[0]
+        self.assertNotIn("<input", box); self.assertIn("2 of 6", box)
+        self.assertEqual(len(re.findall(r'class="course done"', box)), 2)
+        self.assertEqual(fac.post("/students/1/courses", data={"course": ["cm"], "csrf_token": self.token(fac, "/account")}).status_code, 403)
+        self._make_fsr_login(c, t); fsr = self._fsr_client()
+        self.assertEqual(fsr.post("/students/1/courses", data={"course": ["cm"], "csrf_token": self.token(fsr, "/account")}).status_code, 403)
+
+    def test_gde_milestones_are_retired_but_kept(self):
+        c, t = self._milestone_world()
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        conn.execute("INSERT INTO milestones (student_id, kind, date, outcome) VALUES (1, 'gde_quantum_mechanics', '2023-01-05', 'passed')")
+        mid = conn.execute("SELECT max(id) FROM milestones").fetchone()[0]; conn.commit(); conn.close()
+        self.assertIn("GDE Quantum Mechanics", c.get("/students/1").get_data(as_text=True))               # still shown
+        self.assertNotIn("gde_", c.get("/students/1/milestones/new").get_data(as_text=True))              # no longer offered
+        self.assertIn("GDE Quantum Mechanics (retired)", c.get(f"/students/1/milestones/{mid}/edit").get_data(as_text=True))
+        r = c.post("/students/1/milestones/new", data=dict(kind="gde_classical_mechanics", date="2023-03-01", outcome="passed", csrf_token=t))
+        self.assertNotEqual(r.status_code, 302)
+        self.assertNotIn("gde_", c.get("/reports").get_data(as_text=True))                                # not on Milestone Check either
+
     def test_committee_formed_milestone(self):
         c, t = self._milestone_world()
         form = c.get("/students/1/milestones/new").get_data(as_text=True)
         options = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', form.split('name="kind"')[1].split("</select>")[0])
-        self.assertEqual([v for v, _ in options], ["gde_classical_mechanics", "gde_quantum_mechanics", "gde_electrodynamics",
-                                                   "gde_statistical_mechanics", "candidacy", "ms_degree", "committee_formed", "pre_oral",
-                                                   "thesis_defense", "other"])
-        self.assertEqual([l for _, l in options], ["GDE Classical Mechanics", "GDE Quantum Mechanics", "GDE Electrodynamics",
-                                                   "GDE Statistical Mechanics", "Candidacy", "MS Degree", "Committee Formed", "Pre-Oral",
-                                                   "Thesis Defense", "Other"])
+        self.assertEqual([v for v, _ in options], ["candidacy", "ms_degree", "committee_formed", "pre_oral", "thesis_defense", "other"])
+        self.assertEqual([l for _, l in options], ["Candidacy", "MS Degree", "Committee Formed", "Pre-Oral", "Thesis Defense", "Other"])
+        self.assertNotIn("GDE", form)                                                   # the GDE entries are gone from the menu
         self.assertIn(("committee_formed", "Committee Formed"), options)
         self.assertIn("Committee Formed", c.get("/students/1").get_data(as_text=True))
         bad = c.post("/students/1/milestones/new", data=dict(kind="committee_formd", date="2023-03-01", outcome="passed", csrf_token=t))
@@ -1806,17 +1863,17 @@ class WebTests(unittest.TestCase):
             with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
                 return c.get("/reports?" + qs).get_data(as_text=True)
         names = lambda h: re.findall(r">(Mc_\w), Ada</a>", h)
-        html = page("kind=gde_classical_mechanics&years=0.25")
+        html = page("kind=pre_oral&years=0.25")
         # 1) the tab and page are called "Milestone Check"
         self.assertIn(">Milestone Check</a>", html); self.assertIn("<h1>Milestone Check</h1>", html)
         self.assertNotIn("Behind schedule", html); self.assertNotIn("behind schedule", html)
         # 2) the time box takes fractions, and the filter works on them (clock >= 0.25: A, B, C but not D)
         self.assertRegex(html, r'<input type="number" name="years" min="0" max="15" step="0.25" value="0.25">')
         self.assertEqual(names(html), ["Mc_A", "Mc_B", "Mc_C"])
-        self.assertEqual(names(page("kind=gde_classical_mechanics&years=0.3")), ["Mc_A", "Mc_B"])
-        self.assertEqual(names(page("kind=gde_classical_mechanics&years=1")), ["Mc_A"])
-        self.assertEqual(names(page("kind=gde_classical_mechanics&years=1.25")), [])
-        self.assertEqual(sorted(names(page("kind=gde_classical_mechanics&years=0"))), ["Mc_A", "Mc_B", "Mc_C", "Mc_D"])
+        self.assertEqual(names(page("kind=pre_oral&years=0.3")), ["Mc_A", "Mc_B"])
+        self.assertEqual(names(page("kind=pre_oral&years=1")), ["Mc_A"])
+        self.assertEqual(names(page("kind=pre_oral&years=1.25")), [])
+        self.assertEqual(sorted(names(page("kind=pre_oral&years=0"))), ["Mc_A", "Mc_B", "Mc_C", "Mc_D"])
         for typed, shown in (("2", "2"), ("1.5", "1.5"), ("0.75", "0.75"), ("", "2"), ("abc", "2"), ("nan", "2"), ("inf", "2"),
                              ("-3", "0"), ("99", "15")):                                       # sensible handling of any input
             self.assertIn(f'step="0.25" value="{shown}">', page(f"years={typed}"), typed)
@@ -1831,11 +1888,11 @@ class WebTests(unittest.TestCase):
                                  ["Mc_B, Ada", "Spring 2026", "0.5", "area-Mc_B", "Curie"],
                                  ["Mc_C, Ada", "Summer 2026", "0.25", "area-Mc_C", ""]])   # committee-only: no advisor listed
         # both new columns sort (blanks last either way), and the links keep the milestone and the years
-        self.assertEqual(names(page("kind=gde_classical_mechanics&years=0&sort=clock")), ["Mc_D", "Mc_C", "Mc_B", "Mc_A"])
-        self.assertEqual(names(page("kind=gde_classical_mechanics&years=0&sort=clock&dir=desc")), ["Mc_A", "Mc_B", "Mc_C", "Mc_D"])
-        self.assertEqual(names(page("kind=gde_classical_mechanics&years=0&sort=advisor"))[:2], ["Mc_A", "Mc_B"])
-        self.assertEqual(names(page("kind=gde_classical_mechanics&years=0&sort=advisor&dir=desc"))[:2], ["Mc_B", "Mc_A"])
-        self.assertEqual(sorted(names(page("kind=gde_classical_mechanics&years=0&sort=advisor"))[2:]), ["Mc_C", "Mc_D"])
+        self.assertEqual(names(page("kind=pre_oral&years=0&sort=clock")), ["Mc_D", "Mc_C", "Mc_B", "Mc_A"])
+        self.assertEqual(names(page("kind=pre_oral&years=0&sort=clock&dir=desc")), ["Mc_A", "Mc_B", "Mc_C", "Mc_D"])
+        self.assertEqual(names(page("kind=pre_oral&years=0&sort=advisor"))[:2], ["Mc_A", "Mc_B"])
+        self.assertEqual(names(page("kind=pre_oral&years=0&sort=advisor&dir=desc"))[:2], ["Mc_B", "Mc_A"])
+        self.assertEqual(sorted(names(page("kind=pre_oral&years=0&sort=advisor"))[2:]), ["Mc_C", "Mc_D"])
         link_page = page("kind=candidacy&years=0.25&sort=clock&dir=asc")
         self.assertIn("kind=candidacy&amp;years=0.25&amp;sort=clock&amp;dir=desc", link_page)
         self.assertIn("kind=candidacy&amp;years=0.25&amp;sort=advisor&amp;dir=asc", link_page)
@@ -1891,7 +1948,7 @@ class WebTests(unittest.TestCase):
         f = self._faculty_client()
         page = f.get("/my/students/1").get_data(as_text=True)
         self.assertEqual(f.get("/my/students/2").status_code, 200)
-        for needle in ("Stu Aa", "stuaa", "area-Aa", "GDE Classical Mechanics", "Passed", "Niels Bohr", "NSF grant", "1234567-ABC",
+        for needle in ("Stu Aa", "stuaa", "area-Aa", "Pre-Oral", "Passed", "Niels Bohr", "NSF grant", "1234567-ABC",
                        "$3,000", "Autumn 2026", "Winter 2026", "funding note &lt;b&gt;x&lt;/b&gt;"):   # funding notes shown, escaped
             self.assertIn(needle, page)
         self.assertNotIn("<b>x</b>", page)
@@ -2131,7 +2188,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(fac("sort=committees&dir=desc"), ["Cc", "Bb", "Aa"])
         self.assertEqual(fac("sort=advisees"), ["Aa", "Bb", "Cc"])
         self.assertEqual(fac("sort=advisees&dir=desc"), ["Bb", "Cc", "Aa"])           # tie keeps name order
-        rep = lambda qs="": self.names2(c.get("/reports?kind=gde_classical_mechanics&years=0&" + qs).get_data(as_text=True))
+        rep = lambda qs="": self.names2(c.get("/reports?kind=pre_oral&years=0&" + qs).get_data(as_text=True))
         self.assertEqual(rep(), ["Stu_1", "Stu_2", "Stu_3"])                           # default: oldest matriculation first
         self.assertEqual(rep("sort=matriculation&dir=desc"), ["Stu_3", "Stu_2", "Stu_1"])
         self.assertEqual(rep("sort=name&dir=desc"), ["Stu_3", "Stu_2", "Stu_1"])

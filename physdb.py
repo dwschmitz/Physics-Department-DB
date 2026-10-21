@@ -17,9 +17,15 @@ SCHEMA = Path(__file__).with_name("schema.sql")
 CITIZENSHIP = ["citizen", "permanent_resident", "international"]
 # Milestone types offered for new entries, in menu order. The retired two are no longer offered, but entries that
 # already use them are kept (and still shown, with their old names) rather than deleted or silently relabeled.
-MILESTONE_KINDS = ["gde_classical_mechanics", "gde_quantum_mechanics", "gde_electrodynamics",
-                   "gde_statistical_mechanics", "candidacy", "ms_degree", "committee_formed", "pre_oral", "thesis_defense", "other"]
-RETIRED_MILESTONE_KINDS = ["qualifying_exam", "thesis_proposal"]
+MILESTONE_KINDS = ["candidacy", "ms_degree", "committee_formed", "pre_oral", "thesis_defense", "other"]
+RETIRED_MILESTONE_KINDS = ["qualifying_exam", "thesis_proposal", "gde_classical_mechanics", "gde_quantum_mechanics",
+                           "gde_electrodynamics", "gde_statistical_mechanics"]
+# The six courses a student needs credit for before candidacy (passed, or tested out of with a GDE):
+# (code stored in the database, short name, full name), in display order.
+CORE_COURSES = [("cm", "CM", "Classical Mechanics"), ("qm1", "QM-1", "Quantum Mechanics I"),
+                ("qm2", "QM-2", "Quantum Mechanics II"), ("em1", "EM-1", "Electrodynamics I"),
+                ("em2", "EM-2", "Electrodynamics II"), ("sm", "SM", "Statistical Mechanics")]
+COURSE_CODES = [c for c, _, _ in CORE_COURSES]
 SEASONS = ["Autumn", "Winter", "Spring", "Summer"]
 # SQL expression giving chronological position of a season within its calendar year.
 SEASON_RANK_SQL = ("CASE term_season WHEN 'Winter' THEN 1 WHEN 'Spring' THEN 2 "
@@ -544,6 +550,29 @@ def set_status(conn, student, status, year=None, term=None):
     conn.commit()
 
 
+def course_credits(conn, student_id):
+    """The set of core-course codes this student has credit for."""
+    return {r[0] for r in conn.execute("SELECT course FROM course_credits WHERE student_id = ?", (student_id,))}
+
+
+def set_course_credits(conn, student, codes):
+    """Replace a student's core-course credits with exactly `codes` (all or nothing)."""
+    s = _find(conn, "students", student) if not isinstance(student, int) else {"id": student}
+    codes = set(codes)
+    unknown = codes - set(COURSE_CODES)
+    if unknown:
+        raise ValueError(f"unknown course(s): {', '.join(sorted(unknown))}; choose from {', '.join(COURSE_CODES)}")
+    conn.execute("DELETE FROM course_credits WHERE student_id = ?", (s["id"],))
+    conn.executemany("INSERT INTO course_credits (student_id, course) VALUES (?, ?)",
+                     [(s["id"], c) for c in COURSE_CODES if c in codes])
+    conn.commit()
+
+
+def courses_label(codes):
+    """e.g. 'CM, QM-1, SM' for a set of course codes, in the standard order."""
+    return ", ".join(short for code, short, _ in CORE_COURSES if code in codes)
+
+
 def faculty_role_clause(role, faculty_id=None):
     """SQL condition (on a students row aliased `s`) for a current advising relationship.
 
@@ -726,8 +755,12 @@ def milestone_snapshot(conn):
     done = {}
     for m in conn.execute("SELECT student_id, kind FROM milestones WHERE outcome IN ('passed', 'conditional')"):
         done.setdefault(m["student_id"], set()).add(m["kind"])
+    credits = {}
+    for m in conn.execute("SELECT student_id, course FROM course_credits"):
+        credits.setdefault(m["student_id"], set()).add(m["course"])
     for r in rows:
         r["done"] = done.get(r["id"], set())
+        r["courses"] = credits.get(r["id"], set())
     return rows
 
 
@@ -806,6 +839,11 @@ def build_parser():
     a = sub.add_parser("add-fsr", help="add a financial services rep")
     a.add_argument("first_name"); a.add_argument("last_name"); a.add_argument("email"); a.add_argument("--cnet")
 
+    a = sub.add_parser("course-credit", help="record (or with --remove, clear) credit for core courses")
+    a.add_argument("student")
+    a.add_argument("courses", nargs="+", choices=COURSE_CODES, help="core course codes: " + ", ".join(COURSE_CODES))
+    a.add_argument("--remove", action="store_true")
+
     a = sub.add_parser("assign-advisor")
     a.add_argument("student"); a.add_argument("faculty")
     a.add_argument("--role", default="advisor",
@@ -861,6 +899,11 @@ def main(argv=None):
                                                args.email, args.research_area, args.cnet))
         elif c == "add-fsr":
             print("Added FSR", add_fsr(conn, args.first_name, args.last_name, args.email, args.cnet))
+        elif c == "course-credit":
+            s = _find(conn, "students", args.student)
+            have = course_credits(conn, s["id"])
+            set_course_credits(conn, s["id"], have - set(args.courses) if args.remove else have | set(args.courses))
+            print("Core courses with credit:", courses_label(course_credits(conn, s["id"])) or "none")
         elif c == "assign-advisor":
             assign_advisor(conn, args.student, args.faculty, args.role, args.start_date)
         elif c == "add-milestone":
