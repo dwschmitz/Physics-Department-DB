@@ -10,7 +10,6 @@
   {% if next_url %}<a class="btn secondary small" href="{{ next_url }}" title="{{ next_label }}">Next &rsaquo;</a>{% else %}<span class="btn secondary small disabled">Next &rsaquo;</span>{% endif %}
   {% if advisees %}<span class="muted">total ${{ '{:,.0f}'.format(total) }}</span>{% endif %}
 </div>
-<style>main{max-width:96rem}table.nowrap td,table.nowrap th{white-space:nowrap}</style>
 <table class="nowrap"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir) }}{{ sort_th("Graduated", "graduated", sort, sdir) }}{{ sort_th("Research area", "research_area", sort, sdir) }}{{ sort_th("Funding, " ~ season ~ " " ~ year, "funding", sort, sdir, "Sorts by the total for the term") }}</tr>
 {% for s in advisees %}
 <tr><td style="white-space:nowrap">{% if staff_view %}<a href="{{ url_for('student', sid=s.id) }}">{{ s.last_name }}, {{ s.first_name }}</a>{% else %}{{ s.last_name }}, {{ s.first_name }}{% endif %}</td>

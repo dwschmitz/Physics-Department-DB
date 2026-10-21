@@ -1,5 +1,4 @@
-{% extends "base.html" %}{% block body %}
-<style>main{max-width:96rem}table.q td,table.q th{white-space:nowrap}table.q td.reason{white-space:normal}form.reject{display:inline-flex;gap:.3rem;align-items:center}form.reject input{width:14rem}</style>
+{% extends "base.html" %}{% block mainclass %}wide-page{% endblock %}{% block body %}
 <h1>{{ 'Approvals' if can_approve else 'Forms' }}</h1>
 <p class="muted">Candidacy forms are filled in automatically when a student has credit for all six core courses. An approver (or the
   chair) approves each one, then the chair signs it on the Signatures page, which records the Candidacy milestone.</p>

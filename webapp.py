@@ -45,6 +45,16 @@ FSR_ENDPOINTS = {"fsr_home", "account", "logout", "login", "static", "home"}
 LIMITED_ENDPOINTS = {"faculty": FACULTY_ENDPOINTS, "fsr": FSR_ENDPOINTS}   # login role -> the only pages it may open
 HOME_ENDPOINT = {"faculty": "faculty_home", "fsr": "fsr_home"}              # where each limited role lands
 MIN_PASSWORD = 10
+# Sign-in throttling: this many failed attempts within the window blocks further attempts (even with the right password)
+# until the oldest of them is a window old. The address limit is higher, since people behind one proxy share an address.
+LOGIN_WINDOW = 15 * 60
+LOGIN_MAX_PER_USERNAME = 5
+LOGIN_MAX_PER_ADDRESS = 30
+# What a browser may load. Pages carry no inline scripts or styles (they live in static/), so none are allowed; only
+# style="..." attributes are. Applied to web pages (not PDFs or images).
+CONTENT_SECURITY_POLICY = ("default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "
+                           "img-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+TRUE_WORDS = ("1", "true", "yes", "on")
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
 MILESTONE_KINDS = physdb.MILESTONE_KINDS
 OUTCOMES = ["pending", "passed", "conditional", "failed"]
@@ -264,9 +274,17 @@ def sort_rows(rows, keys, sort, sdir, default, tiebreak=None):
 def create_app(db_path=None):
     app = Flask(__name__)
     app.config["DB_PATH"] = db_path or physdb.DB_PATH
+    # Served over HTTPS (PHYSDB_HTTPS=1, or PHYSDB_BASE_URL starting https://): sign-in cookies are marked Secure so a
+    # browser never sends them over plain HTTP, and browsers are told to insist on HTTPS (HSTS).
+    https_mode = os.environ.get("PHYSDB_HTTPS", "").strip().lower() in TRUE_WORDS or \
+        os.environ.get("PHYSDB_BASE_URL", "").strip().lower().startswith("https://")
     app.config.update(MAX_CONTENT_LENGTH=importer.MAX_BYTES + 64 * 1024,      # the biggest upload: a student spreadsheet
-                      SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                      SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=https_mode,
                       PERMANENT_SESSION_LIFETIME=datetime.timedelta(hours=8))
+    proxies = os.environ.get("PHYSDB_TRUST_PROXY", "").strip()
+    if proxies.isdigit() and int(proxies) > 0:      # behind this many reverse proxies: believe their client address / scheme
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=int(proxies), x_proto=int(proxies), x_host=int(proxies))
     app.config["SECRET_KEY"] = os.environ.get("PHYSDB_SECRET") or _persistent_secret()
     app.jinja_env.filters["label"] = label
     app.jinja_env.filters["term"] = physdb.term_label
@@ -313,6 +331,22 @@ def create_app(db_path=None):
         if g.user["must_change"] and request.endpoint not in ("account", "logout"):
             return redirect(url_for("account"))
 
+    @app.after_request
+    def security_headers(resp):
+        h = resp.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("X-Frame-Options", "DENY")                          # the page may not be shown inside another site's frame
+        h.setdefault("Referrer-Policy", "same-origin")
+        h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+        h.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        if resp.mimetype == "text/html":
+            h.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        if request.endpoint != "static":
+            h.setdefault("Cache-Control", "no-store")                     # signed-in pages are never kept in a browser cache
+        if https_mode:
+            h.setdefault("Strict-Transport-Security", "max-age=31536000")
+        return resp
+
     @app.context_processor
     def sort_helpers():
         def sort_url(key, cur_sort, cur_dir, prefix=""):
@@ -341,14 +375,35 @@ def create_app(db_path=None):
                     approvals_waiting=_waiting("pending_approval", APPROVAL_ROLES),
                     signatures_waiting=_waiting("pending_chair", ("chair",)))
 
+    def login_wait(username, address):
+        """Seconds until this username / address may try to sign in again (0 if it may now)."""
+        now = time.time()
+        d = db()
+        d.execute("DELETE FROM login_failures WHERE at < ?", (now - 24 * 3600,))
+        waits = [0]
+        for column, value, limit in (("username", username, LOGIN_MAX_PER_USERNAME), ("ip", address, LOGIN_MAX_PER_ADDRESS)):
+            times = [r[0] for r in d.execute(f"SELECT at FROM login_failures WHERE {column} = ? AND at > ? "
+                                             "ORDER BY at DESC LIMIT ?", (value, now - LOGIN_WINDOW, limit))]
+            if len(times) >= limit:
+                waits.append(times[limit - 1] + LOGIN_WINDOW - now)
+        d.commit()
+        return max(waits)
+
     @app.route("/login", methods=["GET", "POST"])
     def login():
         if request.method == "POST":
-            row = db().execute("SELECT * FROM users WHERE username = ?",
-                               (request.form.get("username", "").strip(),)).fetchone()
+            typed = request.form.get("username", "").strip()
+            key, address = typed.lower()[:80], request.remote_addr or "unknown"
+            wait = login_wait(key, address)
+            if wait > 0:                                    # too many recent failures: don't even look at the password
+                minutes = max(1, -(-int(wait) // 60))
+                flash(f"Too many failed sign-in attempts. Please wait {minutes} minute{'s' if minutes != 1 else ''} and try again.", "error")
+                return render_template("login.html"), 429
+            row = db().execute("SELECT * FROM users WHERE username = ?", (typed,)).fetchone()
             ok = check_password_hash(row["password_hash"] if row else _DUMMY_HASH,
                                      request.form.get("password", ""))
             if row and ok:
+                db().execute("DELETE FROM login_failures WHERE username = ?", (key,)); db().commit()
                 session.clear()
                 session.permanent = True
                 session["user_id"] = row["id"]
@@ -358,6 +413,8 @@ def create_app(db_path=None):
                 if row["role"] in HOME_ENDPOINT and not (target or "").startswith(url_for(HOME_ENDPOINT[row["role"]])):
                     target = None                                   # limited logins only ever land on their own page
                 return redirect(target or home_url_for(row["role"]))
+            db().execute("INSERT INTO login_failures (at, username, ip) VALUES (?, ?, ?)", (time.time(), key, address))
+            db().commit()
             flash("Incorrect username or password.", "error")
         return render_template("login.html")
 

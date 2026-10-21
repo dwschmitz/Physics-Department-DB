@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% block body %}
+{% extends "base.html" %}{% block mainclass %}wide-page{% endblock %}{% block body %}
 <h1>My students</h1>
 <p class="muted">{{ fsr.first_name }} {{ fsr.last_name }}{% if fsr.cnet %} ({{ fsr.cnet }}){% endif %}
   &middot; faculty: {% for f in faculty %}{{ f.last_name }}{{ ', ' if not loop.last }}{% else %}none yet{% endfor %}</p>

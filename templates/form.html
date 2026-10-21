@@ -32,17 +32,4 @@
   {% endfor %}
   <button class="btn">Save</button> <a class="btn secondary" href="{{ back }}">Cancel</a>
 </form>
-<script>
-/* Fields marked data-show-when="field=value" only appear while that field has that value, or, for a checkbox,
-   while it is ticked (without scripting they are always shown), e.g. the graduation term once Status is Graduated. */
-(function () {
-  var boxes = document.querySelectorAll('[data-show-when]');
-  Array.prototype.forEach.call(boxes, function (box) {
-    var rule = box.getAttribute('data-show-when').split('='), src = document.getElementById(rule[0]);
-    if (!src) return;
-    var update = function () { box.hidden = src.type === 'checkbox' ? !src.checked : src.value !== rule[1]; };
-    src.addEventListener('change', update);
-    update();
-  });
-})();
-</script>{% endblock %}
+{% endblock %}

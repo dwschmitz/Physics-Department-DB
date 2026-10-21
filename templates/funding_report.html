@@ -1,10 +1,5 @@
-{% extends "base.html" %}{% from "_macros.html" import sort_th, post_button with context %}{% block body %}
+{% extends "base.html" %}{% from "_macros.html" import sort_th, post_button with context %}{% block mainclass %}wide-page{% endblock %}{% block body %}
 {# this report is wide, so give the page more room and let Notes take it #}
-<style>main{max-width:96rem}.notes{min-width:4.5rem;width:34%;overflow-wrap:anywhere}.source{min-width:20ch}
-.wide th,.wide td{padding:.4rem .3rem}
-.wide td.actions{white-space:nowrap;width:1%}.wide td.actions>*{display:inline-block;margin:0 .15rem 0 0;vertical-align:middle}
-.wide td.actions .small{padding:.12rem .35rem;font-size:.78rem;white-space:nowrap}
-.wide td.actions .small.plus{padding:.12rem .5rem;font-size:1rem;font-weight:700;line-height:1.17rem}</style>
 {% set tab = 'funding' %}{% include "_report_tabs.html" %}
 <h1>Funding for {{ season }} {{ year }}</h1>
 <form class="filters" method="get">
@@ -55,27 +50,5 @@
 {% else %}<tr><td colspan="9" class="muted">There are no active students.</td></tr>{% endfor %}</table>
 {% if can_edit %}
 <dialog id="copy-dialog" aria-label="Copy funding from another term"></dialog>
-<script>
-(function () {
-  var dlg = document.getElementById('copy-dialog');
-  if (!dlg || !dlg.showModal) return;       // very old browsers: the Copy links still work as plain pages
-  function load(url) {
-    return fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'fragment=1', {credentials: 'same-origin'})
-      .then(function (r) { if (!r.ok) { throw new Error(r.status); } return r.text(); })
-      .then(function (html) { dlg.innerHTML = html; });
-  }
-  document.addEventListener('click', function (e) {
-    var open = e.target.closest('a[data-copy]');
-    if (open) {
-      e.preventDefault();
-      load(open.href).then(function () { dlg.showModal(); }, function () { window.location = open.href; });
-      return;
-    }
-    var step = e.target.closest('#copy-dialog a[data-step]');
-    if (step) { e.preventDefault(); load(step.href).catch(function () { window.location = step.href; }); return; }
-    if (e.target.closest('#copy-dialog [data-close]')) { e.preventDefault(); dlg.close(); }
-  });
-})();
-</script>
 {% endif %}
 {% endblock %}

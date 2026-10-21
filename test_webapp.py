@@ -435,8 +435,10 @@ class WebTests(unittest.TestCase):
     def test_funding_report_source_column_is_wide_enough(self):
         c = self.client("ed"); t = self.token(c); self.add_student(c)
         html = c.get("/reports/funding").get_data(as_text=True)
-        self.assertIn(".source{min-width:20ch}", html)                       # room for ~20 characters
-        self.assertIn(".wide td.actions{white-space:nowrap", html)           # Edit / Clear / Copy / + never wrap
+        css = self.app.test_client().get("/static/style.css").get_data(as_text=True)
+        self.assertIn(".source{min-width:20ch}", css)                         # room for ~20 characters
+        self.assertIn('class="source"', html)
+        self.assertIn(".wide td.actions{white-space:nowrap", css)             # Edit / Clear / Copy / + never wrap
         self.assertRegex(html, r'<th class="source"[^>]*>\s*<a [^>]*>Source')   # header and cells share the class
         c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn",
                source="Department of Energy", csrf_token=t))
@@ -517,16 +519,16 @@ class WebTests(unittest.TestCase):
 
     @staticmethod
     def confirm_prompts(html):
-        """Every confirm() message a browser would actually run, decoded from the page's onsubmit attributes."""
-        import json
+        """Every confirmation message a browser would ask, read from the pages' data-confirm attributes (the small
+        script in static/app.js shows them). There must be no inline onsubmit handlers left."""
         from html.parser import HTMLParser
         found = []
         class P(HTMLParser):
             def handle_starttag(self, tag, attrs):
-                js = dict(attrs).get("onsubmit")
-                if tag == "form" and js is not None:
-                    assert js.startswith("return confirm(") and js.endswith(")"), f"broken onsubmit: {js!r}"
-                    found.append(json.loads(js[len("return confirm("):-1]))      # must be one complete JSON string
+                attrs = dict(attrs)
+                assert "onsubmit" not in attrs, "inline handlers are blocked by the Content-Security-Policy"
+                if tag == "form" and attrs.get("data-confirm") is not None:
+                    found.append(attrs["data-confirm"])
         P().feed(html)
         return found
 
@@ -1674,7 +1676,8 @@ class WebTests(unittest.TestCase):
         self.assertIn('href="/fsr?sort=funding&amp;dir=asc"', stepped)                           # clicking the active heading reverses
         self.assertIn('href="/fsr?year=2026&amp;season=Winter&amp;sort=advisor&amp;dir=asc"', page("?year=2026&season=Winter"))   # sorting keeps the term
         # one funding entry per line, none wrapping
-        self.assertIn("table.nowrap td", stepped)
+        self.assertIn('<table class="nowrap">', stepped)
+        self.assertIn("table.nowrap td", self.app.test_client().get("/static/style.css").get_data(as_text=True))
         # nothing else is reachable, and nothing can be changed
         for path in ("/students", "/students/1", "/faculty", "/faculty/1", "/fsrs", "/fsrs/1", "/users", "/reports", "/my",
                      "/my/students/1", "/students/1/funding/new", "/students/1/funding/copy", "/reports/funding", "/fsrs/new"):
@@ -1949,6 +1952,157 @@ class WebTests(unittest.TestCase):
         for k in (self.client("ed"), appr):
             self.assertEqual(k.post("/users/test-email", data=dict(to="me@u.edu", csrf_token=self.token(k, "/account"))).status_code, 403)
 
+    # ---- sign-in limits and browser protections -------------------------------------------------------------
+    def _try_login(self, client, user, password, **environ):
+        return client.post("/login", data={"username": user, "password": password}, environ_base=environ)
+
+    def test_repeated_wrong_passwords_lock_the_username_for_a_while(self):
+        from unittest import mock
+        c = self.app.test_client()
+        clock = [10_000.0]
+        with mock.patch.object(webapp.time, "time", lambda: clock[0]):
+            for n in range(webapp.LOGIN_MAX_PER_USERNAME):
+                r = self._try_login(c, "ed", "wrong-%d" % n)
+                self.assertEqual(r.status_code, 200); self.assertIn("Incorrect username or password", r.get_data(as_text=True))
+                clock[0] += 10
+            # now blocked, even with the right password, and told how long
+            r = self._try_login(c, "ed", "pw-ed")
+            self.assertEqual(r.status_code, 429); html = r.get_data(as_text=True)
+            self.assertIn("Too many failed sign-in attempts. Please wait 15 minutes", html)
+            self.assertEqual(c.get("/students").status_code, 302)                                  # not signed in
+            clock[0] += 14 * 60                                                                    # still inside the window
+            self.assertEqual(self._try_login(c, "ed", "pw-ed").status_code, 429)
+            clock[0] += 2 * 60                                                                     # the first failure is now 15+ minutes old
+            self.assertEqual(self._try_login(c, "ed", "pw-ed").status_code, 302)                   # allowed again
+            self.assertEqual(c.get("/students").status_code, 200)
+            # a good sign-in wipes the count: five more failures are needed to lock it again
+            c2 = self.app.test_client()
+            for n in range(webapp.LOGIN_MAX_PER_USERNAME - 1):
+                self._try_login(c2, "ed", "nope")
+            self.assertEqual(self._try_login(c2, "ed", "pw-ed").status_code, 302)
+            self.assertEqual(self._count("SELECT count(*) FROM login_failures WHERE username = 'ed'"), 0)
+
+    def test_the_lockout_is_per_username_case_insensitive_and_does_not_reveal_which_accounts_exist(self):
+        from unittest import mock
+        c = self.app.test_client()
+        with mock.patch.object(webapp.time, "time", lambda: 50_000.0):
+            for n in range(webapp.LOGIN_MAX_PER_USERNAME):
+                self._try_login(c, "ED" if n % 2 else "Ed", "bad")                                  # any capitalisation counts as the same name
+            self.assertEqual(self._try_login(c, "ed", "pw-ed").status_code, 429)
+            self.assertEqual(self._try_login(c, "vw", "pw-vw").status_code, 302)                     # other people are not affected
+            for n in range(webapp.LOGIN_MAX_PER_USERNAME):                                           # a name that does not exist locks the same way
+                r = self._try_login(c, "nobody", "bad")
+                self.assertIn("Incorrect username or password", r.get_data(as_text=True))
+            r = self._try_login(c, "nobody", "bad")
+            real = self._try_login(c, "ed", "pw-ed")
+            self.assertEqual((r.status_code, real.status_code), (429, 429))
+            self.assertEqual(re.sub(r"\s+", " ", re.findall(r'<div class="flash error">(.*?)</div>', r.get_data(as_text=True), re.S)[0]),
+                             re.sub(r"\s+", " ", re.findall(r'<div class="flash error">(.*?)</div>', real.get_data(as_text=True), re.S)[0]))
+            long_name = "x" * 5000
+            self.assertEqual(self._try_login(c, long_name, "bad").status_code, 200)                  # absurd input is handled
+            self.assertEqual(self._count("SELECT max(length(username)) FROM login_failures"), 80)
+
+    def test_one_address_trying_many_usernames_is_slowed_down_too(self):
+        from unittest import mock
+        c = self.app.test_client()
+        with mock.patch.object(webapp.time, "time", lambda: 70_000.0):
+            for n in range(webapp.LOGIN_MAX_PER_ADDRESS):
+                self._try_login(c, "guess%d" % n, "bad", REMOTE_ADDR="203.0.113.9")
+            r = self._try_login(c, "ed", "pw-ed", REMOTE_ADDR="203.0.113.9")
+            self.assertEqual(r.status_code, 429)                                                      # even for a different, real username
+            self.assertEqual(self._try_login(c, "ed", "pw-ed", REMOTE_ADDR="203.0.113.10").status_code, 302)   # another address is fine
+        self.assertEqual(self._count("SELECT count(*) FROM login_failures WHERE ip = '203.0.113.9'"), webapp.LOGIN_MAX_PER_ADDRESS)
+
+    def test_old_failures_are_cleaned_up_and_proxy_addresses_are_used_when_trusted(self):
+        import os
+        from unittest import mock
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        conn.execute("INSERT INTO login_failures VALUES (1.0, 'old', '1.2.3.4')"); conn.commit(); conn.close()
+        self.app.test_client().post("/login", data={"username": "x", "password": "y"})
+        self.assertEqual(self._count("SELECT count(*) FROM login_failures WHERE username = 'old'"), 0)
+        with mock.patch.dict(os.environ, {"PHYSDB_TRUST_PROXY": "1"}):
+            app = webapp.create_app(self.app.config["DB_PATH"])
+        app.test_client().post("/login", data={"username": "viaproxy", "password": "y"}, headers={"X-Forwarded-For": "198.51.100.7"})
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT ip FROM login_failures WHERE username = 'viaproxy'").fetchone()[0], "198.51.100.7"); conn.close()
+        self.app.test_client().post("/login", data={"username": "direct", "password": "y"}, headers={"X-Forwarded-For": "198.51.100.8"})
+        conn = physdb.connect(self.app.config["DB_PATH"])                                           # not trusted by default: the header is ignored
+        self.assertEqual(conn.execute("SELECT ip FROM login_failures WHERE username = 'direct'").fetchone()[0], "127.0.0.1"); conn.close()
+
+    def test_browser_protection_headers(self):
+        c = self.client("ad"); t = self.token(c)
+        self.add_student(c)
+        for path in ("/login", "/students", "/students/1", "/reports/milestones", "/users", "/nonexistent"):
+            r = (self.app.test_client() if path == "/login" else c).get(path)
+            h = r.headers
+            self.assertEqual(h["X-Content-Type-Options"], "nosniff", path)
+            self.assertEqual(h["X-Frame-Options"], "DENY", path)
+            self.assertEqual(h["Referrer-Policy"], "same-origin", path)
+            self.assertIn("camera=()", h["Permissions-Policy"]); self.assertEqual(h["Cross-Origin-Opener-Policy"], "same-origin")
+            self.assertEqual(h["Cache-Control"], "no-store", path)
+            csp = h["Content-Security-Policy"]
+            for part in ("default-src 'self'", "script-src 'self'", "style-src 'self'", "object-src 'none'", "frame-ancestors 'none'", "form-action 'self'", "base-uri 'self'"):
+                self.assertIn(part, csp, path)
+            self.assertNotRegex(csp, r"(script-src|style-src) [^;]*unsafe")                                      # no inline scripts or style blocks, ever
+            self.assertIn("style-src-attr 'unsafe-inline'", csp)                                                # (only style="..." attributes)
+            self.assertNotIn("Strict-Transport-Security", h)                                                    # only when served over HTTPS
+        css = c.get("/static/style.css")                                                             # static files: cacheable, but still nosniff
+        self.assertEqual(css.headers["X-Content-Type-Options"], "nosniff"); self.assertNotIn("no-store", css.headers.get("Cache-Control", ""))
+        self.assertNotIn("Content-Security-Policy", css.headers)
+        c.post("/students/1/courses", data={"course": self.ALL6, "csrf_token": t})
+        pdf = c.get("/forms/1.pdf")                                                                  # no page policy on PDFs (it can upset PDF viewers)
+        self.assertEqual(pdf.mimetype, "application/pdf"); self.assertNotIn("Content-Security-Policy", pdf.headers)
+        self.assertEqual(pdf.headers["X-Content-Type-Options"], "nosniff"); self.assertIn("no-store", pdf.headers["Cache-Control"])
+
+    def test_https_mode_marks_cookies_secure_and_sends_hsts(self):
+        import os
+        from unittest import mock
+        def sign_in(env):
+            with mock.patch.dict(os.environ, env):
+                app = webapp.create_app(self.app.config["DB_PATH"])
+            c = app.test_client()
+            r = c.post("/login", data={"username": "ed", "password": "pw-ed"})
+            return r, c.get("/students")
+        r, page = sign_in({"PHYSDB_HTTPS": "1"})
+        cookie = r.headers["Set-Cookie"]
+        self.assertIn("Secure", cookie); self.assertIn("HttpOnly", cookie); self.assertIn("SameSite=Lax", cookie)
+        self.assertIn("max-age=31536000", r.headers["Strict-Transport-Security"]); self.assertIn("Strict-Transport-Security", page.headers)
+        r, _ = sign_in({"PHYSDB_BASE_URL": "https://physgrads.example.edu"})                          # the public address implies HTTPS
+        self.assertIn("Secure", r.headers["Set-Cookie"])
+        r, _ = sign_in({"PHYSDB_HTTPS": "", "PHYSDB_BASE_URL": "http://localhost:8123"})
+        self.assertNotIn("Secure", r.headers["Set-Cookie"]); self.assertNotIn("Strict-Transport-Security", r.headers)   # plain local use still works
+
+    def test_pages_have_no_inline_scripts_styles_or_event_handlers(self):
+        """The Content-Security-Policy forbids them, so any that crept back in would silently stop working."""
+        c, t, appr, chair = self._approval_world()
+        c.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", cnet="nbohr", csrf_token=t))
+        c.post("/fsrs/new", data=dict(first_name="X", last_name="Xx", email="x@u.edu", cnet="fsrx", csrf_token=t))
+        c.post("/faculty/1/edit", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", cnet="nbohr", fsr_id="1", csrf_token=t))
+        c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
+        c.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", amount="5", csrf_token=t))
+        c.post("/students/1/courses", data={"course": self.ALL6, "csrf_token": t})
+        self._make_faculty_login(c, t, fid=1); fac = self._faculty_client()
+        pages = {c: ["/students", "/students/1", "/students/new", "/students/1/edit", "/students/1/milestones/new", "/students/1/funding/new",
+                     "/students/1/funding/copy?year=2026&season=Autumn", "/students/import", "/faculty", "/faculty/1", "/faculty/1/edit", "/fsrs",
+                     "/fsrs/1", "/reports", "/reports/milestones", "/reports/funding", "/approvals", "/users", "/users/new", "/users/1/edit", "/account"],
+                 chair: ["/signatures", "/approvals"], fac: ["/my", "/my/students/1"]}
+        checked = 0
+        for client, paths in pages.items():
+            for path in paths:
+                r = client.get(path)
+                self.assertEqual(r.status_code, 200, path)
+                html = r.get_data(as_text=True)
+                self.assertNotRegex(html, r"<script(?![^>]*\bsrc=)", path)                           # only <script src="..."> is allowed
+                self.assertNotIn("<style", html, path)
+                self.assertNotRegex(html, r"<[^>]+\son[a-z]+\s*=", path)                             # no onclick= / onsubmit= ...
+                self.assertNotRegex(html, r"""(?:href|src|action)\s*=\s*["']\s*javascript:""", path)
+                checked += 1
+        self.assertGreater(checked, 20)
+        js = c.get("/static/app.js")
+        self.assertEqual(js.status_code, 200); self.assertIn("data-confirm", js.get_data(as_text=True))
+        self.assertIn('<script src="/static/app.js" defer></script>', c.get("/students").get_data(as_text=True))
+        self.assertIn('class="wide-page"', c.get("/reports/milestones").get_data(as_text=True))
+
     def test_signature_upload_rules(self):
         import io
         c, t, appr, chair = self._approval_world()
@@ -2048,7 +2202,7 @@ class WebTests(unittest.TestCase):
         _, html = who("/faculty/1?sort=funding&dir=desc")
         head = html.split('<table class="nowrap">')[1].split("</tr>")[0]
         self.assertEqual(head.count('class="sortlink'), 6)                                    # every heading sorts
-        self.assertIn("table.nowrap td", html)
+        self.assertIn("table.nowrap td", self.app.test_client().get("/static/style.css").get_data(as_text=True))      # the rule is in the stylesheet
         self.assertIn("sort=funding&amp;dir=desc", html.split("Prev")[0].rsplit("<a ", 1)[1])      # Prev / Next keep the sort
         self.assertIn("sort=funding&amp;dir=desc", html.split("Next")[0].rsplit("<a ", 1)[1])
         # the faculty member's own page sorts the same way

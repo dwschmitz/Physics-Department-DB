@@ -1,5 +1,4 @@
-{% extends "base.html" %}{% block body %}
-<style>main{max-width:96rem}table.q td,table.q th{white-space:nowrap}form.reject{display:inline-flex;gap:.3rem;align-items:center}form.reject input{width:14rem}</style>
+{% extends "base.html" %}{% block mainclass %}wide-page{% endblock %}{% block body %}
 <h1>Signatures</h1>
 <h2>Forms waiting for your signature <span class="muted">({{ mine|length }})</span></h2>
 {% if not has_signature %}
@@ -10,7 +9,7 @@
 <td>{{ f.approved_by }} <span class="muted">{{ f.approved_at[:10] }}</span></td>
 <td><a class="btn secondary small" href="{{ url_for('form_pdf', fid=f.id) }}" target="_blank">View PDF</a>
   <form class="inline" method="post" action="{{ url_for('form_sign', fid=f.id) }}"
-        onsubmit='return confirm({{ ("Sign the candidacy form for " ~ f.first_name ~ " " ~ f.last_name ~ "? Your signature and today's date will be added, and the Candidacy milestone will be recorded.")|tojson }})'>
+        data-confirm="{{ ("Sign the candidacy form for " ~ f.first_name ~ " " ~ f.last_name ~ "? Your signature and today's date will be added, and the Candidacy milestone will be recorded.") }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button class="btn small" {{ 'disabled' if not has_signature }}>Approve and sign</button></form>
   <form class="reject" method="post" action="{{ url_for('form_reject', fid=f.id) }}">
@@ -34,7 +33,7 @@
   <button class="btn">Save signature</button>
 </form>
 {% if has_signature %}
-<form method="post" style="margin-top:1rem" onsubmit='return confirm("Remove your stored signature image? You will not be able to sign forms until you upload another.")'>
+<form method="post" style="margin-top:1rem" data-confirm="Remove your stored signature image? You will not be able to sign forms until you upload another.">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="remove" value="1">
   <button class="btn danger small">Remove my signature</button></form>
 {% endif %}

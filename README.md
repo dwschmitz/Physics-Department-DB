@@ -94,6 +94,14 @@ person's password and role (for example, to regain admin access if no admin can 
   Restart the app, then on the **Accounts** page use **Send test email**; the same page lists the most recent emails
   and any errors. A mail problem never stops a form from moving along. For reminders while forms sit in a queue, run
   `python3 physdb.py send-reminders` from a daily scheduled job (cron on Mac/Linux, Task Scheduler on Windows).
+- **Sign-in protection and HTTPS:** five wrong passwords for the same username within 15 minutes block further
+  attempts for that username (even with the right password) until the oldest failure is 15 minutes old; the message
+  doesn't reveal whether the account exists, and one network address that fails 30 times is slowed down too. When the
+  site is served over HTTPS set `PHYSDB_HTTPS=1` (or `PHYSDB_BASE_URL=https://...`, which also implies it) so the
+  sign-in cookie is marked **Secure** and browsers are told to insist on HTTPS. If it runs behind a reverse proxy set
+  `PHYSDB_TRUST_PROXY=1` (the number of proxies) so the real visitor address is used for the limit. Every page is sent
+  with a strict Content-Security-Policy, anti-framing, no-sniffing and no-caching headers; for that reason pages contain
+  no inline scripts or styles (they live in `static/app.js` and `static/style.css`), so new page features must follow suit.
 - **Importing students from a file:** on the Students tab, **Import from file** (editors and admins) takes an Excel
   (.xlsx, first sheet) or CSV file with one student per row; `examples/Incoming_Student_Data_Test.xlsx` is a sample
   and the page links a blank CSV template. Required columns: First Name, Last Name, UCID (exactly 8 digits), Email,

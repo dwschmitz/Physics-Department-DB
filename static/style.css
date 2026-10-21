@@ -53,3 +53,21 @@ table.mini{font-size:.9rem}table.mini th,table.mini td{padding:.3rem .5rem}
 .courses form{display:contents}.courses label.course,.courses .course{display:inline-flex;align-items:center;gap:.3rem;margin:0;font-weight:600;white-space:nowrap}
 .courses .course.done{color:#1b6e3a}.courses input[type=checkbox]{width:auto}
 .count{background:#fff;color:#800000;border-radius:10px;padding:0 .45rem;font-size:.8rem;font-weight:700;margin-left:.2rem}
+
+/* page widths (a child template picks one with the mainclass block) and the table tweaks that used to be inline <style> blocks */
+main.wide-page{max-width:96rem}main.medium-page{max-width:80rem}
+table.nowrap td,table.nowrap th{white-space:nowrap}
+.fund-line{display:flex;align-items:center;gap:.5rem;flex-wrap:nowrap;white-space:nowrap;margin:.1rem 0}
+.fund-line .small{padding:.12rem .35rem;font-size:.78rem;white-space:nowrap}
+.fund-line .small.plus{padding:.12rem .5rem;font-size:1rem;font-weight:700;line-height:1.17rem}
+.fund-line form,.fund-line a{margin:0}
+table.q td,table.q th{white-space:nowrap}table.q td.reason{white-space:normal}
+form.reject{display:inline-flex;gap:.3rem;align-items:center}form.reject input{width:14rem}
+table.imp td,table.imp th{white-space:nowrap}table.imp td.why{white-space:normal}
+table.snapshot td,table.snapshot th{white-space:nowrap}table.snapshot td.check,table.snapshot th.check{text-align:center}
+table.snapshot td.check{font-weight:700;color:#1b6e3a}
+.notes{min-width:4.5rem;width:34%;overflow-wrap:anywhere}.source{min-width:20ch}
+.wide th,.wide td{padding:.4rem .3rem}
+.wide td.actions{white-space:nowrap;width:1%}.wide td.actions>*{display:inline-block;margin:0 .15rem 0 0;vertical-align:middle}
+.wide td.actions .small{padding:.12rem .35rem;font-size:.78rem;white-space:nowrap}
+.wide td.actions .small.plus{padding:.12rem .5rem;font-size:1rem;font-weight:700;line-height:1.17rem}

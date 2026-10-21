@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% from "_macros.html" import delete_button with context %}{% block body %}
+{% extends "base.html" %}{% from "_macros.html" import delete_button with context %}{% block mainclass %}wide-page{% endblock %}{% block body %}
 <h1>{{ fsr.first_name }} {{ fsr.last_name }} <span class="muted">(FSR)</span></h1>
 <p class="toolbar"><a href="{{ url_for('fsr_list') }}">&larr; All FSRs</a>
 {% if can_edit %} <a class="btn small" href="{{ url_for('fsr_edit', rid=fsr.id) }}">Edit</a>

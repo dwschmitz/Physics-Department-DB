@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% block body %}
+{% extends "base.html" %}{% block mainclass %}wide-page{% endblock %}{% block body %}
 <h1>My students</h1>
 <p class="muted">{{ fac.first_name }} {{ fac.last_name }}{% if fac.cnet %} ({{ fac.cnet }}){% endif %}</p>
 {% set staff_view = False %}{% include "_faculty_overview.html" %}

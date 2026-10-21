@@ -115,6 +115,15 @@ CREATE TABLE IF NOT EXISTS forms (
 );
 CREATE INDEX IF NOT EXISTS idx_forms_student ON forms(student_id);
 
+-- Failed sign-in attempts, so repeated wrong passwords can be slowed down (see webapp LOGIN_* settings).
+CREATE TABLE IF NOT EXISTS login_failures (
+    at        REAL NOT NULL,            -- time.time() of the failed attempt
+    username  TEXT NOT NULL,            -- as typed, lowercased (whether or not such an account exists)
+    ip        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_failures_user ON login_failures(username, at);
+CREATE INDEX IF NOT EXISTS idx_login_failures_ip   ON login_failures(ip, at);
+
 -- A short record of the emails the app tried to send (newest 200 are kept), so a mail problem can be seen and fixed.
 CREATE TABLE IF NOT EXISTS email_log (
     id       INTEGER PRIMARY KEY,

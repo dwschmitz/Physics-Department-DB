@@ -1,30 +1,4 @@
-{# Styles, copy dialog and its script for pages whose funding cells have buttons. Include with `editing` set. #}
-{% if editing %}<style>main{max-width:96rem}.fund-line{display:flex;align-items:center;gap:.5rem;flex-wrap:nowrap;white-space:nowrap;margin:.1rem 0}
-.fund-line .small{padding:.12rem .35rem;font-size:.78rem;white-space:nowrap}
-.fund-line .small.plus{padding:.12rem .5rem;font-size:1rem;font-weight:700;line-height:1.17rem}
-.fund-line form,.fund-line a{margin:0}</style>{% endif %}
+{# The funding copy window, opened by the Copy links (see static/app.js). Include with `editing` set. #}
 {% if editing %}
 <dialog id="copy-dialog" aria-label="Copy funding from another term"></dialog>
-<script>
-(function () {
-  var dlg = document.getElementById('copy-dialog');
-  if (!dlg || !dlg.showModal) return;       // very old browsers: the Copy links still work as plain pages
-  function load(url) {
-    return fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'fragment=1', {credentials: 'same-origin'})
-      .then(function (r) { if (!r.ok) { throw new Error(r.status); } return r.text(); })
-      .then(function (html) { dlg.innerHTML = html; });
-  }
-  document.addEventListener('click', function (e) {
-    var open = e.target.closest('a[data-copy]');
-    if (open) {
-      e.preventDefault();
-      load(open.href).then(function () { dlg.showModal(); }, function () { window.location = open.href; });
-      return;
-    }
-    var step = e.target.closest('#copy-dialog a[data-step]');
-    if (step) { e.preventDefault(); load(step.href).catch(function () { window.location = step.href; }); return; }
-    if (e.target.closest('#copy-dialog [data-close]')) { e.preventDefault(); dlg.close(); }
-  });
-})();
-</script>
 {% endif %}

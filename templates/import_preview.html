@@ -1,5 +1,4 @@
-{% extends "base.html" %}{% block body %}
-<style>main{max-width:80rem}table.imp td,table.imp th{white-space:nowrap}table.imp td.why{white-space:normal}</style>
+{% extends "base.html" %}{% block mainclass %}medium-page{% endblock %}{% block body %}
 <h1>{{ 'Import finished' if done else 'Import preview' }}</h1>
 <p class="muted">File: {{ filename }} &middot; {{ r.total }} row{{ '' if r.total == 1 else 's' }} read</p>
 {% if done %}

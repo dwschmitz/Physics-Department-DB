@@ -1,6 +1,4 @@
-{% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block body %}
-<style>main{max-width:96rem}table.snapshot td,table.snapshot th{white-space:nowrap}table.snapshot td.check,table.snapshot th.check{text-align:center}
-table.snapshot td.check{font-weight:700;color:#1b6e3a}</style>
+{% extends "base.html" %}{% from "_macros.html" import sort_th with context %}{% block mainclass %}wide-page{% endblock %}{% block body %}
 {% set tab = 'milestones' %}{% include "_report_tabs.html" %}
 <h1>Milestones Table</h1>
 <p class="muted">{{ n_active }} active student{{ '' if n_active == 1 else 's' }}{% if n_on_leave %}, {{ n_on_leave }} on leave{% endif %} &middot; a checkmark means the milestone is passed, and the Courses column lists the core courses with credit (a conditional pass counts for milestones).</p>
