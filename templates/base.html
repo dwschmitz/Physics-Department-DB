@@ -11,15 +11,14 @@
   <a href="{{ url_for('faculty_home') }}">My students</a>
   {% elif is_fsr %}
   <a href="{{ url_for('fsr_home') }}">My students</a>
-  {% elif approval_role %}
-  <a href="{{ url_for('approvals') }}">Approvals{% if approvals_waiting %} <span class="count">{{ approvals_waiting }}</span>{% endif %}</a>
-  {% if approval_role == 'chair' %}<a href="{{ url_for('signature') }}">My signature</a>{% endif %}
   {% else %}
   <a href="{{ url_for('students') }}">Students</a>
   <a href="{{ url_for('faculty_list') }}">Faculty</a>
   <a href="{{ url_for('fsr_list') }}">FSRs</a>
   <a href="{{ url_for('milestones_table') }}">Reports</a>
-  <a href="{{ url_for('approvals') }}">Forms</a>
+  {% if approval_role %}<a href="{{ url_for('approvals') }}">Approvals{% if approvals_waiting %} <span class="count">{{ approvals_waiting }}</span>{% endif %}</a>
+  {% else %}<a href="{{ url_for('approvals') }}">Forms</a>{% endif %}
+  {% if approval_role == 'chair' %}<a href="{{ url_for('signatures') }}">Signatures{% if signatures_waiting %} <span class="count">{{ signatures_waiting }}</span>{% endif %}</a>{% endif %}
   {% if is_admin %}<a href="{{ url_for('users') }}">Accounts</a>{% endif %}
   {% endif %}
   <span class="spacer"></span>

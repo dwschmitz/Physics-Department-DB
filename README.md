@@ -62,17 +62,19 @@ person's password and role (for example, to regain admin access if no admin can 
   offered; entries already saved under them are kept and shown as before ("retired").
 - **Candidacy form and approvals:** when the sixth core-course box is ticked, the *Admission to Candidacy* form
   (`forms/Candidacy_Form_2020-2021.pdf`) is filled in for the student (name, University ID, department Physics, the PhD
-  box) and put in a queue. An **Approver** reviews it (**Approve**, or **Reject** with a reason); then it goes to the
-  **Chair**, who presses **Approve and sign**: their stored signature image and the date are added, the signed PDF is
+  box) and put in a queue. An **Approver** (or the Chair) reviews it on the **Approvals** tab (**Approve**, or **Reject**
+  with a reason); then it goes to the **Chair**, who presses **Approve and sign** on the **Signatures** tab: their stored signature image and the date are added, the signed PDF is
   stored in the database, and the **Candidacy milestone** is recorded on the student's record with a link to the PDF.
   Unchecking a course while a form is still waiting withdraws it, and a rejected or withdrawn form can be restarted with
   **+ Start candidacy form** on the student's page. A student's page lists every form with who approved and signed it and
-  when. Approver and Chair accounts are created by an administrator on the **Accounts** page (they need a full name).
-  They see only their approvals page (the Chair also has **My signature**, to upload a PNG/JPEG of their signature).
+  when. Approver and Chair accounts are created by an administrator on the **Accounts** page (they need a full name and email).
+  An **Approver** has every Editor privilege plus the **Approvals** tab. The **Chair** has every Administrator privilege
+  (including the Accounts tab) plus the **Approvals** tab (first round) and a **Signatures** tab (the final round, where
+  the Chair also uploads a PNG/JPEG of their signature). A plain Administrator can't approve or sign.
   Once signed, the student's advisor sees a **Candidacy form (PDF)** link on the Candidacy line of their student's page;
   it is the same signed form but with the University ID replaced by "(withheld)", since faculty never see University IDs
   (only their current advisor, and only after the chair has signed).
-  Everyone else with access can follow the **Forms** page and download the PDFs. A form is flattened when filled in,
+  Everyone else with access can follow the **Forms** tab (the same page, read-only) and download the PDFs. A form is flattened when filled in,
   so it can't be edited afterwards. (PDF handling uses the `pypdf` and `Pillow` libraries, which `run.sh` installs.)
 - **Email notices:** Approver and Chair accounts have an email address (required; other non-faculty accounts may have
   one; faculty and FSR accounts use the email on their own record). When a candidacy form arrives in the approvers'

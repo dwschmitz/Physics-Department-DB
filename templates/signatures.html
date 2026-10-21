@@ -1,0 +1,41 @@
+{% extends "base.html" %}{% block body %}
+<style>main{max-width:96rem}table.q td,table.q th{white-space:nowrap}form.reject{display:inline-flex;gap:.3rem;align-items:center}form.reject input{width:14rem}</style>
+<h1>Signatures</h1>
+<h2>Forms waiting for your signature <span class="muted">({{ mine|length }})</span></h2>
+{% if not has_signature %}
+<div class="flash error">You have not uploaded a signature image yet, so you can't sign. Upload it below.</div>
+{% endif %}
+<table class="q"><tr><th>Student</th><th>University ID</th><th>Form</th><th>Created</th><th>Approved by</th><th></th></tr>
+{% for f in mine %}<tr><td><a href="{{ url_for('student', sid=f.student_id) }}">{{ f.last_name }}, {{ f.first_name }}</a></td><td>{{ f.university_id }}</td><td>Admission to candidacy</td><td>{{ f.created_at[:10] }}</td>
+<td>{{ f.approved_by }} <span class="muted">{{ f.approved_at[:10] }}</span></td>
+<td><a class="btn secondary small" href="{{ url_for('form_pdf', fid=f.id) }}" target="_blank">View PDF</a>
+  <form class="inline" method="post" action="{{ url_for('form_sign', fid=f.id) }}"
+        onsubmit='return confirm({{ ("Sign the candidacy form for " ~ f.first_name ~ " " ~ f.last_name ~ "? Your signature and today's date will be added, and the Candidacy milestone will be recorded.")|tojson }})'>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn small" {{ 'disabled' if not has_signature }}>Approve and sign</button></form>
+  <form class="reject" method="post" action="{{ url_for('form_reject', fid=f.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="stage" value="pending_chair">
+    <input name="reason" placeholder="Reason for rejecting" required maxlength="500" aria-label="Reason for rejecting the form for {{ f.first_name }} {{ f.last_name }}">
+    <button class="btn danger small">Reject</button></form></td></tr>
+{% else %}<tr><td colspan="6" class="muted">Nothing is waiting for your signature.</td></tr>{% endfor %}</table>
+
+<h2>My signature image</h2>
+<p>A picture of your signature is added to each candidacy form you sign with <strong>Approve and sign</strong>, together with
+  that day's date. Use a PNG or JPEG of your signature on a plain light background (a photo or scan is fine); extra white
+  space around it is trimmed automatically. Only you can see this picture here.</p>
+{% if has_signature %}
+<div class="form" style="max-width:36rem;margin-bottom:1rem"><p class="muted" style="margin-top:0">Your current signature image:</p>
+  <img src="{{ url_for('signature_image') }}" alt="Your signature" style="max-width:100%;background:#fff;border:1px solid #d5d9e0;padding:.5rem"></div>
+{% endif %}
+<form class="form" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="field"><label for="image">{{ 'Replace it with a new image' if has_signature else 'Signature image (PNG or JPEG)' }}</label>
+    <input id="image" type="file" name="image" accept="image/png,image/jpeg" required><div class="help">Up to 2 MB.</div></div>
+  <button class="btn">Save signature</button>
+</form>
+{% if has_signature %}
+<form method="post" style="margin-top:1rem" onsubmit='return confirm("Remove your stored signature image? You will not be able to sign forms until you upload another.")'>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="remove" value="1">
+  <button class="btn danger small">Remove my signature</button></form>
+{% endif %}
+{% endblock %}

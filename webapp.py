@@ -35,18 +35,15 @@ FACULTY_ROLE_FILTERS = {"any": "Any role", "advisor": "Advisor",
 ACCOUNT_ROLES = ["viewer", "editor", "admin", "approver", "chair"]      # roles an admin can hand out directly
 ROLE_ORDER = ACCOUNT_ROLES + ["faculty", "fsr"]       # faculty / FSR logins are made from the person, see user_new_faculty
 APPROVAL_ROLES = ("approver", "chair")                # the two people who take a form through the approval process
+EDITING_ROLES = ("editor", "admin", "approver", "chair")   # may add / change / delete records (an approver is an editor who
+ADMIN_ROLES = ("admin", "chair")                            # also approves; the chair is an administrator who also approves and signs)
 # The ONLY pages a faculty login may open (everything else is refused): their own page, a read-only page for each
 # of their advisees, changing their password, signing in/out, and the stylesheet.
 FACULTY_ENDPOINTS = {"faculty_home", "faculty_student", "faculty_form_pdf", "account", "logout", "login", "static", "home"}
 # An FSR login gets just their own page (the advisees of the faculty they are FSR for) and the same basics.
 FSR_ENDPOINTS = {"fsr_home", "account", "logout", "login", "static", "home"}
-# Approvers and the chair see the approvals queue, the form PDFs, and (the chair) their own signature page.
-APPROVAL_ENDPOINTS = {"approvals", "form_pdf", "form_approve", "form_sign", "form_reject", "signature", "signature_image",
-                      "account", "logout", "login", "static", "home"}
-APPROVAL_POSTS = {"form_approve", "form_sign", "form_reject", "signature"}   # the changes those two roles may make
-LIMITED_ENDPOINTS = {"faculty": FACULTY_ENDPOINTS, "fsr": FSR_ENDPOINTS,       # login role -> the only pages it may open
-                     "approver": APPROVAL_ENDPOINTS, "chair": APPROVAL_ENDPOINTS}
-HOME_ENDPOINT = {"faculty": "faculty_home", "fsr": "fsr_home", "approver": "approvals", "chair": "approvals"}   # where each lands
+LIMITED_ENDPOINTS = {"faculty": FACULTY_ENDPOINTS, "fsr": FSR_ENDPOINTS}   # login role -> the only pages it may open
+HOME_ENDPOINT = {"faculty": "faculty_home", "fsr": "fsr_home"}              # where each limited role lands
 MIN_PASSWORD = 10
 ROLES = ["advisor", "co-advisor", "committee", "committee_chair"]
 MILESTONE_KINDS = physdb.MILESTONE_KINDS
@@ -69,7 +66,7 @@ _DUMMY_HASH = generate_password_hash("not-a-real-password")
 
 
 def can_edit(user):
-    return bool(user and user["role"] in ("editor", "admin"))
+    return bool(user and user["role"] in EDITING_ROLES)
 
 
 def pw_fingerprint(password_hash):
@@ -308,8 +305,7 @@ def create_app(db_path=None):
             sent = request.form.get("csrf_token", "")
             if not hmac.compare_digest(sent, session.get("csrf", "")):
                 abort(400, "Your session expired. Go back, reload the page and try again.")
-            if not can_edit(g.user) and request.endpoint not in ("logout", "account") and not (
-                    g.user["role"] in APPROVAL_ROLES and request.endpoint in APPROVAL_POSTS):
+            if not can_edit(g.user) and request.endpoint not in ("logout", "account"):
                 abort(403, "Your account is view-only.")
         limited = LIMITED_ENDPOINTS.get(g.user["role"])
         if limited is not None and request.endpoint not in limited:
@@ -327,23 +323,23 @@ def create_app(db_path=None):
             return request.path + "?" + urlencode(args)
         return dict(sort_url=sort_url)
 
-    def _approvals_waiting():
-        """How many forms are waiting for the signed-in approver / chair (shown in the top bar)."""
+    def _waiting(status, roles):
+        """How many forms are in the queue `status`, for someone whose role is in `roles` (shown in the top bar)."""
         user = g.get("user")
-        if not user or user["role"] not in APPROVAL_ROLES:
+        if not user or user["role"] not in roles:
             return 0
-        status = "pending_approval" if user["role"] == "approver" else "pending_chair"
         return db().execute("SELECT count(*) FROM forms WHERE status = ?", (status,)).fetchone()[0]
 
     @app.context_processor
     def inject():
         session.setdefault("csrf", secrets.token_urlsafe(32))
         return dict(csrf_token=session["csrf"], user=g.get("user"),
-                    can_edit=can_edit(g.get("user")), is_admin=bool(g.get("user") and g.user["role"] == "admin"),
+                    can_edit=can_edit(g.get("user")), is_admin=bool(g.get("user") and g.user["role"] in ADMIN_ROLES),
                     is_faculty=bool(g.get("user") and g.user["role"] == "faculty"),
                     is_fsr=bool(g.get("user") and g.user["role"] == "fsr"),
                     approval_role=g.user["role"] if g.get("user") and g.user["role"] in APPROVAL_ROLES else None,
-                    approvals_waiting=_approvals_waiting())
+                    approvals_waiting=_waiting("pending_approval", APPROVAL_ROLES),
+                    signatures_waiting=_waiting("pending_chair", ("chair",)))
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -424,7 +420,8 @@ def create_app(db_path=None):
     def role_field():
         return F("role", "Role", "select", True, [(r, label(r)) for r in ACCOUNT_ROLES],
                  help="Viewer: look only. Editor: can also change records. Administrator: can also manage accounts. "
-                      "Approver and Chair: take part in approving forms (they see nothing else).")
+                      "Approver: an Editor who also approves candidacy forms. Chair: an Administrator who also "
+                      "approves forms and gives the final signature.")
 
     def full_name_field():
         return F("full_name", "Full name", "text", help="Shown on approvals. Required for an Approver or Chair.")
@@ -891,7 +888,7 @@ def create_app(db_path=None):
             abort(403, "Your account is view-only.")
 
     def require_admin():
-        if g.user["role"] != "admin":
+        if g.user["role"] not in ADMIN_ROLES:
             abort(403, "Only administrators can manage accounts.")
 
     # ---- students --------------------------------------------------------------
@@ -1043,17 +1040,36 @@ def create_app(db_path=None):
 
     @app.route("/approvals")
     def approvals():
-        """Approvers see the forms waiting for them, the chair the forms waiting for their signature; everyone else with
-        access sees the whole pipeline read-only."""
-        role = g.user["role"]
-        waiting = {"approver": "pending_approval", "chair": "pending_chair"}.get(role)
-        has_signature = False
-        if role == "chair":
-            has_signature = db().execute("SELECT 1 FROM signatures WHERE user_id = ?", (g.user["id"],)).fetchone() is not None
+        """First round: forms waiting for an approver (approvers and the chair can act on them). The forms waiting for
+        the chair's signature and the recently finished ones are listed too. Other staff see the same page read-only."""
         return render_template(
-            "approvals.html", mine=workflow.queue(db(), waiting) if waiting else [], waiting=waiting,
-            overview=None if waiting else [(s, workflow.queue(db(), s)) for s in workflow.PENDING],
-            recent=workflow.recent(db()), has_signature=has_signature)
+            "approvals.html", first=workflow.queue(db(), "pending_approval"), second=workflow.queue(db(), "pending_chair"),
+            recent=workflow.recent(db()), can_approve=g.user["role"] in APPROVAL_ROLES)
+
+    @app.route("/signatures", methods=["GET", "POST"])
+    def signatures():
+        """The chair's page: forms waiting for their signature (the final round), and the picture of their signature
+        that is added to the forms they sign."""
+        role_required("chair")
+        if request.method == "POST":
+            if request.form.get("remove"):
+                db().execute("DELETE FROM signatures WHERE user_id = ?", (g.user["id"],)); db().commit()
+                flash("Your signature image was removed.", "ok")
+                return redirect(url_for("signatures"))
+            upload = request.files.get("image")
+            try:
+                png = formfill.prepare_signature(upload.read(formfill.MAX_SIGNATURE_BYTES + 1) if upload and upload.filename else b"")
+            except formfill.SignatureError as e:
+                flash(str(e), "error")
+                return redirect(url_for("signatures"))
+            db().execute("INSERT INTO signatures (user_id, image, updated_at) VALUES (?, ?, ?) "
+                         "ON CONFLICT(user_id) DO UPDATE SET image = excluded.image, updated_at = excluded.updated_at",
+                         (g.user["id"], png, workflow._now()))
+            db().commit()
+            flash("Your signature image was saved. It will be added to forms you sign.", "ok")
+            return redirect(url_for("signatures"))
+        has = db().execute("SELECT 1 FROM signatures WHERE user_id = ?", (g.user["id"],)).fetchone() is not None
+        return render_template("signatures.html", mine=workflow.queue(db(), "pending_chair"), has_signature=has)
 
     @app.route("/forms/<int:fid>.pdf")
     def form_pdf(fid):
@@ -1069,13 +1085,14 @@ def create_app(db_path=None):
         if g.user["role"] != role:
             abort(403, f"Only {label(role).lower()} accounts can do this.")
 
-    def done(message, kind="ok"):
+    def done(message, kind="ok", to="approvals"):
         flash(message, kind)
-        return redirect(url_for("approvals"))
+        return redirect(url_for(to))
 
     @app.post("/forms/<int:fid>/approve")
     def form_approve(fid):
-        role_required("approver")
+        if g.user["role"] not in APPROVAL_ROLES:
+            abort(403, "Only approvers and the chair can approve a form.")
         try:
             workflow.approve(db(), fid, g.user["username"])
         except workflow.WorkflowError as e:
@@ -1084,14 +1101,18 @@ def create_app(db_path=None):
 
     @app.post("/forms/<int:fid>/reject")
     def form_reject(fid):
-        if g.user["role"] not in APPROVAL_ROLES:
-            abort(403, "Only approvers and the chair can reject a form.")
-        stage = "pending_approval" if g.user["role"] == "approver" else "pending_chair"
+        """Reject a form with a reason: an approver or the chair in the first round, only the chair in the final one."""
+        stage = request.form.get("stage")
+        if stage not in workflow.PENDING:
+            abort(400, "Unknown stage.")
+        if g.user["role"] not in (("chair",) if stage == "pending_chair" else APPROVAL_ROLES):
+            abort(403, "Your account can't reject a form at this stage.")
+        back = "signatures" if stage == "pending_chair" else "approvals"
         try:
             workflow.reject(db(), fid, g.user["username"], request.form.get("reason"), stage)
         except workflow.WorkflowError as e:
-            return done(str(e), "error")
-        return done("The form was rejected and the reason recorded.")
+            return done(str(e), "error", back)
+        return done("The form was rejected and the reason recorded.", to=back)
 
     @app.post("/forms/<int:fid>/sign")
     def form_sign(fid):
@@ -1100,32 +1121,8 @@ def create_app(db_path=None):
         try:
             workflow.chair_sign(db(), fid, g.user["username"], sig["image"] if sig else None)
         except workflow.WorkflowError as e:
-            return done(str(e), "error")
-        return done("Signed. The Candidacy milestone was recorded on the student's record, with a link to the form.")
-
-    @app.route("/signature", methods=["GET", "POST"])
-    def signature():
-        """The chair uploads (or removes) the picture of their signature that is added to forms they approve."""
-        role_required("chair")
-        if request.method == "POST":
-            if request.form.get("remove"):
-                db().execute("DELETE FROM signatures WHERE user_id = ?", (g.user["id"],)); db().commit()
-                flash("Your signature image was removed.", "ok")
-                return redirect(url_for("signature"))
-            upload = request.files.get("image")
-            try:
-                png = formfill.prepare_signature(upload.read(formfill.MAX_SIGNATURE_BYTES + 1) if upload and upload.filename else b"")
-            except formfill.SignatureError as e:
-                flash(str(e), "error")
-                return redirect(url_for("signature"))
-            db().execute("INSERT INTO signatures (user_id, image, updated_at) VALUES (?, ?, ?) "
-                         "ON CONFLICT(user_id) DO UPDATE SET image = excluded.image, updated_at = excluded.updated_at",
-                         (g.user["id"], png, workflow._now()))
-            db().commit()
-            flash("Your signature image was saved. It will be added to forms you sign.", "ok")
-            return redirect(url_for("signature"))
-        has = db().execute("SELECT 1 FROM signatures WHERE user_id = ?", (g.user["id"],)).fetchone() is not None
-        return render_template("signature.html", has_signature=has)
+            return done(str(e), "error", "signatures")
+        return done("Signed. The Candidacy milestone was recorded on the student's record, with a link to the form.", to="signatures")
 
     @app.route("/signature.png")
     def signature_image():

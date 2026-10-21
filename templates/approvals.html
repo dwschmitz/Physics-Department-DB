@@ -1,38 +1,34 @@
 {% extends "base.html" %}{% block body %}
 <style>main{max-width:96rem}table.q td,table.q th{white-space:nowrap}table.q td.reason{white-space:normal}form.reject{display:inline-flex;gap:.3rem;align-items:center}form.reject input{width:14rem}</style>
-<h1>{{ 'Forms waiting for your approval' if waiting == 'pending_approval' else "Forms waiting for your signature" if waiting == 'pending_chair' else 'Forms' }}</h1>
-{% if waiting %}
-{% if waiting == 'pending_chair' and not has_signature %}
-<div class="flash error">You have not uploaded a signature image yet, so you can't sign. <a href="{{ url_for('signature') }}">Upload it here</a>.</div>
-{% endif %}
-<table class="q"><tr><th>Student</th><th>University ID</th><th>Form</th><th>Created</th>{% if waiting == 'pending_chair' %}<th>Approved by</th>{% endif %}<th></th></tr>
-{% for f in mine %}<tr><td>{{ f.last_name }}, {{ f.first_name }}</td><td>{{ f.university_id }}</td><td>Admission to candidacy</td><td>{{ f.created_at[:10] }}</td>
-{% if waiting == 'pending_chair' %}<td>{{ f.approved_by }} <span class="muted">{{ f.approved_at[:10] }}</span></td>{% endif %}
+<h1>{{ 'Approvals' if can_approve else 'Forms' }}</h1>
+<p class="muted">Candidacy forms are filled in automatically when a student has credit for all six core courses. An approver (or the
+  chair) approves each one, then the chair signs it on the Signatures page, which records the Candidacy milestone.</p>
+
+<h2>Waiting for approval <span class="muted">({{ first|length }})</span></h2>
+<table class="q"><tr><th>Student</th><th>University ID</th><th>Form</th><th>Created</th><th></th></tr>
+{% for f in first %}<tr><td><a href="{{ url_for('student', sid=f.student_id) }}">{{ f.last_name }}, {{ f.first_name }}</a></td><td>{{ f.university_id }}</td><td>Admission to candidacy</td><td>{{ f.created_at[:10] }}</td>
 <td><a class="btn secondary small" href="{{ url_for('form_pdf', fid=f.id) }}" target="_blank">View PDF</a>
-  <form class="inline" method="post" action="{{ url_for('form_approve' if waiting == 'pending_approval' else 'form_sign', fid=f.id) }}"
-        {% if waiting == 'pending_chair' %}onsubmit='return confirm({{ ("Sign the candidacy form for " ~ f.first_name ~ " " ~ f.last_name ~ "? Your signature and today's date will be added, and the Candidacy milestone will be recorded.")|tojson }})'{% endif %}>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button class="btn small" {{ 'disabled' if waiting == 'pending_chair' and not has_signature }}>{{ 'Approve' if waiting == 'pending_approval' else 'Approve and sign' }}</button></form>
+{% if can_approve %}
+  <form class="inline" method="post" action="{{ url_for('form_approve', fid=f.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn small">Approve</button></form>
   <form class="reject" method="post" action="{{ url_for('form_reject', fid=f.id) }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="stage" value="pending_approval">
     <input name="reason" placeholder="Reason for rejecting" required maxlength="500" aria-label="Reason for rejecting the form for {{ f.first_name }} {{ f.last_name }}">
-    <button class="btn danger small">Reject</button></form></td></tr>
-{% else %}<tr><td colspan="6" class="muted">Nothing is waiting for you.</td></tr>{% endfor %}</table>
-{% else %}
-<p class="muted">Candidacy forms are filled in automatically when a student has credit for all six core courses. An approver approves each one, then the chair signs it, which records the Candidacy milestone.</p>
-{% for status, rows in overview %}
-<h2>{{ status|label }} <span class="muted">({{ rows|length }})</span></h2>
+    <button class="btn danger small">Reject</button></form>
+{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">Nothing is waiting for approval.</td></tr>{% endfor %}</table>
+
+<h2>Waiting for the chair's signature <span class="muted">({{ second|length }})</span></h2>
 <table class="q"><tr><th>Student</th><th>Created</th><th>Approved by</th><th></th></tr>
-{% for f in rows %}<tr><td><a href="{{ url_for('student', sid=f.student_id) }}">{{ f.last_name }}, {{ f.first_name }}</a></td><td>{{ f.created_at[:10] }}</td>
-<td>{% if f.approved_by %}{{ f.approved_by }} <span class="muted">{{ f.approved_at[:10] }}</span>{% endif %}</td>
-<td><a class="btn secondary small" href="{{ url_for('form_pdf', fid=f.id) }}" target="_blank">View PDF</a></td></tr>
-{% else %}<tr><td colspan="4" class="muted">None.</td></tr>{% endfor %}</table>
-{% endfor %}
-{% endif %}
+{% for f in second %}<tr><td><a href="{{ url_for('student', sid=f.student_id) }}">{{ f.last_name }}, {{ f.first_name }}</a></td><td>{{ f.created_at[:10] }}</td>
+<td>{{ f.approved_by }} <span class="muted">{{ f.approved_at[:10] }}</span></td>
+<td><a class="btn secondary small" href="{{ url_for('form_pdf', fid=f.id) }}" target="_blank">View PDF</a>
+{% if user.role == 'chair' %}<a class="btn small" href="{{ url_for('signatures') }}">Go to Signatures</a>{% endif %}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">Nothing is waiting for the chair.</td></tr>{% endfor %}</table>
 
 <h2>Recently finished</h2>
 <table class="q"><tr><th>Student</th><th>Result</th><th>When</th><th>By</th><th>Reason</th><th></th></tr>
-{% for f in recent %}<tr><td>{% if not waiting %}<a href="{{ url_for('student', sid=f.student_id) }}">{{ f.last_name }}, {{ f.first_name }}</a>{% else %}{{ f.last_name }}, {{ f.first_name }}{% endif %}</td>
+{% for f in recent %}<tr><td><a href="{{ url_for('student', sid=f.student_id) }}">{{ f.last_name }}, {{ f.first_name }}</a></td>
 <td>{{ f.status|label }}</td><td>{{ (f.signed_at or f.closed_at)[:10] }}</td><td>{{ f.signed_by or f.closed_by }}</td>
 <td class="reason">{{ f.closed_reason or '' }}</td><td><a class="btn secondary small" href="{{ url_for('form_pdf', fid=f.id) }}" target="_blank">View PDF</a></td></tr>
 {% else %}<tr><td colspan="6" class="muted">None yet.</td></tr>{% endfor %}</table>
