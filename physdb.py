@@ -154,6 +154,7 @@ def connect(path=DB_PATH):
         _restore_old_funding(conn, legacy)
     _finish_interrupted_rebuilds(conn)
     _migrate_users(conn)
+    _add_signatures(conn)
     _add_faculty_fsr(conn)
     _add_faculty_accounts(conn)
     _add_fsr_accounts(conn)
@@ -176,8 +177,17 @@ def _stash_old_milestones(conn):
     row = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'milestones'").fetchone()
     if row is None or "'ms_degree'" in row[0]:
         return False
-    conn.executescript("DROP INDEX IF EXISTS idx_milestones_student;"
-                       "ALTER TABLE milestones RENAME TO milestones_old;")
+    # Other tables (forms) refer to milestones. A plain rename would rewrite those references to point at the set-aside
+    # copy, which is then dropped; with foreign keys off and legacy_alter_table on they keep pointing at "milestones".
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("PRAGMA legacy_alter_table = ON")
+    try:
+        conn.executescript("DROP INDEX IF EXISTS idx_milestones_student;"
+                           "ALTER TABLE milestones RENAME TO milestones_old;")
+    finally:
+        conn.execute("PRAGMA legacy_alter_table = OFF")
+        conn.execute("PRAGMA foreign_keys = ON")
     return True
 
 
@@ -351,33 +361,51 @@ def _restore_old_funding(conn, why="text_term"):
 
 
 def _migrate_users(conn):
-    """Upgrade a users table from before the 'admin' role, must_change, the faculty role/faculty_id or the
-    'fsr' role/fsr_id existed."""
+    """Upgrade a users table from before the 'admin' role, must_change, the faculty / fsr roles and their ids, or the
+    approver / chair roles and full_name existed. Every column the old table has is carried over."""
     ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'users'").fetchone()[0]
-    if "'fsr'" in ddl and "fsr_id" in ddl and "must_change" in ddl:
+    if "'chair'" in ddl and "full_name" in ddl and "must_change" in ddl:
         return
-    has_mc = "must_change" in ddl
-    has_fac = "faculty_id" in ddl
-    # Triggers on other tables mention users; SQLite would rewrite them to point at users_old, so drop them now
-    # (they are recreated, with the right table, by the _add_*_accounts steps that run next).
+    new_cols = ["id", "username", "password_hash", "role", "must_change", "faculty_id", "fsr_id", "full_name"]
+    have = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+    copy = [c for c in new_cols if c in have]
+    # SQLite's recommended way to rebuild a table that others refer to (signatures does): with foreign keys off, build
+    # the new table, copy, drop the old one and rename the new one into place, so references to "users" stay valid.
+    # Triggers on other tables mention users; they are dropped here and recreated by the _add_*_accounts steps next.
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript("""
         DROP TRIGGER IF EXISTS faculty_cnet_needed_for_login;
         DROP TRIGGER IF EXISTS faculty_cnet_renames_login;
         DROP TRIGGER IF EXISTS fsr_cnet_needed_for_login;
         DROP TRIGGER IF EXISTS fsr_cnet_renames_login;""")
     conn.executescript(f"""
-        ALTER TABLE users RENAME TO users_old;
-        CREATE TABLE users (
+        BEGIN;
+        DROP TABLE IF EXISTS users_new;
+        CREATE TABLE users_new (
             id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty', 'fsr')),
+            role TEXT NOT NULL DEFAULT 'viewer'
+                CHECK (role IN ('viewer', 'editor', 'admin', 'faculty', 'fsr', 'approver', 'chair')),
             must_change INTEGER NOT NULL DEFAULT 0,
             faculty_id INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
             fsr_id INTEGER REFERENCES fsrs(id) ON DELETE CASCADE,
+            full_name TEXT,
             CHECK ((role = 'faculty') = (faculty_id IS NOT NULL) AND (role = 'fsr') = (fsr_id IS NOT NULL)));
-        INSERT INTO users (id, username, password_hash, role, must_change, faculty_id)
-            SELECT id, username, password_hash, role, {'must_change' if has_mc else '0'},
-                   {'faculty_id' if has_fac else 'NULL'} FROM users_old;
-        DROP TABLE users_old;""")
+        INSERT INTO users_new ({", ".join(copy)}) SELECT {", ".join(copy)} FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_new RENAME TO users;
+        COMMIT;""")
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _add_signatures(conn):
+    """Signature images for chair accounts. Created here rather than in schema.sql so that it never exists while the
+    users table is being rebuilt by _migrate_users."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signatures (
+            user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            image       BLOB NOT NULL,          -- a PNG, normalised by formfill.prepare_signature
+            updated_at  TEXT NOT NULL);""")
     conn.commit()
 
 
@@ -900,10 +928,15 @@ def main(argv=None):
         elif c == "add-fsr":
             print("Added FSR", add_fsr(conn, args.first_name, args.last_name, args.email, args.cnet))
         elif c == "course-credit":
+            import workflow                      # (not at the top of the file: workflow imports this module)
             s = _find(conn, "students", args.student)
             have = course_credits(conn, s["id"])
-            set_course_credits(conn, s["id"], have - set(args.courses) if args.remove else have | set(args.courses))
+            res = workflow.save_course_credits(conn, s["id"], have - set(args.courses) if args.remove else have | set(args.courses), "command line")
             print("Core courses with credit:", courses_label(course_credits(conn, s["id"])) or "none")
+            if res["created"]:
+                print("All six are complete: the candidacy form was created and is waiting for an approver.")
+            if res["withdrawn"]:
+                print("The candidacy form that was waiting for approval was withdrawn.")
         elif c == "assign-advisor":
             assign_advisor(conn, args.student, args.faculty, args.role, args.start_date)
         elif c == "add-milestone":

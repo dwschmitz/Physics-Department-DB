@@ -60,6 +60,17 @@ person's password and role (for example, to regain admin access if no admin can 
   passed or tested out of with a GDE. At the top of **Milestones** on each student's page, editors tick the courses with
   credit and press **Save** (faculty and viewers see a read-only list). The four GDE milestone types are no longer
   offered; entries already saved under them are kept and shown as before ("retired").
+- **Candidacy form and approvals:** when the sixth core-course box is ticked, the *Admission to Candidacy* form
+  (`forms/Candidacy_Form_2020-2021.pdf`) is filled in for the student (name, University ID, department Physics, the PhD
+  box) and put in a queue. An **Approver** reviews it (**Approve**, or **Reject** with a reason); then it goes to the
+  **Chair**, who presses **Approve and sign**: their stored signature image and the date are added, the signed PDF is
+  stored in the database, and the **Candidacy milestone** is recorded on the student's record with a link to the PDF.
+  Unchecking a course while a form is still waiting withdraws it, and a rejected or withdrawn form can be restarted with
+  **+ Start candidacy form** on the student's page. A student's page lists every form with who approved and signed it and
+  when. Approver and Chair accounts are created by an administrator on the **Accounts** page (they need a full name).
+  They see only their approvals page (the Chair also has **My signature**, to upload a PNG/JPEG of their signature).
+  Everyone else with access can follow the **Forms** page and download the PDFs. A form is flattened when filled in,
+  so it can't be edited afterwards. (PDF handling uses the `pypdf` and `Pillow` libraries, which `run.sh` installs.)
 - **Importing students from a file:** on the Students tab, **Import from file** (editors and admins) takes an Excel
   (.xlsx, first sheet) or CSV file with one student per row; `examples/Incoming_Student_Data_Test.xlsx` is a sample
   and the page links a blank CSV template. Required columns: First Name, Last Name, UCID (exactly 8 digits), Email,
@@ -129,7 +140,7 @@ person's password and role (for example, to regain admin access if no admin can 
 - Set `PHYSDB_SECRET` (or protect the generated `.secret_key` file) so sessions can't be forged.
 
 ## Data model (`schema.sql`)
-`students`, `faculty` (each with an optional FSR), `fsrs`, `advising` (advisor/committee history with dates), `milestones`
+`students`, `faculty` (each with an optional FSR), `fsrs`, `course_credits`, `forms` (the candidacy forms and their approval history, with the PDF), `advising` (advisor/committee history with dates), `milestones`
 (qualifier, candidacy, committee formed, proposal, defense; the student's page shows the clock on each milestone's date), `funding` (TA/RA/fellowship/supplement by term, with a POETAF/COA account number).
 Terms are a year plus Autumn, Winter, Spring or Summer, chosen from menus and sorted chronologically
 (newest first); `year` is the calendar year in which the term takes place.

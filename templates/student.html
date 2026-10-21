@@ -27,10 +27,20 @@
 <h2>Milestones {% if can_edit %}<a class="btn small" href="{{ url_for('child_new', sid=s.id, table='milestones') }}">+ Add</a>{% endif %}</h2>
 {% include "_core_courses.html" %}
 <table><tr><th>Milestone</th><th>Date</th><th title="Clock on that date: years since matriculation, counted in terms">Clock</th><th>Outcome</th><th>Notes</th><th></th></tr>
-{% for m in milestones %}<tr><td>{{ m.kind|label }}</td><td>{{ m.date }}</td><td>{{ m.clock }}</td><td>{{ m.outcome|label }}</td><td>{{ m.notes or '' }}</td>
+{% for m in milestones %}<tr><td>{{ m.kind|label }}</td><td>{{ m.date }}</td><td>{{ m.clock }}</td><td>{{ m.outcome|label }}</td><td>{{ m.notes or '' }}{% if m.id in form_links %} <a href="{{ url_for('form_pdf', fid=form_links[m.id]) }}" target="_blank">Candidacy form (PDF)</a>{% endif %}</td>
 <td class="actions">{% if can_edit %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='milestones', rid=m.id) }}">Edit</a>
 {{ delete_button(url_for('child_delete', sid=s.id, table='milestones', rid=m.id), 'Delete this entry?') }}{% endif %}</td></tr>
 {% else %}<tr><td colspan="6" class="muted">None recorded.</td></tr>{% endfor %}</table>
+
+<h2>Forms {% if can_edit and can_start_form %}<form class="inline" method="post" action="{{ url_for('form_start', sid=s.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn small" title="All six core courses are complete: fill in the candidacy form and send it for approval">+ Start candidacy form</button></form>{% endif %}</h2>
+<table><tr><th>Form</th><th>Status</th><th>Created</th><th>Approved by</th><th>Signed by the chair</th><th>Notes</th><th></th></tr>
+{% for f in forms %}<tr><td>Admission to candidacy</td><td><span class="badge {{ 'active' if f.status == 'complete' else 'on_leave' if f.status in ('pending_approval', 'pending_chair') else 'withdrawn' }}">{{ f.status|label }}</span></td>
+<td style="white-space:nowrap">{{ f.created_at[:10] }}</td>
+<td>{% if f.approved_by %}{{ f.approved_by }} <span class="muted">{{ f.approved_at[:10] }}</span>{% endif %}</td>
+<td>{% if f.signed_by %}{{ f.signed_by }} <span class="muted">{{ f.signed_at[:10] }}</span>{% endif %}</td>
+<td>{% if f.closed_reason %}{{ f.closed_by }} {{ f.status|label|lower }} it: {{ f.closed_reason }}{% endif %}</td>
+<td class="actions"><a class="btn secondary small" href="{{ url_for('form_pdf', fid=f.id) }}" target="_blank">View PDF</a></td></tr>
+{% else %}<tr><td colspan="7" class="muted">None. A candidacy form is created automatically when all six core courses are checked.</td></tr>{% endfor %}</table>
 
 <h2>Funding {% if can_edit %}<a class="btn small" href="{{ url_for('child_new', sid=s.id, table='funding') }}">+ Add</a>{% endif %}</h2>
 <table><tr><th>Term</th><th>Type</th><th>Source</th><th>POETAF/COA</th><th>Amount</th><th>Notes</th><th></th></tr>

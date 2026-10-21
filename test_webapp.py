@@ -1699,6 +1699,205 @@ class WebTests(unittest.TestCase):
         conn = physdb.connect(self.app.config["DB_PATH"])
         self.assertEqual(conn.execute("SELECT count(*) FROM users WHERE role = 'fsr'").fetchone()[0], 0); conn.close()
 
+    # ---- candidacy form approvals ------------------------------------------------------------------------
+    ALL6 = ["cm", "qm1", "qm2", "em1", "em2", "sm"]
+
+    def _approval_world(self):
+        """Admin client + a student (id 1) + an approver 'appr' and a chair 'chr' who have chosen their own passwords."""
+        c = self.client("ad"); t = self.token(c)
+        self.add_student(c)
+        out = [c, t]
+        for username, role, name in (("appr", "approver", "Ann Approver"), ("chr", "chair", "Carl Chair")):
+            r = c.post("/users/new", data=dict(username=username, role=role, full_name=name, password="temp-password-1", csrf_token=t))
+            self.assertEqual(r.status_code, 302, r.get_data(as_text=True)[:300])
+            k = self.app.test_client()
+            self.assertEqual(k.post("/login", data={"username": username, "password": "temp-password-1"}).status_code, 302)
+            nt = self.token(k, "/account")
+            k.post("/account", data=dict(current_password="temp-password-1", new_password="my-own-pass-1", confirm="my-own-pass-1", csrf_token=nt))
+            out.append(k)
+        return out
+
+    def _sig_upload(self, chair, name="sig.png", data=None):
+        import io
+        from test_forms import signature_png
+        return chair.post("/signature", data=dict(csrf_token=self.token(chair, "/signature"),
+                          image=(io.BytesIO(data if data is not None else signature_png()), name)), content_type="multipart/form-data")
+
+    def _forms(self):
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        try:
+            return [dict(r) for r in conn.execute("SELECT * FROM forms ORDER BY id")]
+        finally:
+            conn.close()
+
+    def test_accounts_for_approvers_and_the_chair(self):
+        c, t, appr, chair = self._approval_world()
+        page = c.get("/users/new").get_data(as_text=True)
+        self.assertIn('<option value="approver"', page); self.assertIn('<option value="chair"', page); self.assertIn("Full name", page)
+        r = c.post("/users/new", data=dict(username="noname", role="chair", full_name="", password="temp-password-1", csrf_token=t))
+        self.assertEqual(r.status_code, 200); self.assertIn("Enter their full name", r.get_data(as_text=True))      # a name is required
+        r = c.post("/users/new", data=dict(username="vw2", role="viewer", full_name="", password="temp-password-1", csrf_token=t))
+        self.assertEqual(r.status_code, 302)                                                                         # but not for others
+        users = c.get("/users").get_data(as_text=True)
+        self.assertIn("Approver", users); self.assertIn("Chair", users); self.assertIn("Ann Approver", users); self.assertIn("Carl Chair", users)
+        # they land on the approvals page, and only see that
+        k = self.app.test_client()
+        r = k.post("/login?next=/students", data={"username": "appr", "password": "my-own-pass-1"})
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, "/approvals"))
+        self.assertEqual(k.get("/").headers["Location"], "/approvals")
+        home = appr.get("/approvals").get_data(as_text=True)
+        self.assertIn("(approver)", home); self.assertNotIn(">Students</a>", home); self.assertNotIn("My signature", home)
+        self.assertIn("My signature", chair.get("/approvals").get_data(as_text=True)); self.assertIn("(chair)", chair.get("/approvals").get_data(as_text=True))
+        # changing a chair to another role removes their stored signature
+        self._sig_upload(chair)
+        conn = physdb.connect(self.app.config["DB_PATH"]); uid = conn.execute("SELECT id FROM users WHERE username = 'chr'").fetchone()[0]
+        self.assertEqual(conn.execute("SELECT count(*) FROM signatures").fetchone()[0], 1); conn.close()
+        r = c.post(f"/users/{uid}/edit", data=dict(role="editor", full_name="Carl Chair", password="", csrf_token=t)); self.assertEqual(r.status_code, 302)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        self.assertEqual(conn.execute("SELECT count(*) FROM signatures").fetchone()[0], 0); conn.close()
+
+    def test_sixth_course_starts_the_form_and_the_whole_approval_path(self):
+        import datetime
+        c, t, appr, chair = self._approval_world()
+        save = lambda codes: " | ".join(re.findall(r'<div class="flash [^"]*">(.*?)</div>', c.post("/students/1/courses", data={"course": codes, "csrf_token": t}, follow_redirects=True).get_data(as_text=True), re.S))
+        self.assertNotIn("candidacy form", save(self.ALL6[:5]))
+        self.assertEqual(self._forms(), [])
+        page = save(self.ALL6)
+        self.assertIn("All six core courses are complete, so the candidacy form was filled in and is waiting for an approver.", page)
+        f = self._forms()[0]
+        self.assertEqual((f["status"], f["created_by"], f["kind"]), ("pending_approval", "ad", "candidacy"))
+        student = c.get("/students/1").get_data(as_text=True)
+        forms = student.split("<h2>Forms")[1].split("<h2>Funding")[0]
+        self.assertIn("Waiting for an approver", forms); self.assertIn("View PDF", forms)
+        self.assertNotIn("Start candidacy form", forms)                                          # one is already waiting
+        self.assertEqual(save(self.ALL6).count("candidacy form"), 0); self.assertEqual(len(self._forms()), 1)
+        # staff can read the PDF; it is flat, with the student's details
+        pdf = c.get(f"/forms/{f['id']}.pdf")
+        self.assertEqual((pdf.status_code, pdf.mimetype), (200, "application/pdf")); self.assertTrue(pdf.data.startswith(b"%PDF"))
+        self.assertIn("no-store", pdf.headers["Cache-Control"]); self.assertEqual(pdf.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(self.client("vw").get(f"/forms/{f['id']}.pdf").status_code, 200)
+        self.assertEqual(c.get("/forms/999.pdf").status_code, 404)
+        # the approver's queue (and the count in the top bar)
+        q = appr.get("/approvals").get_data(as_text=True)
+        self.assertIn("Forms waiting for your approval", q); self.assertIn("Lovelace, Ada", q); self.assertIn("12345678" if False else "U1", q)
+        self.assertRegex(q, r'<span class="count">1</span>')
+        self.assertIn("Nothing is waiting for you", chair.get("/approvals").get_data(as_text=True))
+        self.assertEqual(appr.get(f"/forms/{f['id']}.pdf").status_code, 200)
+        # the chair cannot act before the approver, and the approver cannot sign
+        self.assertEqual(appr.post(f"/forms/{f['id']}/sign", data={"csrf_token": self.token(appr, "/approvals")}).status_code, 403)
+        self.assertEqual(chair.post(f"/forms/{f['id']}/approve", data={"csrf_token": self.token(chair, "/approvals")}).status_code, 403)
+        r = appr.post(f"/forms/{f['id']}/approve", data={"csrf_token": self.token(appr, "/approvals")}, follow_redirects=True)
+        self.assertIn("now waiting for the chair", r.get_data(as_text=True))
+        f = self._forms()[0]; self.assertEqual((f["status"], f["approved_by"]), ("pending_chair", "appr"))
+        self.assertIn("Nothing is waiting for you", appr.get("/approvals").get_data(as_text=True))
+        # the chair needs a signature image first
+        cq = chair.get("/approvals").get_data(as_text=True)
+        self.assertIn("Forms waiting for your signature", cq); self.assertIn("You have not uploaded a signature image", cq)
+        self.assertIn("disabled", cq.split("Approve and sign")[0].rsplit("<button", 1)[1])
+        r = chair.post(f"/forms/{f['id']}/sign", data={"csrf_token": self.token(chair, "/approvals")}, follow_redirects=True)
+        self.assertIn("Upload your signature image first", r.get_data(as_text=True)); self.assertEqual(self._forms()[0]["status"], "pending_chair")
+        self.assertEqual(self._sig_upload(chair).status_code, 302)
+        self.assertEqual(chair.get("/signature.png").mimetype, "image/png")
+        self.assertIn('/signature.png', chair.get("/signature").get_data(as_text=True))
+        # signing: milestone recorded, form complete and linked from the student's page
+        before = self._forms()[0]["pdf"]
+        r = chair.post(f"/forms/{f['id']}/sign", data={"csrf_token": self.token(chair, "/approvals")}, follow_redirects=True)
+        self.assertIn("Candidacy milestone was recorded", r.get_data(as_text=True))
+        f = self._forms()[0]
+        self.assertEqual((f["status"], f["signed_by"]), ("complete", "chr")); self.assertNotEqual(f["pdf"], before)
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        m = conn.execute("SELECT * FROM milestones").fetchall(); conn.close()
+        self.assertEqual(len(m), 1)
+        self.assertEqual((m[0]["kind"], m[0]["outcome"], m[0]["date"], f["milestone_id"]), ("candidacy", "passed", datetime.date.today().isoformat(), m[0]["id"]))
+        student = c.get("/students/1").get_data(as_text=True)
+        self.assertIn(f'href="/forms/{f["id"]}.pdf" target="_blank">Candidacy form (PDF)</a>', student.split("<h2>Milestones")[1].split("<h2>Forms")[0])
+        forms = student.split("<h2>Forms")[1].split("<h2>Funding")[0]
+        self.assertIn("Signed", forms); self.assertIn("appr", forms); self.assertIn("chr", forms)
+        self.assertIn("Signed", c.get("/approvals").get_data(as_text=True))
+        # nothing can be done twice
+        self.assertIn("no longer waiting", chair.post(f"/forms/{f['id']}/sign", data={"csrf_token": self.token(chair, "/approvals")}, follow_redirects=True).get_data(as_text=True))
+        self.assertEqual(len(self._forms()), 1)
+
+    def test_rejection_withdrawal_and_restarting_a_form(self):
+        c, t, appr, chair = self._approval_world()
+        save = lambda codes: " | ".join(re.findall(r'<div class="flash [^"]*">(.*?)</div>', c.post("/students/1/courses", data={"course": codes, "csrf_token": t}, follow_redirects=True).get_data(as_text=True), re.S))
+        save(self.ALL6); fid = self._forms()[0]["id"]
+        # a reason is required, and the student's page shows it
+        r = appr.post(f"/forms/{fid}/reject", data={"reason": " ", "csrf_token": self.token(appr, "/approvals")}, follow_redirects=True)
+        self.assertIn("give a reason", r.get_data(as_text=True)); self.assertEqual(self._forms()[0]["status"], "pending_approval")
+        r = appr.post(f"/forms/{fid}/reject", data={"reason": "Wrong UCID", "csrf_token": self.token(appr, "/approvals")}, follow_redirects=True)
+        self.assertIn("rejected", r.get_data(as_text=True))
+        forms = c.get("/students/1").get_data(as_text=True).split("<h2>Forms")[1].split("<h2>Funding")[0]
+        self.assertIn("Rejected", forms); self.assertIn("appr rejected it: Wrong UCID", forms)
+        self.assertIn("Wrong UCID", appr.get("/approvals").get_data(as_text=True))                   # in "recently finished"
+        # saving the courses again does not start a form (nothing changed), but the button does
+        self.assertNotIn("candidacy form", save(self.ALL6)); self.assertEqual(len(self._forms()), 1)
+        self.assertIn("+ Start candidacy form", c.get("/students/1").get_data(as_text=True))
+        r = c.post("/students/1/forms/candidacy", data={"csrf_token": t}, follow_redirects=True)
+        self.assertIn("waiting for an approver", r.get_data(as_text=True)); self.assertEqual(self._forms()[1]["status"], "pending_approval")
+        self.assertNotIn("+ Start candidacy form", c.get("/students/1").get_data(as_text=True))
+        r = c.post("/students/1/forms/candidacy", data={"csrf_token": t}, follow_redirects=True)           # not while one is waiting
+        self.assertIn("already waiting", r.get_data(as_text=True)); self.assertEqual(len(self._forms()), 2)
+        # the chair can reject too
+        fid = self._forms()[1]["id"]
+        appr.post(f"/forms/{fid}/approve", data={"csrf_token": self.token(appr, "/approvals")})
+        self.assertEqual(chair.post(f"/forms/{fid}/reject", data={"reason": "Please redo", "csrf_token": self.token(chair, "/approvals")}).status_code, 302)
+        self.assertEqual((self._forms()[1]["status"], self._forms()[1]["closed_by"]), ("rejected", "chr"))
+        # unchecking a course withdraws a form that is waiting
+        c.post("/students/1/forms/candidacy", data={"csrf_token": t})
+        self.assertEqual(self._forms()[2]["status"], "pending_approval")
+        page = save(self.ALL6[:5])
+        self.assertIn("was withdrawn", page); self.assertEqual(self._forms()[2]["status"], "withdrawn")
+        self.assertEqual(appr.get("/approvals").get_data(as_text=True).count("Nothing is waiting for you"), 1)
+        self.assertEqual(c.post("/students/1/forms/candidacy", data={"csrf_token": t}, follow_redirects=True).get_data(as_text=True).count("all six core courses"), 1)
+
+    def test_signature_upload_rules(self):
+        import io
+        c, t, appr, chair = self._approval_world()
+        self.assertEqual(appr.get("/signature").status_code, 403); self.assertEqual(appr.get("/signature.png").status_code, 403)
+        self.assertEqual(c.get("/signature").status_code, 403)                                         # even an administrator
+        self.assertEqual(chair.get("/signature.png").status_code, 404)                                  # none stored yet
+        for data, name, word in ((b"hello", "sig.png", "could not be read"), (b"", "sig.png", "Choose an image")):
+            r = self._sig_upload(chair, name, data)
+            self.assertEqual(r.status_code, 302)
+            self.assertIn(word, chair.get("/signature").get_data(as_text=True))
+        self.assertEqual(chair.post("/signature", data=dict(csrf_token=self.token(chair, "/signature"))).status_code, 302)        # no file at all
+        self.assertEqual(chair.post("/signature", data=dict(image=(io.BytesIO(b"x"), "s.png")), content_type="multipart/form-data").status_code, 400)  # CSRF
+        self._sig_upload(chair)
+        self.assertEqual(chair.get("/signature.png").status_code, 200)
+        self.assertNotIn("signature.png", appr.get("/approvals").get_data(as_text=True))
+        r = chair.post("/signature", data=dict(remove="1", csrf_token=self.token(chair, "/signature")), follow_redirects=True)
+        self.assertIn("was removed", r.get_data(as_text=True)); self.assertEqual(chair.get("/signature.png").status_code, 404)
+
+    def test_approvers_and_the_chair_can_open_nothing_else(self):
+        c, t, appr, chair = self._approval_world()
+        c.post("/students/1/courses", data={"course": self.ALL6, "csrf_token": t})
+        fid = self._forms()[0]["id"]
+        pages = ["/students", "/students/1", "/students/new", "/students/import", "/faculty", "/faculty/new", "/fsrs", "/reports",
+                 "/reports/milestones", "/reports/funding", "/users", "/export.csv", "/my", "/fsr", "/students/1/edit",
+                 "/students/1/funding/new"]
+        for k in (appr, chair):
+            for path in pages:
+                self.assertEqual(k.get(path).status_code, 403, path)
+            tok = self.token(k, "/approvals")
+            for path in ("/students/1/courses", "/students/1/forms/candidacy", "/students/new", "/students/1/delete", "/faculty/new",
+                         "/users/new", "/students/import", "/faculty/1/delete"):
+                self.assertEqual(k.post(path, data={"csrf_token": tok}).status_code, 403, path)
+            self.assertEqual(k.get("/account").status_code, 200)
+        # staff can follow the process read-only, and the ordinary accounts cannot approve
+        page = c.get("/approvals").get_data(as_text=True)
+        self.assertIn("Waiting for an approver", page); self.assertNotIn(">Approve<", page)
+        v = self.client("vw"); self.assertEqual(v.get("/approvals").status_code, 200)
+        for path in (f"/forms/{fid}/approve", f"/forms/{fid}/sign", f"/forms/{fid}/reject"):
+            self.assertEqual(v.post(path, data={"csrf_token": self.token(v), "reason": "x"}).status_code, 403, path)
+            self.assertEqual(c.post(path, data={"csrf_token": t, "reason": "x"}).status_code, 403, path)    # not even an administrator
+        self.assertEqual(self._forms()[0]["status"], "pending_approval")
+        # faculty and FSR logins cannot see the forms or the queue
+        a2, at = self._fsr_world()
+        self._make_faculty_login(a2, at); fac = self._faculty_client()
+        self.assertEqual(fac.get("/approvals").status_code, 403)
+        self.assertEqual(fac.get(f"/forms/{fid}.pdf").status_code, 403)
+
     def test_child_edit_heading_names_the_student(self):
         c, t = self._faculty_world()
         self.assertIn("<h1>Edit: funding for Stu Aa</h1>", c.get("/students/1/funding/1/edit").get_data(as_text=True))

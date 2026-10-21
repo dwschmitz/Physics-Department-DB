@@ -93,6 +93,27 @@ CREATE TABLE IF NOT EXISTS course_credits (
     PRIMARY KEY (student_id, course)
 );
 
+-- Forms generated for a student (currently only the candidacy form) and where each is in the approval process:
+-- pending_approval (waiting for an approver) -> pending_chair (waiting for the chair's signature) -> complete
+-- (signed; the milestone is recorded), or rejected / withdrawn. The PDF itself is stored here. People are recorded by
+-- username as text so the history survives an account being deleted.
+CREATE TABLE IF NOT EXISTS forms (
+    id            INTEGER PRIMARY KEY,
+    student_id    INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL CHECK (kind IN ('candidacy')),
+    status        TEXT NOT NULL DEFAULT 'pending_approval'
+                  CHECK (status IN ('pending_approval', 'pending_chair', 'complete', 'rejected', 'withdrawn')),
+    template      TEXT NOT NULL,        -- which version of the blank form was filled in
+    created_at    TEXT NOT NULL, created_by TEXT NOT NULL,
+    approved_at   TEXT, approved_by TEXT,
+    signed_at     TEXT, signed_by TEXT,
+    closed_at     TEXT, closed_by TEXT, closed_reason TEXT,        -- rejected or withdrawn
+    milestone_id  INTEGER REFERENCES milestones(id) ON DELETE SET NULL,   -- the milestone recorded when it was signed
+    pdf           BLOB NOT NULL,
+    pdf_sha256    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_forms_student ON forms(student_id);
+
 CREATE INDEX IF NOT EXISTS idx_advising_student   ON advising(student_id);
 CREATE INDEX IF NOT EXISTS idx_milestones_student ON milestones(student_id);
 CREATE INDEX IF NOT EXISTS idx_funding_student    ON funding(student_id);
@@ -100,15 +121,17 @@ CREATE INDEX IF NOT EXISTS idx_funding_student    ON funding(student_id);
 -- Web interface logins. 'viewer' can read; 'editor' can also add/change/delete records;
 -- 'admin' can additionally manage accounts; 'faculty' is a faculty member who can see only their own
 -- advisees and committee students (faculty_id says which faculty member; their username is their CNET);
--- 'fsr' is a financial services rep who can see the advisees of the faculty they are the FSR for (fsr_id).
+-- 'fsr' is a financial services rep who can see the advisees of the faculty they are the FSR for (fsr_id);
+-- 'approver' and 'chair' take part in the form approval process (see forms) and can see nothing else.
 -- must_change forces a new password at next login.
 CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY,
     username       TEXT UNIQUE NOT NULL,
     password_hash  TEXT NOT NULL,
-    role           TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty', 'fsr')),
+    role           TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer', 'editor', 'admin', 'faculty', 'fsr', 'approver', 'chair')),
     must_change    INTEGER NOT NULL DEFAULT 0,
     faculty_id     INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
     fsr_id         INTEGER REFERENCES fsrs(id) ON DELETE CASCADE,
+    full_name      TEXT,                 -- shown on approvals (needed for approver and chair)
     CHECK ((role = 'faculty') = (faculty_id IS NOT NULL) AND (role = 'fsr') = (fsr_id IS NOT NULL))
 );

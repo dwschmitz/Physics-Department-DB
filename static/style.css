@@ -52,3 +52,4 @@ table.mini{font-size:.9rem}table.mini th,table.mini td{padding:.3rem .5rem}
 .courses{background:#fff;border:1px solid #d5d9e0;padding:.6rem 1rem;margin-bottom:.8rem;display:flex;flex-wrap:wrap;gap:.4rem 1.1rem;align-items:center}
 .courses form{display:contents}.courses label.course,.courses .course{display:inline-flex;align-items:center;gap:.3rem;margin:0;font-weight:600;white-space:nowrap}
 .courses .course.done{color:#1b6e3a}.courses input[type=checkbox]{width:auto}
+.count{background:#fff;color:#800000;border-radius:10px;padding:0 .45rem;font-size:.8rem;font-weight:700;margin-left:.2rem}
