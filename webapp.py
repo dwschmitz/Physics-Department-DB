@@ -24,6 +24,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import formfill
 import importer
+import mailer
+import notify
 import physdb
 import workflow
 
@@ -427,27 +429,54 @@ def create_app(db_path=None):
     def full_name_field():
         return F("full_name", "Full name", "text", help="Shown on approvals. Required for an Approver or Chair.")
 
+    def email_field():
+        return F("email", "Email", "email", help="Where approval notices are sent. Required for an Approver or Chair. "
+                                                 "(Faculty and FSR logins use the email on their own record.)")
+
     def needs_full_name(values, errors):
-        if values.get("role") in APPROVAL_ROLES and not values.get("full_name"):
-            errors["full_name"] = "Enter their full name (shown on approvals)."
+        if values.get("role") in APPROVAL_ROLES:
+            if not values.get("full_name"):
+                errors["full_name"] = "Enter their full name (shown on approvals)."
+            if not values.get("email"):
+                errors["email"] = "Enter their email address (approval notices are sent there)."
 
     @app.route("/users")
     def users():
         require_admin()
         rows = [dict(r) for r in db().execute(
-            """SELECT u.*, COALESCE(f.first_name, r.first_name) AS f_first, COALESCE(f.last_name, r.last_name) AS f_last
+            """SELECT u.*, COALESCE(f.first_name, r.first_name) AS f_first, COALESCE(f.last_name, r.last_name) AS f_last,
+                      COALESCE(u.email, f.email, r.email) AS shown_email
                FROM users u LEFT JOIN faculty f ON f.id = u.faculty_id LEFT JOIN fsrs r ON r.id = u.fsr_id""").fetchall()]
         rows, sort, sdir = sort_rows(rows, {
             "username": lambda r: _text(r["username"]),
             "role": lambda r: ROLE_ORDER.index(r["role"]),
             "status": lambda r: r["must_change"],
         }, request.args.get("sort"), request.args.get("dir"), "username")
-        return render_template("users.html", rows=rows, sort=sort, sdir=sdir)
+        return render_template("users.html", rows=rows, sort=sort, sdir=sdir, mail_on=mailer.enabled(),
+                               mail_log=db().execute("SELECT * FROM email_log ORDER BY id DESC LIMIT 10").fetchall())
+
+    @app.post("/users/test-email")
+    def user_test_email():
+        """Send one test message so an administrator can check the mail settings."""
+        require_admin()
+        to = (request.form.get("to") or "").strip()
+        if "@" not in to or " " in to:
+            flash("Enter an email address to send the test to.", "error")
+            return redirect(url_for("users"))
+        error = None
+        try:
+            mailer.send(to, "Test message from the Physics Graduate Students database",
+                        "If you are reading this, the app can send email. No action is needed.")
+        except mailer.MailError as e:
+            error = str(e)
+        notify._log(str(app.config["DB_PATH"]), to, "Test message", error)
+        flash(f"Test email sent to {to}." if error is None else f"The test email could not be sent: {error}", "ok" if error is None else "error")
+        return redirect(url_for("users"))
 
     @app.route("/users/new", methods=["GET", "POST"])
     def user_new():
         require_admin()
-        fields = user_fields(True) + [role_field(), full_name_field(),
+        fields = user_fields(True) + [role_field(), full_name_field(), email_field(),
                  F("password", "Temporary password", "password", True,
                    help=f"At least {MIN_PASSWORD} characters. The person must choose their own at first login.")]
         errors = {}
@@ -456,9 +485,9 @@ def create_app(db_path=None):
             needs_full_name(values, errors)
             if not errors:
                 try:
-                    db().execute("INSERT INTO users (username, password_hash, role, must_change, full_name) "
-                                 "VALUES (?,?,?,1,?)", (values["username"],
-                                 generate_password_hash(values["password"]), values["role"], values["full_name"]))
+                    db().execute("INSERT INTO users (username, password_hash, role, must_change, full_name, email) "
+                                 "VALUES (?,?,?,1,?,?)", (values["username"], generate_password_hash(values["password"]),
+                                                          values["role"], values["full_name"], values["email"]))
                     db().commit()
                     flash(f"Account '{values['username']}' created.", "ok")
                     return redirect(url_for("users"))
@@ -551,7 +580,7 @@ def create_app(db_path=None):
         u = get_or_404("users", uid)
         if u["id"] == g.user["id"]:
             return redirect(url_for("account"))   # own password/role: use the normal page
-        fields = [role_field(), full_name_field(),
+        fields = [role_field(), full_name_field(), email_field(),
                   F("password", "New temporary password", "password", False,
                     help="Leave blank to keep the current password. Setting one signs the person out "
                          "everywhere and makes them choose a new password at next login.")]
@@ -565,8 +594,8 @@ def create_app(db_path=None):
                 needs_full_name(values, errors)
             if not errors:
                 if "role" in values:
-                    db().execute("UPDATE users SET role = ?, full_name = ? WHERE id = ?",
-                                 (values["role"], values["full_name"], uid))
+                    db().execute("UPDATE users SET role = ?, full_name = ?, email = ? WHERE id = ?",
+                                 (values["role"], values["full_name"], values["email"], uid))
                     if values["role"] != "chair":                       # a signature image is only kept for a chair
                         db().execute("DELETE FROM signatures WHERE user_id = ?", (uid,))
                 if values.get("password"):

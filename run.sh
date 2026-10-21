@@ -14,5 +14,8 @@ if ! cmp -s requirements.txt .venv/requirements.installed; then
     cp requirements.txt .venv/requirements.installed
 fi
 
+# Optional settings (mail server etc.) kept in a file named .env next to this script; it is never put on GitHub.
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
+
 .venv/bin/python webapp.py ensure-admin
 exec .venv/bin/python webapp.py run

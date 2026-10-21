@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS forms (
 );
 CREATE INDEX IF NOT EXISTS idx_forms_student ON forms(student_id);
 
+-- A short record of the emails the app tried to send (newest 200 are kept), so a mail problem can be seen and fixed.
+CREATE TABLE IF NOT EXISTS email_log (
+    id       INTEGER PRIMARY KEY,
+    at       TEXT NOT NULL,
+    to_addr  TEXT NOT NULL,
+    subject  TEXT NOT NULL,
+    ok       INTEGER NOT NULL,
+    error    TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_advising_student   ON advising(student_id);
 CREATE INDEX IF NOT EXISTS idx_milestones_student ON milestones(student_id);
 CREATE INDEX IF NOT EXISTS idx_funding_student    ON funding(student_id);
@@ -134,5 +144,7 @@ CREATE TABLE IF NOT EXISTS users (
     faculty_id     INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
     fsr_id         INTEGER REFERENCES fsrs(id) ON DELETE CASCADE,
     full_name      TEXT,                 -- shown on approvals (needed for approver and chair)
+    email          TEXT,                 -- where approval notices go (needed for approver and chair; faculty and FSR
+                                         -- logins use the email on their faculty / FSR record instead)
     CHECK ((role = 'faculty') = (faculty_id IS NOT NULL) AND (role = 'fsr') = (fsr_id IS NOT NULL))
 );

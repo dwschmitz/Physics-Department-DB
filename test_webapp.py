@@ -8,6 +8,11 @@ import physdb
 import webapp
 
 
+def mailer_module():
+    import mailer
+    return mailer
+
+
 class WebTests(unittest.TestCase):
     def setUp(self):
         import tempfile, os
@@ -1708,7 +1713,7 @@ class WebTests(unittest.TestCase):
         self.add_student(c)
         out = [c, t]
         for username, role, name in (("appr", "approver", "Ann Approver"), ("chr", "chair", "Carl Chair")):
-            r = c.post("/users/new", data=dict(username=username, role=role, full_name=name, password="temp-password-1", csrf_token=t))
+            r = c.post("/users/new", data=dict(username=username, role=role, full_name=name, email=f"{username}@u.edu", password="temp-password-1", csrf_token=t))
             self.assertEqual(r.status_code, 302, r.get_data(as_text=True)[:300])
             k = self.app.test_client()
             self.assertEqual(k.post("/login", data={"username": username, "password": "temp-password-1"}).status_code, 302)
@@ -1734,12 +1739,16 @@ class WebTests(unittest.TestCase):
         c, t, appr, chair = self._approval_world()
         page = c.get("/users/new").get_data(as_text=True)
         self.assertIn('<option value="approver"', page); self.assertIn('<option value="chair"', page); self.assertIn("Full name", page)
-        r = c.post("/users/new", data=dict(username="noname", role="chair", full_name="", password="temp-password-1", csrf_token=t))
+        r = c.post("/users/new", data=dict(username="noname", role="chair", full_name="", email="", password="temp-password-1", csrf_token=t))
         self.assertEqual(r.status_code, 200); self.assertIn("Enter their full name", r.get_data(as_text=True))      # a name is required
+        self.assertIn("Enter their email address", r.get_data(as_text=True))                                         # and an email
+        r = c.post("/users/new", data=dict(username="noname", role="approver", full_name="N", email="not-an-email", password="temp-password-1", csrf_token=t))
+        self.assertEqual(r.status_code, 200); self.assertIn("valid email", r.get_data(as_text=True))
         r = c.post("/users/new", data=dict(username="vw2", role="viewer", full_name="", password="temp-password-1", csrf_token=t))
         self.assertEqual(r.status_code, 302)                                                                         # but not for others
         users = c.get("/users").get_data(as_text=True)
         self.assertIn("Approver", users); self.assertIn("Chair", users); self.assertIn("Ann Approver", users); self.assertIn("Carl Chair", users)
+        self.assertIn("appr@u.edu", users); self.assertIn("chr@u.edu", users)
         # they land on the approvals page, and only see that
         k = self.app.test_client()
         r = k.post("/login?next=/students", data={"username": "appr", "password": "my-own-pass-1"})
@@ -1752,7 +1761,7 @@ class WebTests(unittest.TestCase):
         self._sig_upload(chair)
         conn = physdb.connect(self.app.config["DB_PATH"]); uid = conn.execute("SELECT id FROM users WHERE username = 'chr'").fetchone()[0]
         self.assertEqual(conn.execute("SELECT count(*) FROM signatures").fetchone()[0], 1); conn.close()
-        r = c.post(f"/users/{uid}/edit", data=dict(role="editor", full_name="Carl Chair", password="", csrf_token=t)); self.assertEqual(r.status_code, 302)
+        r = c.post(f"/users/{uid}/edit", data=dict(role="editor", full_name="Carl Chair", email="chr@u.edu", password="", csrf_token=t)); self.assertEqual(r.status_code, 302)
         conn = physdb.connect(self.app.config["DB_PATH"])
         self.assertEqual(conn.execute("SELECT count(*) FROM signatures").fetchone()[0], 0); conn.close()
 
@@ -1888,6 +1897,52 @@ class WebTests(unittest.TestCase):
         conn = physdb.connect(self.app.config["DB_PATH"])
         conn.execute("UPDATE advising SET end_date = '2025-01-01'"); conn.commit(); conn.close()
         self.assertEqual(bohr.get(f"/my/forms/{fid}.pdf").status_code, 404)
+
+    def test_account_emails_and_the_email_notices_panel(self):
+        import os
+        from unittest import mock
+        c, t, appr, chair = self._approval_world()
+        form = c.get("/users/new").get_data(as_text=True)
+        self.assertIn("Email", form); self.assertIn("Required for an Approver or Chair", form)
+        # optional for ordinary accounts (and checked when given)
+        ok = lambda **kw: c.post("/users/new", data=dict(username=kw.pop("username"), role="viewer", full_name="", email=kw.pop("email", ""),
+                                                          password="temp-password-1", csrf_token=t))
+        self.assertEqual(ok(username="viewer1").status_code, 302); self.assertEqual(ok(username="viewer2", email="v2@u.edu").status_code, 302)
+        self.assertEqual(ok(username="viewer3", email="nonsense").status_code, 200)
+        # editing keeps or changes it
+        conn = physdb.connect(self.app.config["DB_PATH"]); uid = conn.execute("SELECT id FROM users WHERE username = 'appr'").fetchone()[0]; conn.close()
+        self.assertIn('value="appr@u.edu"', c.get(f"/users/{uid}/edit").get_data(as_text=True))
+        r = c.post(f"/users/{uid}/edit", data=dict(role="approver", full_name="Ann Approver", email="", password="", csrf_token=t))
+        self.assertEqual(r.status_code, 200); self.assertIn("Enter their email address", r.get_data(as_text=True))
+        r = c.post(f"/users/{uid}/edit", data=dict(role="approver", full_name="Ann Approver", email="ann@new.edu", password="", csrf_token=t))
+        self.assertEqual(r.status_code, 302); self.assertIn("ann@new.edu", c.get("/users").get_data(as_text=True))
+        # faculty and FSR accounts show the email from their own record
+        a2, at = self._fsr_world()
+        self._make_faculty_login(a2, at)
+        self.assertIn("Bohr@u.edu", a2.get("/users").get_data(as_text=True))
+        # the panel: off by default, with a way to test once on
+        with mock.patch.dict(os.environ, {"PHYSDB_SMTP_HOST": ""}):
+            page = c.get("/users").get_data(as_text=True)
+            self.assertIn("Email is not set up", page); self.assertNotIn("Send test email", page)
+        with mock.patch.dict(os.environ, {"PHYSDB_SMTP_HOST": "mail.example.edu"}):
+            page = c.get("/users").get_data(as_text=True)
+            self.assertIn("Email is switched on", page); self.assertIn("Send test email", page)
+            sent = []
+            with mock.patch.object(mailer_module(), "send", lambda to, subject, body: sent.append((to, subject))):
+                r = c.post("/users/test-email", data=dict(to="me@u.edu", csrf_token=t), follow_redirects=True)
+            self.assertEqual(sent[0][0], "me@u.edu"); self.assertIn("Test email sent to me@u.edu", r.get_data(as_text=True))
+            self.assertIn("me@u.edu", c.get("/users").get_data(as_text=True).split("Email notices")[1]); self.assertIn("Sent", c.get("/users").get_data(as_text=True))
+            def broken(to, subject, body):
+                raise mailer_module().MailError("SMTPAuthenticationError: bad login")
+            with mock.patch.object(mailer_module(), "send", broken):
+                r = c.post("/users/test-email", data=dict(to="me@u.edu", csrf_token=t), follow_redirects=True)
+            self.assertIn("could not be sent: SMTPAuthenticationError: bad login", r.get_data(as_text=True))
+            self.assertIn("Failed", c.get("/users").get_data(as_text=True)); self.assertIn("bad login", c.get("/users").get_data(as_text=True))
+            r = c.post("/users/test-email", data=dict(to="nonsense", csrf_token=t), follow_redirects=True)
+            self.assertIn("Enter an email address", r.get_data(as_text=True))
+        # only administrators
+        for k in (self.client("ed"), appr, chair):
+            self.assertEqual(k.post("/users/test-email", data=dict(to="me@u.edu", csrf_token=self.token(k, "/account"))).status_code, 403)
 
     def test_signature_upload_rules(self):
         import io

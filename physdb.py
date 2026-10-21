@@ -155,6 +155,7 @@ def connect(path=DB_PATH):
     _finish_interrupted_rebuilds(conn)
     _migrate_users(conn)
     _add_signatures(conn)
+    _add_user_email(conn)
     _add_forms_faculty_copy(conn)
     _add_faculty_fsr(conn)
     _add_faculty_accounts(conn)
@@ -367,7 +368,7 @@ def _migrate_users(conn):
     ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'users'").fetchone()[0]
     if "'chair'" in ddl and "full_name" in ddl and "must_change" in ddl:
         return
-    new_cols = ["id", "username", "password_hash", "role", "must_change", "faculty_id", "fsr_id", "full_name"]
+    new_cols = ["id", "username", "password_hash", "role", "must_change", "faculty_id", "fsr_id", "full_name", "email"]
     have = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
     copy = [c for c in new_cols if c in have]
     # SQLite's recommended way to rebuild a table that others refer to (signatures does): with foreign keys off, build
@@ -391,12 +392,20 @@ def _migrate_users(conn):
             faculty_id INTEGER REFERENCES faculty(id) ON DELETE CASCADE,
             fsr_id INTEGER REFERENCES fsrs(id) ON DELETE CASCADE,
             full_name TEXT,
+            email TEXT,
             CHECK ((role = 'faculty') = (faculty_id IS NOT NULL) AND (role = 'fsr') = (fsr_id IS NOT NULL)));
         INSERT INTO users_new ({", ".join(copy)}) SELECT {", ".join(copy)} FROM users;
         DROP TABLE users;
         ALTER TABLE users_new RENAME TO users;
         COMMIT;""")
     conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _add_user_email(conn):
+    """users.email (where approval notices go) was added after the approver / chair roles."""
+    if "email" not in {r[1] for r in conn.execute("PRAGMA table_info(users)")}:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        conn.commit()
 
 
 def _add_forms_faculty_copy(conn):
@@ -880,6 +889,8 @@ def build_parser():
     a.add_argument("courses", nargs="+", choices=COURSE_CODES, help="core course codes: " + ", ".join(COURSE_CODES))
     a.add_argument("--remove", action="store_true")
 
+    sub.add_parser("send-reminders", help="email the approvers / chair that candidacy forms are waiting (run daily if wanted)")
+
     a = sub.add_parser("assign-advisor")
     a.add_argument("student"); a.add_argument("faculty")
     a.add_argument("--role", default="advisor",
@@ -945,6 +956,12 @@ def main(argv=None):
                 print("All six are complete: the candidacy form was created and is waiting for an approver.")
             if res["withdrawn"]:
                 print("The candidacy form that was waiting for approval was withdrawn.")
+        elif c == "send-reminders":
+            import mailer, notify
+            if not mailer.enabled():
+                raise SystemExit("Email is not set up: PHYSDB_SMTP_HOST is empty (see mailer.py for the settings).")
+            notify.ASYNC = False                 # wait for the messages to go before the command exits
+            print("Reminders sent:", notify.send_reminders(conn))
         elif c == "assign-advisor":
             assign_advisor(conn, args.student, args.faculty, args.role, args.start_date)
         elif c == "add-milestone":

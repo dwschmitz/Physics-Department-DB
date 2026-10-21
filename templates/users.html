@@ -2,11 +2,31 @@
 <h1>Accounts <a class="btn small" href="{{ url_for('user_new') }}">+ Add account</a>
   <a class="btn small" href="{{ url_for('user_new_faculty') }}">+ Add faculty account</a>
   <a class="btn small" href="{{ url_for('user_new_fsr') }}">+ Add FSR account</a></h1>
-<table><tr>{{ sort_th("Username", "username", sort, sdir) }}{{ sort_th("Role", "role", sort, sdir) }}{{ sort_th("Status", "status", sort, sdir) }}<th></th></tr>
+<table><tr>{{ sort_th("Username", "username", sort, sdir) }}{{ sort_th("Role", "role", sort, sdir) }}<th>Email</th>{{ sort_th("Status", "status", sort, sdir) }}<th></th></tr>
 {% for r in rows %}<tr><td>{{ r.username }}{% if r.id == user.id %} <span class="muted">(you)</span>{% endif %}</td>
 <td>{{ r.role|label }}{% if r.role in ('faculty', 'fsr') %} <span class="muted">&mdash; {{ r.f_first }} {{ r.f_last }}</span>{% elif r.full_name %} <span class="muted">&mdash; {{ r.full_name }}</span>{% endif %}</td>
+<td>{{ r.shown_email or '' }}</td>
 <td>{% if r.must_change %}<span class="badge on_leave">Must choose new password</span>{% else %}<span class="badge active">OK</span>{% endif %}</td>
 <td class="actions">{% if r.id == user.id %}<a class="btn secondary small" href="{{ url_for('account') }}">Change my password</a>{% else %}<a class="btn secondary small" href="{{ url_for('user_edit', uid=r.id) }}">{{ 'Reset password' if r.role in ('faculty', 'fsr') else 'Change role / reset password' }}</a>{% endif %}
 {% if r.id != user.id %}{{ delete_button(url_for('user_delete', uid=r.id), 'Delete the account ' ~ r.username ~ '?') }}{% endif %}</td></tr>
 {% endfor %}</table>
-<p class="muted">Deleting an account does not affect any student records.</p>{% endblock %}
+<p class="muted">Deleting an account does not affect any student records. Faculty and FSR accounts show the email on their own record.</p>
+
+<h2>Email notices</h2>
+{% if mail_on %}
+<p>Email is switched on. Approvers and the chair are emailed when a candidacy form arrives in their queue. Send a test message to check it works:</p>
+<form class="filters" method="post" action="{{ url_for('user_test_email') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Send a test to<input type="email" name="to" size="30" required placeholder="you@example.edu"></label>
+  <button class="btn">Send test email</button>
+</form>
+{% else %}
+<p class="muted">Email is not set up, so no notices are sent (the approvals pages still work). To switch it on, give the app your mail server's details
+  (<code>PHYSDB_SMTP_HOST</code> and related settings, see the README) and restart it.</p>
+{% endif %}
+{% if mail_log %}
+<table><tr><th>When</th><th>To</th><th>Subject</th><th>Result</th></tr>
+{% for m in mail_log %}<tr><td style="white-space:nowrap">{{ m.at.replace('T', ' ') }}</td><td>{{ m.to_addr }}</td><td>{{ m.subject }}</td>
+<td>{% if m.ok %}<span class="badge active">Sent</span>{% else %}<span class="badge withdrawn">Failed</span> {{ m.error }}{% endif %}</td></tr>{% endfor %}</table>
+{% endif %}
+{% endblock %}

@@ -178,6 +178,147 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual([r["status"] for r in workflow.recent(self.conn)], ["rejected"])
 
 
+class MailerTests(unittest.TestCase):
+    ENV = {"PHYSDB_SMTP_HOST": "mail.example.edu", "PHYSDB_SMTP_USER": "bot@example.edu", "PHYSDB_SMTP_PASSWORD": "pw"}
+
+    def test_settings_and_defaults(self):
+        import mailer
+        self.assertIsNone(mailer.settings({})); self.assertIsNone(mailer.settings({"PHYSDB_SMTP_HOST": "  "}))
+        cfg = mailer.settings(self.ENV)
+        self.assertEqual((cfg["host"], cfg["port"], cfg["security"], cfg["sender"]), ("mail.example.edu", 587, "starttls", "bot@example.edu"))
+        cfg = mailer.settings({**self.ENV, "PHYSDB_SMTP_PORT": "465", "PHYSDB_SMTP_SECURITY": "SSL", "PHYSDB_MAIL_FROM": "grads@example.edu",
+                               "PHYSDB_BASE_URL": "https://grads.example.edu/"})
+        self.assertEqual((cfg["port"], cfg["security"], cfg["sender"], cfg["base_url"]), (465, "ssl", "grads@example.edu", "https://grads.example.edu"))
+
+    def test_sending(self):
+        import mailer
+        from unittest import mock
+        with mock.patch.dict(os.environ, self.ENV, clear=False), mock.patch("smtplib.SMTP") as smtp:
+            mailer.send("a@example.edu", "Hello", "Body text")
+            server = smtp.return_value.__enter__.return_value
+            smtp.assert_called_once_with("mail.example.edu", 587, timeout=mailer.TIMEOUT)
+            server.starttls.assert_called_once(); server.login.assert_called_once_with("bot@example.edu", "pw")
+            msg = server.send_message.call_args[0][0]
+            self.assertEqual((msg["To"], msg["From"], msg["Subject"]), ("a@example.edu", "bot@example.edu", "Hello"))
+            self.assertIn("Body text", msg.get_content())
+        with mock.patch.dict(os.environ, {**self.ENV, "PHYSDB_SMTP_SECURITY": "ssl"}), mock.patch("smtplib.SMTP_SSL") as ssl_smtp:
+            mailer.send("a@example.edu", "Hello", "Body")
+            ssl_smtp.return_value.__enter__.return_value.send_message.assert_called_once()
+        with mock.patch.dict(os.environ, {**self.ENV, "PHYSDB_SMTP_SECURITY": "none", "PHYSDB_SMTP_USER": "", "PHYSDB_MAIL_FROM": "x@example.edu"}), \
+                mock.patch("smtplib.SMTP") as smtp:
+            mailer.send("a@example.edu", "Hello", "Body")
+            server = smtp.return_value.__enter__.return_value
+            server.starttls.assert_not_called(); server.login.assert_not_called()
+
+    def test_problems_become_mail_errors(self):
+        import smtplib
+        import mailer
+        from unittest import mock
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(mailer.MailError):
+                mailer.send("a@example.edu", "s", "b")
+            self.assertFalse(mailer.enabled())
+        for env, word in (({"PHYSDB_SMTP_SECURITY": "carrier-pigeon"}, "SECURITY"), ({"PHYSDB_SMTP_USER": "", "PHYSDB_MAIL_FROM": ""}, "From"),
+                          ({"PHYSDB_SMTP_PORT": "abc"}, "PORT")):
+            with mock.patch.dict(os.environ, {**self.ENV, **env}, clear=True):
+                with self.assertRaises(mailer.MailError) as cm:
+                    mailer.send("a@example.edu", "s", "b")
+                self.assertIn(word, str(cm.exception))
+        for exc in (smtplib.SMTPAuthenticationError(535, b"bad login"), ConnectionRefusedError("down"), TimeoutError("slow")):
+            with mock.patch.dict(os.environ, self.ENV, clear=True), mock.patch("smtplib.SMTP") as smtp:
+                smtp.return_value.__enter__.return_value.send_message.side_effect = exc
+                with self.assertRaises(mailer.MailError):
+                    mailer.send("a@example.edu", "s", "b")
+
+
+class NotifyTests(unittest.TestCase):
+    def setUp(self):
+        from unittest import mock
+        import mailer, notify
+        self.notify, self.mailer = notify, mailer
+        path = os.path.join(tempfile.mkdtemp(), "n.db")
+        self.conn = physdb.connect(path)
+        self.sid = physdb.add_student(self.conn, university_id="12345678", first_name="Secret", last_name="Studentname",
+                                      email="s@u.edu", matriculation_year=2022, research_area=None, notes=None)
+        for name, role, email in (("a1", "approver", "a1@u.edu"), ("a2", "approver", "a2@u.edu"), ("a3", "approver", None),
+                                  ("c1", "chair", "c1@u.edu"), ("e1", "editor", "e1@u.edu")):
+            self.conn.execute("INSERT INTO users (username, password_hash, role, full_name, email) VALUES (?, 'h', ?, ?, ?)", (name, role, name, email))
+        self.conn.commit()
+        self.sent = []
+        env = mock.patch.dict(os.environ, {"PHYSDB_SMTP_HOST": "mail.example.edu", "PHYSDB_BASE_URL": "https://grads.example.edu"}); env.start()
+        send = mock.patch.object(mailer, "send", lambda to, subject, body: self.sent.append((to, subject, body))); send.start()
+        asyn = mock.patch.object(notify, "ASYNC", False); asyn.start()
+        for p in (env, send, asyn):
+            self.addCleanup(p.stop)
+        self.all6 = [c for c, _, _ in physdb.CORE_COURSES]
+
+    def test_a_new_form_emails_the_approvers_and_an_approval_emails_the_chair(self):
+        workflow.save_course_credits(self.conn, self.sid, self.all6, "ed")
+        self.assertEqual(sorted(t for t, _, _ in self.sent), ["a1@u.edu", "a2@u.edu"])            # approvers with an address; not the editor or the chair
+        to, subject, body = self.sent[0]
+        self.assertIn("waiting for your approval", subject); self.assertIn("1 candidacy form is waiting", body)
+        self.assertIn("https://grads.example.edu/approvals", body)
+        for text in (subject, body):
+            self.assertNotIn("Secret", text); self.assertNotIn("Studentname", text); self.assertNotIn("12345678", text)   # no student details by email
+        self.sent.clear()
+        workflow.approve(self.conn, self.conn.execute("SELECT id FROM forms").fetchone()[0], "a1")
+        self.assertEqual([(t, "signature" in s) for t, s, _ in self.sent], [("c1@u.edu", True)])
+        self.sent.clear()
+        fid = self.conn.execute("SELECT id FROM forms").fetchone()[0]
+        workflow.reject(self.conn, fid, "c1", "no", "pending_chair")                              # rejecting sends nothing
+        self.assertEqual(self.sent, [])
+
+    def test_without_email_set_up_nothing_is_sent_and_nothing_breaks(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"PHYSDB_SMTP_HOST": ""}):
+            workflow.save_course_credits(self.conn, self.sid, self.all6, "ed")
+        self.assertEqual(self.sent, []); self.assertEqual(self.conn.execute("SELECT status FROM forms").fetchone()[0], "pending_approval")
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM email_log").fetchone()[0], 0)
+
+    def test_a_mail_failure_is_logged_not_raised(self):
+        from unittest import mock
+        def broken(to, subject, body):
+            raise self.mailer.MailError("SMTPAuthenticationError: bad login")
+        with mock.patch.object(self.mailer, "send", broken):
+            workflow.save_course_credits(self.conn, self.sid, self.all6, "ed")                      # still creates the form
+        self.assertEqual(self.conn.execute("SELECT status FROM forms").fetchone()[0], "pending_approval")
+        rows = self.conn.execute("SELECT to_addr, ok, error FROM email_log ORDER BY id").fetchall()
+        self.assertEqual([(r[0], r[1]) for r in rows], [("a1@u.edu", 0), ("a2@u.edu", 0)]); self.assertIn("bad login", rows[0][2])
+
+    def test_successes_are_logged_and_the_log_is_trimmed(self):
+        workflow.save_course_credits(self.conn, self.sid, self.all6, "ed")
+        self.assertEqual([r[0] for r in self.conn.execute("SELECT ok FROM email_log")], [1, 1])
+        for i in range(250):
+            self.notify._log(self.conn.execute("PRAGMA database_list").fetchone()[2], f"x{i}@u.edu", "s", None)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM email_log").fetchone()[0], self.notify.KEEP_LOG)
+        self.assertEqual(self.conn.execute("SELECT to_addr FROM email_log ORDER BY id DESC LIMIT 1").fetchone()[0], "x249@u.edu")
+
+    def test_reminders(self):
+        self.assertEqual(self.notify.send_reminders(self.conn), 0); self.assertEqual(self.sent, [])          # nothing waiting
+        workflow.save_course_credits(self.conn, self.sid, self.all6, "ed"); self.sent.clear()
+        self.assertEqual(self.notify.send_reminders(self.conn), 2)
+        self.assertTrue(all(s.startswith("Reminder: ") for _, s, _ in self.sent)); self.assertEqual(sorted(t for t, _, _ in self.sent), ["a1@u.edu", "a2@u.edu"])
+        workflow.approve(self.conn, self.conn.execute("SELECT id FROM forms").fetchone()[0], "a1"); self.sent.clear()
+        self.assertEqual(self.notify.send_reminders(self.conn), 1); self.assertEqual(self.sent[0][0], "c1@u.edu")
+
+    def test_background_sending_does_not_block_and_still_delivers(self):
+        import threading, time
+        from unittest import mock
+        gate, done = threading.Event(), []
+        def slow(to, subject, body):
+            gate.wait(5); done.append(to)
+        with mock.patch.object(self.notify, "ASYNC", True), mock.patch.object(self.mailer, "send", slow):
+            start = time.time()
+            workflow.save_course_credits(self.conn, self.sid, self.all6, "ed")
+            self.assertLess(time.time() - start, 2); self.assertEqual(done, [])                      # returned while the mail was still "sending"
+            gate.set()
+            for _ in range(50):
+                if len(done) == 2:
+                    break
+                time.sleep(0.1)
+        self.assertEqual(sorted(done), ["a1@u.edu", "a2@u.edu"])
+
+
 class CommandLineTests(unittest.TestCase):
     def test_course_credit_command_starts_and_withdraws_the_form(self):
         import contextlib
@@ -200,6 +341,10 @@ class CommandLineTests(unittest.TestCase):
         conn = real(path)
         self.assertEqual([r["status"] for r in conn.execute("SELECT status FROM forms")], ["withdrawn"])
         self.assertEqual(conn.execute("SELECT created_by FROM forms").fetchone()[0], "command line")
+        # reminders need email to be set up
+        with self.assertRaises(SystemExit) as cm, mock.patch.dict(os.environ, {"PHYSDB_SMTP_HOST": ""}):
+            run("send-reminders")
+        self.assertIn("not set up", str(cm.exception))
 
 
 class MigrationTests(unittest.TestCase):

@@ -10,8 +10,10 @@ database connection, commits its own changes, and refuses a step that is not val
 (so two people acting at once can't both succeed).
 """
 import datetime
+import sys
 
 import formfill
+import notify
 import physdb
 
 PENDING = ("pending_approval", "pending_chair")
@@ -21,6 +23,14 @@ STATUS_NAMES = {"pending_approval": "Waiting for an approver", "pending_chair": 
 
 class WorkflowError(Exception):
     """A step that can't be done (wrong status, missing signature, ...). The message is for the user."""
+
+
+def _notify(conn, status):
+    """Tell the people who handle a queue that something arrived. A mail problem must never stop the workflow."""
+    try:
+        notify.queue_changed(conn, status)
+    except Exception as e:                                   # noqa: BLE001 (any failure here is only worth a note)
+        print(f"notification not sent: {e}", file=sys.stderr)
 
 
 def _now():
@@ -61,6 +71,7 @@ def start_candidacy_form(conn, student_id, actor):
            VALUES (?, 'candidacy', 'pending_approval', ?, ?, ?, ?, ?)""",
         (student_id, formfill.CANDIDACY_TEMPLATE, _now(), actor, pdf, formfill.sha256(pdf)))
     conn.commit()
+    _notify(conn, "pending_approval")
     return cur.lastrowid
 
 
@@ -97,6 +108,7 @@ def approve(conn, form_id, actor):
     conn.commit()
     if cur.rowcount != 1:
         raise WorkflowError("This form is no longer waiting for an approver (someone may have already dealt with it).")
+    _notify(conn, "pending_chair")
 
 
 def reject(conn, form_id, actor, reason, stage):

@@ -74,6 +74,24 @@ person's password and role (for example, to regain admin access if no admin can 
   (only their current advisor, and only after the chair has signed).
   Everyone else with access can follow the **Forms** page and download the PDFs. A form is flattened when filled in,
   so it can't be edited afterwards. (PDF handling uses the `pypdf` and `Pillow` libraries, which `run.sh` installs.)
+- **Email notices:** Approver and Chair accounts have an email address (required; other non-faculty accounts may have
+  one; faculty and FSR accounts use the email on their own record). When a candidacy form arrives in the approvers'
+  queue they are emailed, and when it moves to the chair's queue the chair is. The email says how many forms are waiting
+  and links to the approvals page; it never contains student names or IDs. Nothing is sent until you give the app your
+  mail server's details (ask your IT group for an SMTP server, port, and a login for the app). Put them in a file named
+  `.env` next to `run.sh` (never uploaded to GitHub; Windows users can use `set NAME=value` lines in `run.bat` instead):
+
+      PHYSDB_SMTP_HOST=smtp.example.edu
+      PHYSDB_SMTP_PORT=587              # optional; 587 is the default
+      PHYSDB_SMTP_SECURITY=starttls     # optional: starttls (default), ssl or none
+      PHYSDB_SMTP_USER=physdb-bot       # optional, if the server asks for a login
+      PHYSDB_SMTP_PASSWORD='...'           # keep the quotes if it has spaces or symbols
+      PHYSDB_MAIL_FROM=physgrads@example.edu
+      PHYSDB_BASE_URL=https://physgrads.example.edu    # the address people use, for the link in the email
+
+  Restart the app, then on the **Accounts** page use **Send test email**; the same page lists the most recent emails
+  and any errors. A mail problem never stops a form from moving along. For reminders while forms sit in a queue, run
+  `python3 physdb.py send-reminders` from a daily scheduled job (cron on Mac/Linux, Task Scheduler on Windows).
 - **Importing students from a file:** on the Students tab, **Import from file** (editors and admins) takes an Excel
   (.xlsx, first sheet) or CSV file with one student per row; `examples/Incoming_Student_Data_Test.xlsx` is a sample
   and the page links a blank CSV template. Required columns: First Name, Last Name, UCID (exactly 8 digits), Email,
