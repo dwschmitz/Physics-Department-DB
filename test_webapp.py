@@ -2103,6 +2103,142 @@ class WebTests(unittest.TestCase):
         self.assertIn('<script src="/static/app.js" defer></script>', c.get("/students").get_data(as_text=True))
         self.assertIn('class="wide-page"', c.get("/reports/milestones").get_data(as_text=True))
 
+    # ---- the audit log -----------------------------------------------------------------------------------
+    def _audit(self, **where):
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        try:
+            sql = "SELECT * FROM audit_log" + (" WHERE " + " AND ".join(f"{k} = ?" for k in where) if where else "") + " ORDER BY id"
+            return [dict(r) for r in conn.execute(sql, tuple(where.values()))]
+        finally:
+            conn.close()
+
+    def test_web_changes_are_credited_to_whoever_made_them(self):
+        import json
+        c, t, appr, chair = self._approval_world()                                 # admin "ad", approver "appr", chair "chr"
+        ed = self.client("ed"); et = self.token(ed)
+        ed.post("/students/1/edit", data=dict(first_name="Ada", last_name="Lovelace", university_id="U1", email="ada@u.edu", citizenship="citizen",
+                status="on_leave", matriculation_year="2022", matriculation_term="Autumn", research_area="optics", csrf_token=et))
+        ed.post("/students/1/milestones/new", data=dict(kind="pre_oral", date="2024-05-01", outcome="passed", csrf_token=et))
+        ed.post("/students/1/funding/new", data=dict(kind="RA", term_year=2026, term_season="Autumn", amount="5", csrf_token=et))
+        ed.post("/students/1/courses", data={"course": ["cm", "sm"], "csrf_token": et})
+        who = {(r["entity"], r["action"]): r["actor"] for r in self._audit() if r["actor"] != "ad"}
+        for key in (("students", "update"), ("milestones", "insert"), ("funding", "insert"), ("course_credits", "insert")):
+            self.assertEqual(who.get(key), "ed", key)
+        upd = [r for r in self._audit(entity="students") if r["action"] == "update"][0]
+        old, new = json.loads(upd["old_values"]), json.loads(upd["new_values"])
+        self.assertEqual((old["status"], new["status"], old["research_area"], new["research_area"]), ("active", "on_leave", None, "optics"))
+        # account actions by the administrator, and the user's own password change, are logged without any hash
+        self.assertTrue(any(r["entity"] == "users" and r["action"] == "insert" and r["actor"] == "ad" and r["label"] == "appr" for r in self._audit()))
+        appr.post("/account", data=dict(current_password="my-own-pass-1", new_password="another-pass-2", confirm="another-pass-2", csrf_token=self.token(appr, "/account")))
+        pw = [r for r in self._audit(entity="users", actor="appr") if r["action"] == "update"]
+        self.assertEqual(len(pw), 2)                                                                  # the forced first change, and this one
+        self.assertTrue(all("password_hash_changed" in r["new_values"] for r in pw))
+        self.assertNotIn("scrypt", " ".join(f"{r['old_values']}{r['new_values']}" for r in self._audit()))
+        # the approval path is attributed too
+        c.post("/students/1/courses", data={"course": self.ALL6, "csrf_token": t})
+        fid = self._forms()[0]["id"]
+        appr.post(f"/forms/{fid}/approve", data={"csrf_token": self.token(appr, "/approvals")})
+        self._sig_upload(chair); chair.post(f"/forms/{fid}/sign", data={"csrf_token": self.token(chair, "/signatures")})
+        steps = [(r["entity"], r["action"], r["actor"]) for r in self._audit() if r["entity"] in ("forms", "signatures") or
+                 (r["entity"] == "milestones" and r["actor"] == "chr")]
+        self.assertIn(("forms", "insert", "ad"), steps); self.assertIn(("forms", "update", "appr"), steps)
+        self.assertIn(("signatures", "insert", "chr"), steps); self.assertIn(("forms", "update", "chr"), steps)
+        self.assertIn(("milestones", "insert", "chr"), steps)                                       # the milestone the signing recorded
+        # nobody in the log is "(outside the app)" and nothing is unattributed
+        self.assertEqual([r for r in self._audit() if r["actor"] is None], [])
+
+    def test_sign_ins_lockouts_and_imports_are_logged(self):
+        from test_import import HEADER, good, xlsx
+        c = self.app.test_client()
+        self._try_login(c, "ed", "pw-ed")
+        ev = [r for r in self._audit(action="event")]
+        self.assertEqual([(r["actor"], r["label"]) for r in ev], [("ed", "Signed in")])
+        for n in range(webapp.LOGIN_MAX_PER_USERNAME):
+            self._try_login(self.app.test_client(), "mallory", "bad")
+        locked = [r for r in self._audit(action="event") if "locked" in r["label"]]
+        self.assertEqual(len(locked), 1); self.assertIn("'mallory'", locked[0]["label"]); self.assertEqual(locked[0]["actor"], "(not signed in)")
+        self._try_login(self.app.test_client(), "mallory", "bad")                                    # blocked attempts don't add more
+        self.assertEqual(len([r for r in self._audit(action="event") if "locked" in r["label"]]), 1)
+        # an import is marked as such, one row per student
+        import io
+        ed = self.client("ed"); et = self.token(ed, "/students/import")
+        ed.post("/students/import", data=dict(csrf_token=et, file=(io.BytesIO(xlsx([HEADER, good(1), good(2)])), "new class.xlsx")), content_type="multipart/form-data")
+        ed.post("/students/import/confirm", data={"csrf_token": et})
+        imported = [r for r in self._audit(entity="students") if r["action"] == "insert"]
+        self.assertEqual([(r["actor"], r["note"]) for r in imported], [("ed", "student import from new class.xlsx")] * 2)
+
+    def test_the_audit_page_is_for_administrators_and_the_chair_only(self):
+        c, t, appr, chair = self._approval_world()
+        self.assertEqual(c.get("/audit").status_code, 200); self.assertEqual(chair.get("/audit").status_code, 200)
+        for who in (self.client("ed"), self.client("vw"), appr):
+            self.assertEqual(who.get("/audit").status_code, 403)
+        self.assertEqual(self.app.test_client().get("/audit").status_code, 302)
+        c.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", cnet="nbohr", csrf_token=t))
+        self._make_faculty_login(c, t, fid=1); fac = self._faculty_client()
+        self.assertEqual(fac.get("/audit").status_code, 403)
+        self.assertNotIn(">Audit<", self.client("ed").get("/students").get_data(as_text=True))
+        self.assertIn(">Audit<", c.get("/students").get_data(as_text=True))
+        self.assertIn('href="/audit?student=1"', c.get("/students/1").get_data(as_text=True))          # History link
+        self.assertNotIn("/audit?student=", self.client("ed").get("/students/1").get_data(as_text=True))
+        # there is no way to change or remove an entry from the site
+        for path in ("/audit/1/delete", "/audit/1/edit", "/audit/clear"):
+            self.assertIn(c.post(path, data={"csrf_token": t}).status_code, (404, 405))
+
+    def test_the_audit_page_shows_readable_entries_and_filters_them(self):
+        c, t, appr, chair = self._approval_world()
+        c.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", cnet="nbohr", csrf_token=t))
+        c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
+        ed = self.client("ed"); et = self.token(ed)
+        ed.post("/students/1/edit", data=dict(first_name="Ada", last_name="Lovelace", university_id="U1", email="ada@u.edu", citizenship="citizen",
+                status="graduated", graduation_year="2026", graduation_term="Spring", matriculation_year="2022", matriculation_term="Autumn",
+                notes="<script>alert(1)</script>", csrf_token=et))
+        page = c.get("/audit").get_data(as_text=True)
+        self.assertIn("Status: Active → Graduated", page); self.assertIn("Graduation year: (empty) → 2026", page)
+        self.assertIn("Changed student", page); self.assertIn("Added advisor / committee", page); self.assertIn("Faculty: Niels Bohr", page)
+        self.assertIn("Role: Advisor", page)
+        c.post("/students/1/courses", data={"course": ["qm2"], "csrf_token": t})
+        self.assertIn("Course: QM-2 (Quantum Mechanics II)", c.get("/audit").get_data(as_text=True))
+        self.assertNotIn("Student: 1", c.get("/audit").get_data(as_text=True))
+        self.assertIn(">ed<", page); self.assertIn(">ad<", page)
+        self.assertNotIn("<script>alert", page); self.assertIn("&lt;script&gt;alert(1)", page)            # entries are escaped
+        rows = lambda q: re.findall(r"<tr>\s*<td style=\"white-space:nowrap\">(\d{4}-\d{2}-\d{2} [\d:]+)</td>", c.get("/audit" + q).get_data(as_text=True))
+        everything = len(rows(""))
+        self.assertGreater(everything, 5)
+        by_ed = c.get("/audit?who=ed").get_data(as_text=True)
+        self.assertIn("Status: Active → Graduated", by_ed); self.assertNotIn("Role: Advisor", by_ed)
+        self.assertIn("Role: Advisor", c.get("/audit?what=advising").get_data(as_text=True)); self.assertNotIn("Status:", c.get("/audit?what=advising").get_data(as_text=True))
+        self.assertNotIn("Role: Advisor", c.get("/audit?action=update").get_data(as_text=True))
+        self.assertIn("Role: Advisor", c.get("/audit?action=insert").get_data(as_text=True))
+        stu = c.get("/audit?student=1").get_data(as_text=True)
+        self.assertIn("Ada Lovelace", stu); self.assertIn("only changes concerning", stu); self.assertNotIn("Bohr, Niels", stu)
+        self.assertIn("Ada Lovelace", c.get("/audit?q=lovelace").get_data(as_text=True))
+        self.assertEqual(len(rows("?q=zzzznomatch")), 0); self.assertIn("Nothing matches", c.get("/audit?q=zzzznomatch").get_data(as_text=True))
+        self.assertEqual(len(rows("?since=2999-01-01")), 0); self.assertEqual(len(rows("?until=2000-01-01")), 0)
+        import datetime
+        today = datetime.date.today().isoformat()
+        self.assertEqual(len(rows(f"?since={today}&until={today}")), everything)                           # "until" includes the whole day
+        for junk in ("?since=not-a-date", "?until=2026-13-45", "?page=abc", "?student=x", "?who=%27%3B--", "?what=nonsense", "?q=%25_%5C"):
+            self.assertEqual(c.get("/audit" + junk).status_code, 200, junk)
+        # a change made straight to the database file shows up as outside the app
+        import sqlite3
+        raw = sqlite3.connect(self.app.config["DB_PATH"]); raw.execute("UPDATE students SET notes = 'sneaky' WHERE id = 1"); raw.commit(); raw.close()
+        outside = c.get("/audit?who=_outside").get_data(as_text=True)
+        self.assertIn("(outside the app)", outside); self.assertIn("sneaky", outside)
+
+    def test_the_audit_page_pages_through_a_long_log(self):
+        c, t, appr, chair = self._approval_world()
+        conn = physdb.connect(self.app.config["DB_PATH"])
+        conn.executemany("INSERT INTO audit_log (at, actor, action, entity, label, new_values) VALUES ('2026-01-01T00:00:00', 'bulk', 'event', 'session', ?, NULL)",
+                         [(f"event {n}",) for n in range(250)]); conn.commit(); conn.close()
+        first = c.get("/audit?who=bulk").get_data(as_text=True)
+        self.assertEqual(first.count("event "), 100)
+        self.assertIn("event 249", first); self.assertNotIn("event 149", first); self.assertIn("Older", first); self.assertNotIn("Newer", first)
+        older = c.get("/audit?who=bulk&page=2").get_data(as_text=True)
+        self.assertIn("event 149", older); self.assertIn("Newer", older); self.assertIn("Older", older)
+        last = c.get("/audit?who=bulk&page=3").get_data(as_text=True)
+        self.assertEqual(last.count("event "), 50); self.assertNotIn("Older", last)
+        self.assertIn("who=bulk", re.search(r'href="([^"]*)">Older', first).group(1).replace("&amp;", "&"))        # filters are kept
+
     def test_signature_upload_rules(self):
         import io
         c, t, appr, chair = self._approval_world()
@@ -2150,8 +2286,8 @@ class WebTests(unittest.TestCase):
         header = lambda k: re.findall(r"<header>(.*?)<span class=\"spacer\">", k.get("/students").get_data(as_text=True), re.S)[0]
         tabs = lambda k: [re.sub(r"<[^>]+>|\s+", " ", x).strip().split(" ")[0] for x in re.findall(r"<a href=\"/[^\"]*\">(.*?)</a>", header(k), re.S)]
         self.assertEqual(tabs(appr), ["Students", "Faculty", "FSRs", "Reports", "Approvals"])
-        self.assertEqual(tabs(chair), ["Students", "Faculty", "FSRs", "Reports", "Approvals", "Signatures", "Accounts"])
-        self.assertEqual(tabs(c), ["Students", "Faculty", "FSRs", "Reports", "Forms", "Accounts"])
+        self.assertEqual(tabs(chair), ["Students", "Faculty", "FSRs", "Reports", "Approvals", "Signatures", "Accounts", "Audit"])
+        self.assertEqual(tabs(c), ["Students", "Faculty", "FSRs", "Reports", "Forms", "Accounts", "Audit"])
         self.assertRegex(header(appr), r'Approvals <span class="count">1</span>'); self.assertNotIn("Signatures", header(appr))
         # first round: the approver or the chair; final round: the chair only; rejecting follows the same split
         tok = lambda k: self.token(k, "/students")

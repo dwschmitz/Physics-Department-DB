@@ -71,3 +71,4 @@ table.snapshot td.check{font-weight:700;color:#1b6e3a}
 .wide td.actions{white-space:nowrap;width:1%}.wide td.actions>*{display:inline-block;margin:0 .15rem 0 0;vertical-align:middle}
 .wide td.actions .small{padding:.12rem .35rem;font-size:.78rem;white-space:nowrap}
 .wide td.actions .small.plus{padding:.12rem .5rem;font-size:1rem;font-weight:700;line-height:1.17rem}
+table.audit td{vertical-align:top}table.audit td.why{white-space:normal;min-width:18rem}

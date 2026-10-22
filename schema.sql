@@ -115,6 +115,25 @@ CREATE TABLE IF NOT EXISTS forms (
 );
 CREATE INDEX IF NOT EXISTS idx_forms_student ON forms(student_id);
 
+-- The audit log (see audit.py): who changed what, and when. Written by triggers; never edited by the app.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY,
+    at          TEXT NOT NULL,            -- local time of the change
+    actor       TEXT,                     -- the username (or "command line"); empty if the change came from outside the app
+    note        TEXT,                     -- a few words of context, e.g. "student import"
+    action      TEXT NOT NULL,            -- insert / update / delete / event
+    entity      TEXT NOT NULL,            -- the table changed (or "session" for sign-ins)
+    row_id      INTEGER,
+    student_id  INTEGER,                  -- the student this concerns, if any (no link: the student may be deleted later)
+    label       TEXT,                     -- who or what it was, in words, at the time
+    old_values  TEXT,                     -- JSON, for update and delete
+    new_values  TEXT                      -- JSON, for insert and update
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at      ON audit_log(at);
+CREATE INDEX IF NOT EXISTS idx_audit_student ON audit_log(student_id, id);
+CREATE INDEX IF NOT EXISTS idx_audit_actor   ON audit_log(actor, id);
+CREATE TABLE IF NOT EXISTS audit_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
 -- Failed sign-in attempts, so repeated wrong passwords can be slowed down (see webapp LOGIN_* settings).
 CREATE TABLE IF NOT EXISTS login_failures (
     at        REAL NOT NULL,            -- time.time() of the failed attempt

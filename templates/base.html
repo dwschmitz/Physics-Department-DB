@@ -20,7 +20,7 @@
   {% if approval_role %}<a href="{{ url_for('approvals') }}">Approvals{% if approvals_waiting %} <span class="count">{{ approvals_waiting }}</span>{% endif %}</a>
   {% else %}<a href="{{ url_for('approvals') }}">Forms</a>{% endif %}
   {% if approval_role == 'chair' %}<a href="{{ url_for('signatures') }}">Signatures{% if signatures_waiting %} <span class="count">{{ signatures_waiting }}</span>{% endif %}</a>{% endif %}
-  {% if is_admin %}<a href="{{ url_for('users') }}">Accounts</a>{% endif %}
+  {% if is_admin %}<a href="{{ url_for('users') }}">Accounts</a><a href="{{ url_for('audit_view') }}">Audit</a>{% endif %}
   {% endif %}
   <span class="spacer"></span>
   <a href="{{ url_for('account') }}" title="Change your password">{{ user['username'] }}</a>{% if is_faculty %} (faculty){% elif is_fsr %} (FSR){% elif approval_role %} ({{ approval_role }}){% elif not can_edit %} (view only){% endif %}

@@ -22,6 +22,7 @@ from flask import (Flask, Response, abort, flash, g, redirect, render_template,
                    request, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import audit
 import formfill
 import importer
 import mailer
@@ -315,6 +316,10 @@ def create_app(db_path=None):
                     session.get("pwf", ""), pw_fingerprint(g.user["password_hash"])):
                 g.user = None
                 session.clear()
+        if g.user is not None:
+            db().actor = g.user["username"]                 # who the audit log credits for any change made by this request
+        else:
+            db().actor = "(not signed in)"
         if request.endpoint in ("login", "static"):
             return None
         if g.user is None:
@@ -403,7 +408,9 @@ def create_app(db_path=None):
             ok = check_password_hash(row["password_hash"] if row else _DUMMY_HASH,
                                      request.form.get("password", ""))
             if row and ok:
-                db().execute("DELETE FROM login_failures WHERE username = ?", (key,)); db().commit()
+                db().actor = row["username"]
+                db().execute("DELETE FROM login_failures WHERE username = ?", (key,))
+                audit.event(db(), row["username"], "Signed in"); db().commit()
                 session.clear()
                 session.permanent = True
                 session["user_id"] = row["id"]
@@ -414,6 +421,10 @@ def create_app(db_path=None):
                     target = None                                   # limited logins only ever land on their own page
                 return redirect(target or home_url_for(row["role"]))
             db().execute("INSERT INTO login_failures (at, username, ip) VALUES (?, ?, ?)", (time.time(), key, address))
+            recent = db().execute("SELECT count(*) FROM login_failures WHERE username = ? AND at > ?",
+                                  (key, time.time() - LOGIN_WINDOW)).fetchone()[0]
+            if recent == LOGIN_MAX_PER_USERNAME:
+                audit.event(db(), "(not signed in)", f"Sign-in for '{key}' locked after {recent} failed attempts from {address}")
             db().commit()
             flash("Incorrect username or password.", "error")
         return render_template("login.html")
@@ -1058,6 +1069,7 @@ def create_app(db_path=None):
         name = pending["name"]
         try:
             result = importer.analyse(db(), path.read_bytes(), name)        # checked again: the database may have changed
+            db().audit_note = f"student import from {name}"[:200]
             for item in result["new"]:
                 physdb.insert_student(db(), **item["v"])
             db().commit()                                                   # all of them, or none
@@ -1081,6 +1093,71 @@ def create_app(db_path=None):
         require_editor()
         return Response(importer.csv_template(), mimetype="text/csv",
                         headers={"Content-Disposition": "attachment; filename=student_import_template.csv"})
+
+    # ---- the audit log -----------------------------------------------------------------
+    AUDIT_PAGE = 100
+    ENUM_FIELDS = {"status", "citizenship", "role", "kind", "outcome"}
+
+    @app.route("/audit")
+    def audit_view():
+        """Who changed what and when (administrators and the chair)."""
+        require_admin()
+        a = request.args
+        where, params = [], []
+        if a.get("who") == "_outside":
+            where.append("actor IS NULL")
+        elif a.get("who"):
+            where.append("actor = ?"); params.append(a["who"])
+        if a.get("what") in audit.ENTITY_NAMES:
+            where.append("entity = ?"); params.append(a["what"])
+        if a.get("action") in ("insert", "update", "delete", "event"):
+            where.append("action = ?"); params.append(a["action"])
+        student_id = int(a["student"]) if a.get("student", "").isdigit() else None
+        if student_id is not None:
+            where.append("student_id = ?"); params.append(student_id)
+        for key, op in (("since", ">="), ("until", "<")):
+            try:
+                day = datetime.date.fromisoformat(a.get(key, ""))
+            except ValueError:
+                continue                                     # blank or not a real date: ignored
+            if key == "until":
+                day += datetime.timedelta(days=1)            # "until" includes that whole day
+            where.append(f"at {op} ?"); params.append(day.isoformat())
+        q = a.get("q", "").strip()
+        if q:
+            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            where.append("(label LIKE ? ESCAPE '\\' OR actor LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\')")
+            params += [like] * 3
+        page = max(1, int(a["page"])) if a.get("page", "").isdigit() else 1
+        sql = "SELECT * FROM audit_log" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ? OFFSET ?"
+        rows = [dict(r) for r in db().execute(sql, (*params, AUDIT_PAGE + 1, (page - 1) * AUDIT_PAGE))]
+        more = len(rows) > AUDIT_PAGE
+        rows = rows[:AUDIT_PAGE]
+        faculty = {r["id"]: f"{r['first_name']} {r['last_name']}" for r in db().execute("SELECT id, first_name, last_name FROM faculty")}
+        fsrs = {r["id"]: f"{r['first_name']} {r['last_name']}" for r in db().execute("SELECT id, first_name, last_name FROM fsrs")}
+        def nice(key, value):
+            if key == "faculty_id":
+                return faculty.get(value, f"#{value}")
+            if key == "fsr_id":
+                return fsrs.get(value, f"#{value}")
+            if key == "course":
+                return next((f"{short} ({full})" for code, short, full in physdb.CORE_COURSES if code == value), value)
+            return label(value) if key in ENUM_FIELDS and isinstance(value, str) else value
+        existing = {r[0] for r in db().execute("SELECT id FROM students")}
+        for r in rows:
+            r["lines"] = audit.describe(r["entity"], r["action"], r["old_values"], r["new_values"], nice)
+            r["student_exists"] = r["student_id"] in existing
+            r["what"] = audit.ENTITY_NAMES.get(r["entity"], r["entity"])
+        actors = [r[0] for r in db().execute("SELECT DISTINCT actor FROM audit_log WHERE actor IS NOT NULL ORDER BY actor")]
+        kept = {k: v for k, v in a.items() if k != "page" and v}
+        student_name = None
+        if student_id is not None:
+            s = db().execute("SELECT first_name, last_name FROM students WHERE id = ?", (student_id,)).fetchone()
+            student_name = f"{s['first_name']} {s['last_name']}" if s else f"student #{student_id} (deleted)"
+        return render_template("audit.html", rows=rows, page=page, more=more, actors=actors, entities=audit.ENTITY_NAMES, filters=a,
+                               older=url_for("audit_view", **kept, page=page + 1) if more else None,
+                               newer=url_for("audit_view", **kept, page=page - 1) if page > 1 else None,
+                               student_name=student_name)
 
     # ---- the candidacy form and its approvals -------------------------------------
     @app.post("/students/<int:sid>/forms/candidacy")

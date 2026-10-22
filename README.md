@@ -94,6 +94,14 @@ person's password and role (for example, to regain admin access if no admin can 
   Restart the app, then on the **Accounts** page use **Send test email**; the same page lists the most recent emails
   and any errors. A mail problem never stops a form from moving along. For reminders while forms sit in a queue, run
   `python3 physdb.py send-reminders` from a daily scheduled job (cron on Mac/Linux, Task Scheduler on Windows).
+- **Audit log:** the **Audit** tab (administrators and the Chair) lists every change to records and accounts: who made it,
+  when, what was changed, and the old and new values (for example *Status: Active → Graduated*), plus sign-ins and
+  lockouts. Filter by person, kind of record, date, student or a search word; a student's page has a **History**
+  button that shows just that student. The log is written by database triggers, so every route is covered (the web
+  pages, imports, the command line); it records the signed-in username, and a change made directly on the database
+  file by some other program shows as "(outside the app)". Passwords, PDFs and the signature image are never copied
+  into it (only that they changed). Nothing on the site can edit or delete entries, and the log is kept indefinitely,
+  so it grows slowly; it is part of `physics_grads.db`, so it is backed up with everything else.
 - **Sign-in protection and HTTPS:** five wrong passwords for the same username within 15 minutes block further
   attempts for that username (even with the right password) until the oldest failure is 15 minutes old; the message
   doesn't reveal whether the account exists, and one network address that fails 30 times is slowed down too. When the

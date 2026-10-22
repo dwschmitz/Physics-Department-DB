@@ -3,6 +3,7 @@ import io
 import sqlite3
 import unittest
 
+import audit
 import physdb
 
 
@@ -521,6 +522,7 @@ class PhysDBTests(unittest.TestCase):
         import os, tempfile
         path = os.path.join(tempfile.mkdtemp(), "old.db")
         conn = physdb.connect(path)
+        audit.drop_triggers(conn)                       # (a database from before the audit log has none of these)
         conn.executescript("""ALTER TABLE students DROP COLUMN graduation_year; ALTER TABLE students DROP COLUMN graduation_term;
                               ALTER TABLE students ADD COLUMN expected_grad_year INTEGER;""")
         conn.execute("INSERT INTO students (university_id, first_name, last_name, email, status, matriculation_year, expected_grad_year)"

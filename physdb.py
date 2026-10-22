@@ -9,6 +9,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import audit
+
 DB_PATH = os.environ.get("PHYSDB_PATH", "physics_grads.db")
 SCHEMA = Path(__file__).with_name("schema.sql")
 
@@ -143,8 +145,11 @@ def clock_label_at(student, when):
     return "—" if terms < 0 else _format_terms(terms)
 
 
-def connect(path=DB_PATH):
-    conn = sqlite3.connect(path)
+def connect(path=DB_PATH, actor="command line"):
+    """Open the database (creating or upgrading it as needed). `actor` is who is making changes, for the audit log; the
+    web app sets it to the signed-in username."""
+    conn = sqlite3.connect(path, factory=audit.AuditedConnection)
+    conn.actor = actor
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     legacy = _stash_old_funding(conn)
@@ -166,6 +171,7 @@ def connect(path=DB_PATH):
     _migrate_matriculation(conn)
     _add_student_cnet(conn)
     _migrate_graduation(conn)
+    audit.install(conn)            # last: the triggers must match the finished tables
     return conn
 
 
@@ -182,6 +188,7 @@ def _stash_old_milestones(conn):
     # Other tables (forms) refer to milestones. A plain rename would rewrite those references to point at the set-aside
     # copy, which is then dropped; with foreign keys off and legacy_alter_table on they keep pointing at "milestones".
     conn.commit()
+    audit.drop_triggers(conn)         # they are put back (for the new table) at the end of connect()
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.execute("PRAGMA legacy_alter_table = ON")
     try:
@@ -204,6 +211,8 @@ def _restore_old_milestones(conn):
 def _finish_interrupted_rebuilds(conn):
     """If the program was stopped in the middle of a table rebuild, the old rows are still in <table>_old:
     copy them back now (rows already restored are skipped) so nothing is ever lost."""
+    if _table_exists(conn, "milestones_old") or _table_exists(conn, "funding_old"):
+        audit.drop_triggers(conn)
     if _table_exists(conn, "milestones_old"):
         _restore_old_milestones(conn)
     if _table_exists(conn, "funding_old"):
@@ -334,6 +343,7 @@ def _stash_old_funding(conn):
         why = "check"
     else:
         return None
+    audit.drop_triggers(conn)         # they are put back at the end of connect()
     conn.executescript("DROP INDEX IF EXISTS idx_funding_student;"
                        "ALTER TABLE funding RENAME TO funding_old;")
     return why
@@ -375,6 +385,7 @@ def _migrate_users(conn):
     # the new table, copy, drop the old one and rename the new one into place, so references to "users" stay valid.
     # Triggers on other tables mention users; they are dropped here and recreated by the _add_*_accounts steps next.
     conn.commit()
+    audit.drop_triggers(conn)
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript("""
         DROP TRIGGER IF EXISTS faculty_cnet_needed_for_login;
@@ -607,9 +618,12 @@ def set_course_credits(conn, student, codes):
     unknown = codes - set(COURSE_CODES)
     if unknown:
         raise ValueError(f"unknown course(s): {', '.join(sorted(unknown))}; choose from {', '.join(COURSE_CODES)}")
-    conn.execute("DELETE FROM course_credits WHERE student_id = ?", (s["id"],))
-    conn.executemany("INSERT INTO course_credits (student_id, course) VALUES (?, ?)",
-                     [(s["id"], c) for c in COURSE_CODES if c in codes])
+    have = course_credits(conn, s["id"])                  # only what changes is written (so the audit log shows just that)
+    for code in sorted(have - codes):
+        conn.execute("DELETE FROM course_credits WHERE student_id = ? AND course = ?", (s["id"], code))
+    for code in COURSE_CODES:
+        if code in codes and code not in have:
+            conn.execute("INSERT INTO course_credits (student_id, course) VALUES (?, ?)", (s["id"], code))
     conn.commit()
 
 
