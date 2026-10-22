@@ -1,7 +1,7 @@
 # Physics Graduate Student Database — summary for IT
 
 **Purpose.** A web application for the Physics Department to keep track of PhD students: records, advisors and committees, milestones, core-course credit, funding by term, and the candidacy-form approval process. Used by department staff, faculty (read-only view of their own students), financial services reps (FSRs), an approver and the department chair.
-**Owner / contact:** [name, email] **Backup contact:** [name, email] **Source code:** github.com/dwschmitz/Physics-Department-DB
+**Owner:** David Schmitz, dwschmitz@uchicago.edu **Backup:** Shadla Cycholl, scychol@uchicago.edu **Source code:** github.com/dwschmitz/Physics-Department-DB
 
 ## Architecture
 - **One Python 3 program** (Flask; tested on Python 3.13) that serves HTML pages. No JavaScript framework, no external services other than optional outbound SMTP.
