@@ -7,7 +7,7 @@
 ## Architecture
 - **One Python 3 program** (Flask; tested on Python 3.13) that serves HTML pages. No JavaScript framework, no external services other than optional outbound SMTP.
 - **One SQLite database file** (`physics_grads.db`) holds everything: records, login accounts, generated form PDFs and the chair's signature image. Only one process writes at a time; expected load is a handful of simultaneous users.
-- **Libraries:** Flask (with Werkzeug and Jinja2), openpyxl (Excel import), pypdf and Pillow (PDF forms and signature image). About 7,000 lines of code and about 175 automated tests.
+- **Libraries:** Flask (with Werkzeug and Jinja2), openpyxl (Excel import), pypdf and Pillow (PDF forms and signature image). About 8,200 lines of code (including tests) and about 200 automated tests.
 - **Configuration:** environment variables or a `.env` file (mail server, session secret, public URL). Passwords and secrets are never stored in the repository or the database.
 
 ## Data stored and who sees it
