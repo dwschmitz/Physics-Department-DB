@@ -172,6 +172,8 @@ person's password and role (for example, to regain admin access if no admin can 
   an FSR's page (FSRs → click a name).
 - **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
+- **Prev / Next on a student's page** step through students in the order of the Students list you last looked at
+  (same filters and sort), with "n of N" shown; **All students** returns to that same view.
 - Login is required for every page; forms are CSRF-protected; deletes ask for confirmation.
 - `webapp.py run` is Flask's development server. For real use serve it to other machines with a
   production server behind HTTPS, e.g. `gunicorn 'webapp:create_app()'` behind your department's

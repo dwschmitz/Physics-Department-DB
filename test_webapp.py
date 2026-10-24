@@ -2743,6 +2743,42 @@ class WebTests(unittest.TestCase):
     def names(self, html):
         return re.findall(r"Stu_\w+(?=,)", html)
 
+    def test_prev_and_next_follow_the_students_list_order(self):
+        import re as _re
+        c = self.client("ed")
+        ids = {}
+        for last, uid, status in [("Nb", "U1", "active"), ("Na", "U2", "graduated"), ("Nc", "U3", "active")]:
+            self.add_student(c, last_name=last, university_id=uid, email=f"{uid}@u.edu", status=status)
+            ids[last] = int(_re.search(r"/students/(\d+)", c.get("/students?q=" + last).get_data(as_text=True)).group(1))
+        def page(name):
+            return c.get(f"/students/{ids[name]}").get_data(as_text=True)
+        def links(html):
+            return [int(m) for m in _re.findall(r'href="/students/(\d+)"[^>]*>(?:&lsaquo; Prev|Next &rsaquo;)', html)]
+        # no list visited yet: everyone, by name
+        h = page("Nb")
+        self.assertEqual(links(h), [ids["Na"], ids["Nc"]])
+        self.assertIn("2 of 3", h)
+        self.assertIn('class="btn secondary small disabled">&lsaquo; Prev', page("Na"))   # first: no Prev
+        self.assertIn('class="btn secondary small disabled">Next &rsaquo;', page("Nc"))   # last: no Next
+        # sorted by name descending
+        c.get("/students?sort=name&dir=desc")
+        self.assertEqual(links(page("Nb")), [ids["Nc"], ids["Na"]])
+        self.assertIn('href="/students?sort=name&amp;dir=desc"', page("Nb"))              # All students returns to it
+        # filtered: the graduated student is out of the list, so Prev / Next skip them
+        c.get("/students?status=active")
+        h = page("Nb")
+        self.assertEqual(links(h), [ids["Nc"]])
+        self.assertIn("1 of 2", h)
+        # a student outside the remembered list falls back to everyone
+        h = page("Na")
+        self.assertIn("1 of 3", h)
+        self.assertIn('href="/students"', h)
+        self.assertNotIn("status=active", h)
+        # junk or oversized remembered values are harmless
+        with c.session_transaction() as sess:
+            sess["student_list"] = "sort=%00&dir=&&q=" + "z" * 300 + "&role=x&faculty=abc"
+        self.assertEqual(c.get(f"/students/{ids['Nb']}").status_code, 200)
+
     def test_student_columns_sort_both_ways(self):
         from unittest import mock
         c = self.client("ed")

@@ -964,12 +964,14 @@ def create_app(db_path=None):
     def home():
         return redirect(home_url())
 
-    @app.route("/students")
-    def students():
-        q = request.args.get("q", "").strip()
-        status = request.args.get("status", "")
-        faculty_id = request.args.get("faculty", "")
-        role = request.args.get("role", "any")
+    def student_list(args):
+        """The students list for these query parameters (q, status, faculty, role, sort, dir): returns
+        (rows, q, status, faculty_id, role, sort, sdir). Used by the list page and by Prev / Next on a student's page,
+        so the two always agree on the order."""
+        q = args.get("q", "").strip()
+        status = args.get("status", "")
+        faculty_id = args.get("faculty", "")
+        role = args.get("role", "any")
         if role not in FACULTY_ROLE_FILTERS:
             role = "any"
         sql = """SELECT s.*, (SELECT group_concat(f.last_name, ', ') FROM advising a
@@ -1005,11 +1007,17 @@ def create_app(db_path=None):
             "advisor": lambda r: _text(r["advisors"]),
             "research_area": lambda r: _text(r["research_area"]),
             "graduated": _graduation_key,
-        }, request.args.get("sort"), request.args.get("dir"), "name")
+        }, args.get("sort"), args.get("dir"), "name")
+        return rows, q, status, faculty_id, role, sort, sdir
+
+    @app.route("/students")
+    def students():
+        rows, q, status, faculty_id, role, sort, sdir = student_list(request.args)
+        session["student_list"] = request.query_string.decode("ascii", "ignore")[:400]       # Prev / Next on a student page follow this list
         faculty = db().execute("SELECT id, last_name, first_name FROM faculty ORDER BY last_name").fetchall()
         return render_template("students.html", rows=rows, faculty=faculty, q=q, status=status,
                                faculty_id=faculty_id, role=role, role_filters=FACULTY_ROLE_FILTERS,
-                               statuses=STATUSES, now=f"{now[0]} {now[1]}", sort=sort, sdir=sdir)
+                               statuses=STATUSES, now=" ".join(map(str, physdb.current_term())), sort=sort, sdir=sdir)
 
     @app.route("/students/new", methods=["GET", "POST"])
     def student_new():
@@ -1266,6 +1274,24 @@ def create_app(db_path=None):
             abort(404)
         return Response(row["image"], mimetype="image/png", headers={"Cache-Control": "private, no-store"})
 
+    def student_neighbours(sid):
+        """Where this student is in the list the user last looked at (same filters and sort order), for Prev / Next.
+        Without a remembered list it is everyone, by name."""
+        from urllib.parse import parse_qs
+        remembered = session.get("student_list", "")
+        args = {k: v[0] for k, v in parse_qs(remembered).items() if v}
+        ids = [r["id"] for r in student_list(args)[0]]
+        if sid not in ids and remembered:                    # edited or reached from elsewhere so it is not in that list now
+            args, remembered = {}, ""
+            ids = [r["id"] for r in student_list(args)[0]]
+        i = ids.index(sid) if sid in ids else None
+        names = {r["id"]: f"{r['last_name']}, {r['first_name']}" for r in db().execute("SELECT id, first_name, last_name FROM students")}
+        return dict(list_url=url_for("students") + ("?" + remembered if remembered else ""),
+                    prev_id=ids[i - 1] if i else None, next_id=ids[i + 1] if i is not None and i + 1 < len(ids) else None,
+                    prev_name=names.get(ids[i - 1]) if i else None,
+                    next_name=names.get(ids[i + 1]) if i is not None and i + 1 < len(ids) else None,
+                    position=(i + 1, len(ids)) if i is not None else None)
+
     @app.route("/students/<int:sid>")
     def student(sid):
         s = get_or_404("students", sid)
@@ -1278,7 +1304,7 @@ def create_app(db_path=None):
         funding = d.execute(f"SELECT * FROM funding WHERE student_id = ? ORDER BY {physdb.FUNDING_ORDER_SQL}",
                             (sid,)).fetchall()
         forms = workflow.forms_for_student(d, sid)
-        return render_template("student.html", s=s, advising=advising, milestones=milestones,
+        return render_template("student.html", s=s, advising=advising, milestones=milestones, **student_neighbours(sid),
                                funding=funding, titles=CHILD_TABLES, courses=physdb.CORE_COURSES,
                                credited=physdb.course_credits(d, sid), forms=forms,
                                form_links={f["milestone_id"]: f["id"] for f in forms if f["status"] == "complete" and f["milestone_id"]},

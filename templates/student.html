@@ -1,6 +1,9 @@
 {% extends "base.html" %}{% from "_macros.html" import delete_button with context %}{% block body %}
 <h1>{{ s.first_name }} {{ s.last_name }} <span class="badge {{ s.status }}">{{ s.status|label }}</span></h1>
-<p class="toolbar"><a href="{{ url_for('students') }}">&larr; All students</a>
+<p class="toolbar"><a href="{{ list_url }}">&larr; All students</a>
+{% if prev_id %}<a class="btn secondary small" href="{{ url_for('student', sid=prev_id) }}" title="{{ prev_name }}">&lsaquo; Prev</a>{% else %}<span class="btn secondary small disabled">&lsaquo; Prev</span>{% endif %}
+{% if position %}<span class="muted">{{ position[0] }} of {{ position[1] }}</span>{% endif %}
+{% if next_id %}<a class="btn secondary small" href="{{ url_for('student', sid=next_id) }}" title="{{ next_name }}">Next &rsaquo;</a>{% else %}<span class="btn secondary small disabled">Next &rsaquo;</span>{% endif %}
 {% if is_admin %} <a class="btn secondary small" href="{{ url_for('audit_view', student=s.id) }}">History</a>{% endif %}
 {% if can_edit %} <a class="btn small" href="{{ url_for('student_edit', sid=s.id) }}">Edit details</a>
  {{ delete_button(url_for('student_delete', sid=s.id), 'Permanently delete ' ~ s.first_name ~ ' ' ~ s.last_name ~ ' and all of their records?') }}{% endif %}</p>
