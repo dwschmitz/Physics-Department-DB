@@ -52,7 +52,7 @@ person's password and role (for example, to regain admin access if no admin can 
   copy. If something else is using port 8123 it picks the next free port and prints the address.
   To stop a stray copy: close the window it runs in, or on Mac/Linux use `pkill -f "webapp.py run"`,
   on Windows end "python" in Task Manager.
-- **Milestone Check** (Reports tab): pick a milestone and a minimum clock in years (fractions such as 0.25 are fine) to
+- **Milestone Check** (Milestones tab): pick a milestone and a minimum clock in years (fractions such as 0.25 are fine) to
   list the active students at or past that clock who have no passed or conditional entry for it, with matriculation,
   clock, research area and advisor; every heading sorts.
 - **Core courses (instead of GDE milestones):** candidacy requires credit for six courses: Classical Mechanics (CM),
@@ -129,11 +129,11 @@ person's password and role (for example, to regain admin access if no admin can 
   `set-status STUDENT graduated --year 2026 --term spring` (also for `withdrawn`). The Students tab has a
   **Graduated** column (withdrawal terms show on the student's own page). Students already marked graduated or withdrawn have no term until you
   edit them and enter it.
-- **Milestones Table** (Reports, first tab): a snapshot with one row per active or on-leave student: name, clock,
+- **Milestones Table** (Milestones tab, first panel): a snapshot with one row per active or on-leave student: name, clock,
   advisor, a **Courses** column listing the core courses with credit (CM, QM-1, QM-2, EM-1, EM-2, SM), and a ✓ for each of Candidacy, MS, Committee,
   Pre-Oral and Defense passed (a conditional pass counts). Every column sorts. Graduated and withdrawn students
   are not listed; the **Students** tab has a **Graduated** column with each graduate's term.
-- **Funding report** (Reports → *Funding by term*): pick a year and term (or step with **‹ Prev** / **Next ›**) to list every *active* student with
+- **Funding report** (Funding tab → *Funding by term*): pick a year and term (or step with **‹ Prev** / **Next ›**) to list every *active* student with
   their funding for that term (type, source, POETAF/COA, amount, notes). Active students with nothing
   recorded still appear, with empty fields; a student with several entries gets one row per entry.
   Students on leave, graduated or withdrawn are not included. Download it as CSV for a spreadsheet.
@@ -170,7 +170,7 @@ person's password and role (for example, to regain admin access if no admin can 
   (graduate in Summer 2026 and you're listed through Autumn 2026, gone from Winter 2027); one with no recorded term
   stays. Faculty pages keep graduated and withdrawn students indefinitely. Staff see the same table on
   an FSR's page (FSRs → click a name).
-- **Sorting:** click any column heading on the Students, Faculty, Reports and Accounts lists to sort by
+- **Sorting:** click any column heading on the Students, Faculty, Milestones, Funding and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - **Prev / Next on a student's page** step through students in the order of the Students list you last looked at
   (same filters and sort), with "n of N" shown; **All students** returns to that same view.

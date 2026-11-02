@@ -332,9 +332,9 @@ class WebTests(unittest.TestCase):
         self.assertEqual(who(page("sort=name&dir=desc")), [("3", "Cc"), ("2", "Bb"), ("1", "Aa"), ("1", "Aa")])
         self.assertIn("Funding for Autumn 2026", page("year=abc&season=Fall"))
         self.assertIn("Funding for Autumn 2026", page("year=1800"))
-        # tabs and a visible link from the Reports page
-        self.assertIn("Funding by term", c.get("/reports").get_data(as_text=True))
-        self.assertIn("Milestone Check", html)
+        # the Funding tab has its own panel, and is no longer listed under Milestones
+        self.assertNotIn("Funding by term", c.get("/reports").get_data(as_text=True))
+        self.assertIn("Funding by term", html)
         # CSV: the screen drops University ID, but the file carries the full student record
         c.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", csrf_token=t))
         c.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
@@ -1146,11 +1146,12 @@ class WebTests(unittest.TestCase):
         self.assertEqual(sorted(order("?sort=clock")), ["Bb", "Dd", "Ff", "Lovelace"]); self.assertEqual(order("?sort=bogus"), order(""))
         # it is the first report tab, and the Reports link opens it
         tabs = re.findall(r'<p class="tabs">(.*?)</p>', html, re.S)[0]
-        self.assertEqual(re.findall(r">([^<]+)</a>", tabs), ["Milestones Table", "Milestone Check", "Funding by term"])
+        self.assertEqual(re.findall(r">([^<]+)</a>", tabs), ["Milestones Table", "Milestone Check"])
         self.assertIn('class="on" href="/reports/milestones"', tabs)
-        self.assertIn('<a href="/reports/milestones">Reports</a>', html)
-        for path in ("/reports", "/reports/funding"):
-            self.assertIn("Milestones Table", c.get(path).get_data(as_text=True))
+        self.assertIn('<a href="/reports/milestones">Milestones</a>', html)
+        self.assertIn('<a href="/reports/funding">Funding</a>', html)
+        for path, panel in (("/reports", "Milestones Table"), ("/reports/funding", "Funding by term")):
+            self.assertIn(panel, c.get(path).get_data(as_text=True))
         # viewers can look; faculty and FSR logins cannot
         self.assertEqual(self.client("vw").get("/reports/milestones").status_code, 200)
 
@@ -2285,9 +2286,9 @@ class WebTests(unittest.TestCase):
         # the tabs: approver = editor tabs + Approvals; chair = admin tabs + Approvals + Signatures; others see "Forms"
         header = lambda k: re.findall(r"<header>(.*?)<span class=\"spacer\">", k.get("/students").get_data(as_text=True), re.S)[0]
         tabs = lambda k: [re.sub(r"<[^>]+>|\s+", " ", x).strip().split(" ")[0] for x in re.findall(r"<a href=\"/[^\"]*\">(.*?)</a>", header(k), re.S)]
-        self.assertEqual(tabs(appr), ["Students", "Faculty", "FSRs", "Reports", "Approvals"])
-        self.assertEqual(tabs(chair), ["Students", "Faculty", "FSRs", "Reports", "Approvals", "Signatures", "Accounts", "Audit"])
-        self.assertEqual(tabs(c), ["Students", "Faculty", "FSRs", "Reports", "Forms", "Accounts", "Audit"])
+        self.assertEqual(tabs(appr), ["Students", "Faculty", "FSRs", "Milestones", "Funding", "Approvals"])
+        self.assertEqual(tabs(chair), ["Students", "Faculty", "FSRs", "Milestones", "Funding", "Approvals", "Signatures", "Accounts", "Audit"])
+        self.assertEqual(tabs(c), ["Students", "Faculty", "FSRs", "Milestones", "Funding", "Forms", "Accounts", "Audit"])
         self.assertRegex(header(appr), r'Approvals <span class="count">1</span>'); self.assertNotIn("Signatures", header(appr))
         # first round: the approver or the chair; final round: the chair only; rejecting follows the same split
         tok = lambda k: self.token(k, "/students")
@@ -2512,7 +2513,7 @@ class WebTests(unittest.TestCase):
         # the page still exists for everyone who could open it before (view-only too), and the other tab is intact
         with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
             self.assertEqual(self.client("vw").get("/reports").status_code, 200)
-        self.assertIn("Funding by term", html)
+        self.assertIn("Milestones Table", html)
 
     def test_faculty_summary_columns_and_active_counts(self):
         c, t = self._faculty_world(); self._make_faculty_login(c, t)
@@ -2932,7 +2933,7 @@ class WebTests(unittest.TestCase):
         assign(1, "committee"); assign(2, "committee_chair"); assign(6, "co-advisor")
         assign(5, "committee"); assign(4, "advisor"); assign(3, "advisor", end="2025-01-01")
         page = c.get("/students/1").get_data(as_text=True)
-        section = page[page.index("Advisors"):page.index("Milestones")]
+        section = page[page.index("<h2>Advisors"):page.index("<h2>Milestones")]
         order = [n for n in sorted(names, key=section.index) if n in section]
         self.assertEqual(order, ["Dunn", "Fox", "Bravo", "Aaron", "Evans", "Carter"])
         #   advisor, co-advisor, chair, members (alphabetical), then the ended advisor last

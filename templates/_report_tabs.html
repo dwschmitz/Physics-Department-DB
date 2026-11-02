@@ -1,5 +1,8 @@
 <p class="tabs">
+{% if tab == 'funding' %}
+  <a class="on" href="{{ url_for('funding_report') }}">Funding by term</a>
+{% else %}
   <a class="{{ 'on' if tab == 'milestones' }}" href="{{ url_for('milestones_table') }}">Milestones Table</a>
   <a class="{{ 'on' if tab == 'behind' }}" href="{{ url_for('reports') }}">Milestone Check</a>
-  <a class="{{ 'on' if tab == 'funding' }}" href="{{ url_for('funding_report') }}">Funding by term</a>
+{% endif %}
 </p>
