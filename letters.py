@@ -120,7 +120,8 @@ def docx_to_pdfs(files):
     import shutil
     import subprocess
     import tempfile
-    office = shutil.which("soffice") or shutil.which("libreoffice")
+    mac_app = "/Applications/LibreOffice.app/Contents/MacOS/soffice"          # where the Mac download puts it (not on the PATH)
+    office = shutil.which("soffice") or shutil.which("libreoffice") or (mac_app if Path(mac_app).exists() else None)
     if office is None:
         raise LetterError("PDFs could not be made because LibreOffice is not installed on the computer running this app.")
     with tempfile.TemporaryDirectory(prefix="physdb-letters-") as tmp:
