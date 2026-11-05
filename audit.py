@@ -160,7 +160,7 @@ class AuditedConnection(sqlite3.Connection):
 
 ENTITY_NAMES = {"students": "Student", "faculty": "Faculty", "fsrs": "FSR", "advising": "Advisor / committee",
                 "milestones": "Milestone", "funding": "Funding", "course_credits": "Core course", "forms": "Form",
-                "terms": "Term dates", "users": "Account", "signatures": "Signature image", "session": "Sign-in"}
+                "terms": "Term dates", "letter": "Letter", "users": "Account", "signatures": "Signature image", "session": "Sign-in"}
 FIELD_NAMES = {"university_id": "University ID", "cnet": "CNET", "poetaf_coa": "POETAF/COA", "fsr_id": "FSR",
                "faculty_id": "Faculty", "student_id": "Student", "password_hash_changed": "Password", "image_changed": "Image",
                "pdf_changed": "PDF", "pdf_faculty_changed": "Advisor copy", "pdf_sha256_changed": "PDF checksum",

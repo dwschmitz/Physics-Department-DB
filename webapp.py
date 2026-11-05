@@ -25,6 +25,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import audit
 import formfill
 import importer
+import letters
 import mailer
 import notify
 import physdb
@@ -1281,6 +1282,24 @@ def create_app(db_path=None):
         return Response(row["pdf"], mimetype="application/pdf", headers={
             "Content-Disposition": f'inline; filename="Candidacy_Form_{name}.pdf"',
             "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+    @app.route("/students/<int:sid>/funding/<int:fid>/letter")
+    def funding_letter(sid, fid):
+        """Download the assignment letter for one funding entry (made fresh each time, nothing is stored)."""
+        require_editor()
+        s = get_or_404("students", sid)
+        f = get_or_404("funding", fid, student_id=sid)
+        try:
+            data, name = letters.make_letter(db(), s, f)
+        except letters.LetterError as e:
+            flash(str(e), "error")
+            return redirect(url_for("student", sid=sid))
+        audit.event(db(), g.user["username"], f"Made the {f['kind']} letter for {s['first_name']} {s['last_name']}, "
+                    f"{f['term_season']} {f['term_year']}", entity="letter")
+        db().commit()
+        return Response(data, mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"',
+                                 "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
     def role_required(role):
         if g.user["role"] != role:

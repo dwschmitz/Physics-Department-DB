@@ -174,6 +174,14 @@ person's password and role (for example, to regain admin access if no admin can 
   once a year (year, term, first day, last day); edits and removals are in the audit log. Appointment letters will read
   their start and end dates from here. The approximate dates in `physdb.TERM_STARTS` are still used only to work out
   which term today falls in.
+- **Assignment letters** (editors and above): each *RA* funding row on a student's page has a **Letter** button that downloads
+  the filled-in Word letter for that term (the template is `letter_templates/RA_Primary_Template.docx`; the file is made
+  fresh each time and the download is noted in the audit log). The start date is the term's first day from the **Terms**
+  calendar, and the supervisor is whoever is recorded as the student's advisor or co-advisor during that term. If something
+  is missing (the term isn't in the calendar, no advisor, no reply address) the page says what to fix. Set these before use:
+  `PHYSDB_LETTER_REPLY_EMAIL` (where signed letters are returned; required), and optionally `PHYSDB_LETTER_DEPARTMENT` and
+  `PHYSDB_LETTER_PROGRAM` (both default to "Physics"). Wording that is fixed in the template, such as the pay amount, is
+  changed by editing the template in Word and keeping the «FIELD» names.
 - **Sorting:** click any column heading on the Students, Faculty, Milestones, Funding and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - **Prev / Next on a student's page** step through students in the order of the Students list you last looked at

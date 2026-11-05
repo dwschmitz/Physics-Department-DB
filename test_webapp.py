@@ -2806,6 +2806,39 @@ class WebTests(unittest.TestCase):
         self.assertNotIn("<td>Autumn 2026</td>", ad.get("/terms").get_data(as_text=True))
         self.assertEqual(ad.get("/terms/99/edit").status_code, 404)
 
+    def test_ra_letter_download(self):
+        import zipfile, io
+        from unittest import mock
+        ed, vw = self.client("ed"), self.client("vw")
+        self.add_student(ed)
+        t = self.token(ed)
+        ed.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", csrf_token=t))
+        ed.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
+        ed.post("/students/1/funding/new", data=dict(kind="RA", term_year="2026", term_season="Autumn", csrf_token=t))
+        ed.post("/students/1/funding/new", data=dict(kind="TA", term_year="2026", term_season="Autumn", csrf_token=t))
+        page = ed.get("/students/1").get_data(as_text=True)
+        self.assertEqual(page.count("/funding/1/letter"), 1)                      # RA rows only
+        self.assertNotIn("/funding/2/letter", page)
+        self.assertNotIn("/funding/1/letter", vw.get("/students/1").get_data(as_text=True))
+        self.assertEqual(vw.get("/students/1/funding/1/letter").status_code, 403)
+        # not in the calendar yet: back to the student page with the reason
+        r = ed.get("/students/1/funding/1/letter", follow_redirects=True)
+        self.assertIn("not in the term calendar", r.get_data(as_text=True))
+        ad = self.client("ad")
+        ad.post("/terms/new", data=dict(term_year="2026", term_season="Autumn", start_date="2026-09-28",
+                                        end_date="2026-12-11", csrf_token=self.token(ad)))
+        r = ed.get("/students/1/funding/1/letter", follow_redirects=True)           # reply address not set
+        self.assertIn("PHYSDB_LETTER_REPLY_EMAIL", r.get_data(as_text=True))
+        with mock.patch.dict(os.environ, {"PHYSDB_LETTER_REPLY_EMAIL": "grad@u.edu"}):
+            r = ed.get("/students/1/funding/1/letter")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("attachment", r.headers["Content-Disposition"])
+        xml = zipfile.ZipFile(io.BytesIO(r.data)).read("word/document.xml").decode()
+        self.assertIn("September 28, 2026", xml)
+        self.assertEqual(ed.get("/students/1/funding/2/letter", follow_redirects=True).status_code, 200)   # TA: no template, explained
+        self.assertIn("Made the RA letter for Ada Lovelace", ad.get("/audit").get_data(as_text=True))
+        self.assertEqual(ed.get("/students/1/funding/9/letter").status_code, 404)
+
     def test_student_columns_sort_both_ways(self):
         from unittest import mock
         c = self.client("ed")

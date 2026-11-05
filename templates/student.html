@@ -53,6 +53,7 @@
 <td>{% if f.amount is not none %}${{ '{:,.0f}'.format(f.amount) }}{% endif %}</td>
 <td style="white-space:pre-wrap">{{ f.notes or '' }}</td>
 <td class="actions">{% if can_edit %}<a class="btn secondary small" href="{{ url_for('child_edit', sid=s.id, table='funding', rid=f.id) }}">Edit</a>
+{% if f.kind == 'RA' %}<a class="btn secondary small" href="{{ url_for('funding_letter', sid=s.id, fid=f.id) }}" title="Download the assignment letter (Word)">Letter</a>{% endif %}
 {{ delete_button(url_for('child_delete', sid=s.id, table='funding', rid=f.id), 'Delete this entry?') }}{% endif %}</td></tr>
 {% else %}<tr><td colspan="7" class="muted">None recorded.</td></tr>{% endfor %}</table>
 {% endblock %}
