@@ -7,11 +7,12 @@
 ## Architecture
 - **One Python 3 program** (Flask; tested on Python 3.13) that serves HTML pages. No JavaScript framework, no external services other than optional outbound SMTP.
 - **One SQLite database file** (`physics_grads.db`) holds everything: records, login accounts, generated form PDFs and the chair's signature image. Only one process writes at a time; expected load is a handful of simultaneous users.
-- **Libraries:** Flask (with Werkzeug and Jinja2), openpyxl (Excel import), pypdf and Pillow (PDF forms and signature image). About 8,200 lines of code (including tests) and about 200 automated tests.
+- **Libraries:** Flask (with Werkzeug and Jinja2), openpyxl (Excel import), pypdf and Pillow (PDF forms and signature image). About 9,900 lines of code (including tests) and 212 automated tests.
+- **LibreOffice (headless, command line only) is needed on the server** for one feature: turning generated assignment letters (Word files) into PDFs. Nothing else depends on it, and without it the Word files are still produced.
 - **Configuration:** environment variables or a `.env` file (mail server, session secret, public URL). Passwords and secrets are never stored in the repository or the database.
 
 ## Data stored and who sees it
-Student names, University ID (UCID), CNET, email, citizenship, status, matriculation / transfer / graduation / withdrawal terms, research area, internal notes, advisors and committees, milestones, core-course credit, funding (type, source, account number, amount); faculty and FSR names and emails; account usernames and password hashes. These are **student education records (FERPA)**. Nothing is sent outside the university except notification emails, which contain only a count and a link, never student names or IDs.
+Student names, University ID (UCID), CNET, email, citizenship, status, matriculation / transfer / graduation / withdrawal terms, research area, internal notes, advisors and committees, milestones, core-course credit, funding (type, source, account number, amount), the term calendar (term start and end dates); faculty and FSR names and emails; account usernames and password hashes. These are **student education records (FERPA)**. Assignment letters are generated on request as Word and PDF files and are not stored by the app. Nothing is sent outside the university except notification emails, which contain only a count and a link, never student names or IDs.
 
 | Role | Can do |
 |---|---|
@@ -31,7 +32,7 @@ Passwords hashed with scrypt, minimum 10 characters, temporary passwords must be
 - Runs on the development web server by default; a production WSGI server (e.g. gunicorn behind nginx) is needed. No built-in backups or high availability. Accessibility has not been formally reviewed.
 
 ## What we need from IT
-1. A small Linux VM or container (1 vCPU, 1 GB RAM, a few GB of disk; the data is megabytes), a current Python 3 (developed and tested on 3.13).
+1. A small Linux VM or container (1 vCPU, 1 GB RAM, a few GB of disk; the data is megabytes), a current Python 3 (developed and tested on 3.13), and LibreOffice installed (for letter PDFs).
 2. A hostname and TLS certificate; a reverse proxy; access limited to campus network or VPN at first, if acceptable.
 3. Encrypted storage and regular backups of `physics_grads.db`, `.env` and `.secret_key`, with a tested restore.
 4. SSO (SAML/Shibboleth or OIDC) registration, and an SMTP relay / sending address for notices.
