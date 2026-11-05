@@ -14,6 +14,7 @@
   {% if next_url %}<a class="btn secondary" href="{{ next_url }}" title="{{ next_label }}">Next &rsaquo;</a>
   {% else %}<span class="btn secondary disabled" title="No later term is available">Next &rsaquo;</span>{% endif %}
   <a class="btn secondary" href="{{ url_for('funding_report_csv', year=year, season=season, sort=sort, dir=sdir) }}">Download CSV</a>
+  {% if can_edit %}<button class="btn" type="submit" form="letters-form" title="Download a zip of the letters for every ticked student">Generate letters</button>{% endif %}
 </form>
 <p class="muted">{{ n_students }} active student{{ '' if n_students == 1 else 's' }}
   &middot; {{ n_funded }} with funding recorded for this term
@@ -22,8 +23,10 @@
 {% if undated %}<div class="flash error">{{ undated }} funding entr{{ 'y' if undated == 1 else 'ies' }} of active students
   {{ 'has' if undated == 1 else 'have' }} no term yet (marked &ldquo;please re-enter&rdquo; on the student&rsquo;s page) and
   {{ 'is' if undated == 1 else 'are' }} not included here.</div>{% endif %}
-<table class="wide"><tr>{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir, "Years since matriculation, counted in terms (0.25 per term), up to the current term") }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Type", "type", sort, sdir) }}{{ sort_th("Source", "source", sort, sdir, cls="source") }}{{ sort_th("POETAF/COA", "poetaf_coa", sort, sdir) }}{{ sort_th("Amount", "amount", sort, sdir) }}<th class="notes">Notes</th>{% if can_edit %}<th></th>{% endif %}</tr>
-{% for r in rows %}<tr><td style="white-space:nowrap"><a href="{{ url_for('student', sid=r.student_id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
+<table class="wide"><tr>{% if can_edit %}<th><input type="checkbox" data-select-all="funding_id" aria-label="Select all students with an RA entry"
+  title="Select all"></th>{% endif %}{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir, "Years since matriculation, counted in terms (0.25 per term), up to the current term") }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Type", "type", sort, sdir) }}{{ sort_th("Source", "source", sort, sdir, cls="source") }}{{ sort_th("POETAF/COA", "poetaf_coa", sort, sdir) }}{{ sort_th("Amount", "amount", sort, sdir) }}<th class="notes">Notes</th>{% if can_edit %}<th></th>{% endif %}</tr>
+{% for r in rows %}<tr>{% if can_edit %}<td>{% if r.funding_id and r.kind == 'RA' %}<input type="checkbox" name="funding_id" value="{{ r.funding_id }}" form="letters-form"
+  aria-label="Letter for {{ r.last_name }}, {{ r.first_name }}">{% endif %}</td>{% endif %}<td style="white-space:nowrap"><a href="{{ url_for('student', sid=r.student_id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
 <td>{{ r.clock }}</td><td>{{ r.advisors or '' }}</td>
 <td>{{ r.kind|label if r.kind else '' }}</td><td class="source">{{ r.source or '' }}</td><td style="white-space:nowrap">{{ r.poetaf_coa or '' }}</td>
 <td>{% if r.amount is not none %}${{ '{:,.0f}'.format(r.amount) }}{% endif %}</td>
@@ -32,6 +35,8 @@
 <td class="actions">
   {% if r.funding_id %}
     <a class="btn secondary small" href="{{ url_for('child_edit', sid=r.student_id, table='funding', rid=r.funding_id, next=here) }}">Edit</a>
+    {% if r.kind == 'RA' %}<a class="btn secondary small" href="{{ url_for('funding_letter', sid=r.student_id, fid=r.funding_id, next=here) }}"
+        title="Download the assignment letter (Word)">Letter</a>{% endif %}
     {{ post_button(url_for('child_delete', sid=r.student_id, table='funding', rid=r.funding_id, next=here), "Clear",
          "Delete this funding entry (" ~ r.kind|label ~ (", $" ~ '{:,.0f}'.format(r.amount) if r.amount is not none else "") ~ ") for " ~ who ~ " in " ~ term ~ "? This cannot be undone.",
          cls="btn danger small") }}
@@ -47,8 +52,10 @@
   {% endif %}
 </td>{% endif %}
 </tr>
-{% else %}<tr><td colspan="9" class="muted">There are no active students.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="10" class="muted">There are no active students.</td></tr>{% endfor %}</table>
 {% if can_edit %}
+<form id="letters-form" method="post" action="{{ url_for('funding_letters') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="next" value="{{ here }}"></form>
 <dialog id="copy-dialog" aria-label="Copy funding from another term"></dialog>
 {% endif %}
 {% endblock %}

@@ -2835,6 +2835,55 @@ class WebTests(unittest.TestCase):
         self.assertIn("Made the RA letter for Ada Lovelace", ad.get("/audit").get_data(as_text=True))
         self.assertEqual(ed.get("/students/1/funding/9/letter").status_code, 404)
 
+    def test_funding_tab_letter_buttons_and_the_zip_of_checked_letters(self):
+        import io, zipfile
+        ed, vw, ad = self.client("ed"), self.client("vw"), self.client("ad")
+        t = self.token(ed)
+        ed.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", csrf_token=t))
+        for i, last in enumerate(["Aa", "Bb", "Cc", "Dd"], 1):
+            self.add_student(ed, last_name=last, university_id=f"U{i}", email=f"u{i}@u.edu")
+            if last != "Cc":                                                  # Cc has no advisor
+                ed.post(f"/students/{i}/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
+        for i, kind in enumerate(["RA", "RA", "RA", "TA"], 1):
+            ed.post(f"/students/{i}/funding/new", data=dict(kind=kind, term_year="2026", term_season="Autumn", csrf_token=t))
+        ad.post("/terms/new", data=dict(term_year="2026", term_season="Autumn", start_date="2026-09-28", end_date="2026-12-11",
+                                        csrf_token=self.token(ad)))
+        page = ed.get("/reports/funding?year=2026&season=Autumn").get_data(as_text=True)
+        self.assertEqual(re.findall(r'name="funding_id" value="(\d+)"', page), ["1", "2", "3"])    # RA rows only, not the TA
+        self.assertEqual(page.count("/funding/1/letter"), 1)
+        self.assertIn("data-select-all", page); self.assertIn("Generate letters", page)
+        self.assertEqual(page.count('data-select-all'), 1)
+        self.assertNotIn("funding_id", vw.get("/reports/funding?year=2026&season=Autumn").get_data(as_text=True))
+        self.assertNotIn("Generate letters", vw.get("/reports/funding?year=2026&season=Autumn").get_data(as_text=True))
+        post = lambda c, *ids, **extra: c.post("/reports/funding/letters", data={"funding_id": list(ids), "csrf_token": t, **extra})
+        self.assertEqual(post(vw, "1").status_code, 403)
+        self.assertEqual(ed.post("/reports/funding/letters", data={"funding_id": ["1"]}).status_code, 400)   # no CSRF token
+        r = post(ed)                                                          # nothing ticked
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("Tick the students", ed.get("/reports/funding").get_data(as_text=True))
+        r = post(ed, "1", "2", "1", "abc", "999", next="/reports/funding?year=2026&season=Autumn")
+        self.assertEqual(r.mimetype, "application/zip")
+        self.assertIn("Letters_Autumn_2026.zip", r.headers["Content-Disposition"])
+        z = zipfile.ZipFile(io.BytesIO(r.data))
+        self.assertEqual(sorted(z.namelist()), ["RA_letter_Aa_Autumn_2026.docx", "RA_letter_Bb_Autumn_2026.docx"])
+        letter = zipfile.ZipFile(io.BytesIO(z.read("RA_letter_Aa_Autumn_2026.docx"))).read("word/document.xml").decode()
+        self.assertIn("September 28, 2026", letter)
+        # one that can't be made (no advisor) and one with no template (TA) are listed, the rest still come
+        r = post(ed, "1", "3", "4")
+        z = zipfile.ZipFile(io.BytesIO(r.data))
+        self.assertEqual(sorted(z.namelist()), ["NOT_MADE.txt", "RA_letter_Aa_Autumn_2026.docx"])
+        note = z.read("NOT_MADE.txt").decode()
+        self.assertIn("Cc, Ada: Ada Cc has no advisor", note); self.assertIn("Dd, Ada: There is no letter template for TA", note)
+        # nothing could be made: back to the page with the reasons, no zip
+        r = post(ed, "3", next="/reports/funding?year=2026&season=Autumn")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("No letters were made", ed.get("/reports/funding").get_data(as_text=True))
+        self.assertEqual(post(ed, "1", next="https://evil.example/").status_code, 200)          # still just a download
+        # the one-letter button from the Funding tab returns to the tab if it fails
+        r = ed.get("/students/3/funding/3/letter?next=/reports/funding%3Fyear%3D2026", follow_redirects=False)
+        self.assertEqual(r.headers["Location"], "/reports/funding?year=2026")
+        self.assertIn("Made the RA letter for Ada Aa", ad.get("/audit").get_data(as_text=True))
+
     def test_student_columns_sort_both_ways(self):
         from unittest import mock
         c = self.client("ed")

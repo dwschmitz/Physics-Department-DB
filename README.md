@@ -182,6 +182,9 @@ person's password and role (for example, to regain admin access if no admin can 
   "Physics", signature "Department of Physics", signed letters returned to putrikusumo@uchicago.edu (change them with
   `PHYSDB_LETTER_DEPARTMENT`, `PHYSDB_LETTER_PROGRAM` and `PHYSDB_LETTER_REPLY_EMAIL`). Wording that is fixed in the template, such as the pay amount, is
   changed by editing the template in Word and keeping the «FIELD» names.
+- **Letters from the Funding tab:** every RA row has a **Letter** button, and a tick box (with *select all* in the header)
+  for making several at once: tick the students, press **Generate letters**, and a zip of their letters downloads. A
+  letter that can't be made (term not in the calendar, no advisor) is left out and explained in `NOT_MADE.txt` inside the zip.
 - **Sorting:** click any column heading on the Students, Faculty, Milestones, Funding and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - **Prev / Next on a student's page** step through students in the order of the Students list you last looked at

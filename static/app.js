@@ -17,6 +17,14 @@
     update();
   });
 
+  // A checkbox marked data-select-all="name" ticks or unticks every checkbox of that name on the page.
+  Array.prototype.forEach.call(document.querySelectorAll('input[data-select-all]'), function (all) {
+    all.addEventListener('change', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('input[type=checkbox][name="' + all.getAttribute('data-select-all') + '"]'),
+        function (box) { box.checked = all.checked; });
+    });
+  });
+
   // The "copy funding from another term" window: opened by links marked data-copy, stepped by links marked data-step.
   var dlg = document.getElementById('copy-dialog');
   if (dlg && dlg.showModal) {               // very old browsers: the Copy links still work as plain pages
