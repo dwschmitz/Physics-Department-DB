@@ -2287,8 +2287,8 @@ class WebTests(unittest.TestCase):
         header = lambda k: re.findall(r"<header>(.*?)<span class=\"spacer\">", k.get("/students").get_data(as_text=True), re.S)[0]
         tabs = lambda k: [re.sub(r"<[^>]+>|\s+", " ", x).strip().split(" ")[0] for x in re.findall(r"<a href=\"/[^\"]*\">(.*?)</a>", header(k), re.S)]
         self.assertEqual(tabs(appr), ["Students", "Faculty", "FSRs", "Milestones", "Funding", "Approvals"])
-        self.assertEqual(tabs(chair), ["Students", "Faculty", "FSRs", "Milestones", "Funding", "Approvals", "Signatures", "Accounts", "Audit"])
-        self.assertEqual(tabs(c), ["Students", "Faculty", "FSRs", "Milestones", "Funding", "Forms", "Accounts", "Audit"])
+        self.assertEqual(tabs(chair), ["Students", "Faculty", "FSRs", "Milestones", "Funding", "Approvals", "Signatures", "Terms", "Accounts", "Audit"])
+        self.assertEqual(tabs(c), ["Students", "Faculty", "FSRs", "Milestones", "Funding", "Forms", "Terms", "Accounts", "Audit"])
         self.assertRegex(header(appr), r'Approvals <span class="count">1</span>'); self.assertNotIn("Signatures", header(appr))
         # first round: the approver or the chair; final round: the chair only; rejecting follows the same split
         tok = lambda k: self.token(k, "/students")
@@ -2779,6 +2779,32 @@ class WebTests(unittest.TestCase):
         with c.session_transaction() as sess:
             sess["student_list"] = "sort=%00&dir=&&q=" + "z" * 300 + "&role=x&faculty=abc"
         self.assertEqual(c.get(f"/students/{ids['Nb']}").status_code, 200)
+
+    def test_term_calendar_is_for_administrators_and_validates_dates(self):
+        ad, ed = self.client("ad"), self.client("ed")
+        for path in ("/terms", "/terms/new"):
+            self.assertEqual(ed.get(path).status_code, 403)
+            self.assertEqual(ad.get(path).status_code, 200)
+        t = self.token(ad)
+        post = lambda c, url, **d: c.post(url, data=dict(csrf_token=t, **d))
+        good = dict(term_year="2026", term_season="Autumn", start_date="2026-09-28", end_date="2026-12-11")
+        self.assertEqual(post(ed, "/terms/new", **good).status_code, 403)
+        self.assertIn("can&#39;t be before", post(ad, "/terms/new", **{**good, "end_date": "2026-09-01"}).get_data(as_text=True))
+        self.assertIn("required", post(ad, "/terms/new", **{**good, "start_date": ""}).get_data(as_text=True))
+        self.assertEqual(post(ad, "/terms/new", **good).status_code, 302)
+        self.assertIn("already in the calendar", post(ad, "/terms/new", **good).get_data(as_text=True))
+        post(ad, "/terms/new", **{**good, "term_season": "Winter", "term_year": "2027", "start_date": "2027-01-04", "end_date": "2027-03-19"})
+        page = ad.get("/terms").get_data(as_text=True)
+        self.assertLess(page.index("Winter 2027"), page.index("Autumn 2026"))          # newest first
+        self.assertIn("2026-09-28", page); self.assertIn("2026-12-11", page)
+        # edit, then it is in the audit log
+        self.assertEqual(post(ad, "/terms/1/edit", **{**good, "end_date": "2026-12-12"}).status_code, 302)
+        self.assertIn("2026-12-12", ad.get("/terms").get_data(as_text=True))
+        self.assertIn("Term dates", ad.get("/audit").get_data(as_text=True))
+        self.assertEqual(post(ed, "/terms/1/delete").status_code, 403)
+        self.assertEqual(post(ad, "/terms/1/delete").status_code, 302)
+        self.assertNotIn("<td>Autumn 2026</td>", ad.get("/terms").get_data(as_text=True))
+        self.assertEqual(ad.get("/terms/99/edit").status_code, 404)
 
     def test_student_columns_sort_both_ways(self):
         from unittest import mock

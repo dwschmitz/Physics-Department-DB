@@ -31,6 +31,7 @@ TABLES = {
     "funding":        dict(skip=(), student="{r}.student_id", row="{r}.id", label=_STUDENT_NAME),
     "course_credits": dict(skip=(), student="{r}.student_id", row="NULL", label=_STUDENT_NAME),
     "forms":          dict(skip=("pdf", "pdf_faculty", "pdf_sha256"), student="{r}.student_id", row="{r}.id", label=_STUDENT_NAME),
+    "terms":          dict(skip=(), student=None, row="{r}.id", label="{r}.term_season || ' ' || {r}.term_year"),
     "users":          dict(skip=("password_hash",), student=None, row="{r}.id", label="{r}.username"),
     "signatures":     dict(skip=("image",), student=None, row="{r}.user_id",
                            label="(SELECT username FROM users WHERE id = {r}.user_id)"),
@@ -159,7 +160,7 @@ class AuditedConnection(sqlite3.Connection):
 
 ENTITY_NAMES = {"students": "Student", "faculty": "Faculty", "fsrs": "FSR", "advising": "Advisor / committee",
                 "milestones": "Milestone", "funding": "Funding", "course_credits": "Core course", "forms": "Form",
-                "users": "Account", "signatures": "Signature image", "session": "Sign-in"}
+                "terms": "Term dates", "users": "Account", "signatures": "Signature image", "session": "Sign-in"}
 FIELD_NAMES = {"university_id": "University ID", "cnet": "CNET", "poetaf_coa": "POETAF/COA", "fsr_id": "FSR",
                "faculty_id": "Faculty", "student_id": "Student", "password_hash_changed": "Password", "image_changed": "Image",
                "pdf_changed": "PDF", "pdf_faculty_changed": "Advisor copy", "pdf_sha256_changed": "PDF checksum",

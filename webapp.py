@@ -684,6 +684,64 @@ def create_app(db_path=None):
             flash(f"Account '{u['username']}' deleted.", "ok")
         return redirect(url_for("users"))
 
+    # ---- the term calendar -----------------------------------------------------
+    def term_fields():
+        return [F("term_year", "Year", "select", True, term_years(), placeholder=True),
+                F("term_season", "Term", "select", True, [(s, s) for s in physdb.SEASONS], placeholder=True),
+                F("start_date", "First day of the term", "date", True),
+                F("end_date", "Last day of the term", "date", True,
+                  help="The last day of the term's appointment period (for example the last day of finals or the "
+                       "day before the next term starts, whichever your letters use).")]
+
+    @app.route("/terms")
+    def terms():
+        require_admin()
+        rows = sorted(db().execute("SELECT * FROM terms").fetchall(),
+                      key=lambda r: physdb.term_index(r["term_season"], r["term_year"]), reverse=True)
+        return render_template("terms.html", rows=rows)
+
+    def term_form(title, row=None):
+        fields = term_fields()
+        errors = {}
+        if request.method == "POST":
+            values, errors = parse_form(fields, request.form)
+            if not errors and values["end_date"] < values["start_date"]:
+                errors["end_date"] = "The last day can't be before the first day."
+            if not errors:
+                problem = save("terms", fields, values, row["id"] if row else None)
+                if problem:
+                    errors["_form"] = problem
+                else:
+                    flash(f"{values['term_season']} {values['term_year']} saved.", "ok")
+                    return redirect(url_for("terms"))
+            shown = request.form
+        elif row:
+            shown = row
+        else:
+            season, year = physdb.current_term()
+            shown = {"term_year": year, "term_season": season}
+        return render_template("form.html", title=title, fields=fields, values=shown, errors=errors,
+                               back=url_for("terms"))
+
+    @app.route("/terms/new", methods=["GET", "POST"])
+    def term_new():
+        require_admin()
+        return term_form("Add term dates")
+
+    @app.route("/terms/<int:tid>/edit", methods=["GET", "POST"])
+    def term_edit(tid):
+        require_admin()
+        t = get_or_404("terms", tid)
+        return term_form(f"Edit term dates: {t['term_season']} {t['term_year']}", t)
+
+    @app.post("/terms/<int:tid>/delete")
+    def term_delete(tid):
+        require_admin()
+        t = get_or_404("terms", tid)
+        db().execute("DELETE FROM terms WHERE id = ?", (tid,)); db().commit()
+        flash(f"{t['term_season']} {t['term_year']} removed from the calendar.", "ok")
+        return redirect(url_for("terms"))
+
     # ---- pages for faculty logins ----------------------------------------------
     def require_faculty():
         if g.user["role"] != "faculty":
@@ -897,6 +955,7 @@ def create_app(db_path=None):
                         ("students", "cnet"): "Another student already has this CNET.",
                         ("faculty", "cnet"): "Another faculty member already has this CNET.",
                         ("fsrs", "email"): "Someone else already has this email address.",
+                        ("terms", "term_season"): "That term is already in the calendar; edit it instead.",
                         ("fsrs", "cnet"): "Another FSR already has this CNET.",
                         ("faculty", "username"): "That CNET is already the login name of a different account.",
                         }.get((table, col), "That entry already exists.")

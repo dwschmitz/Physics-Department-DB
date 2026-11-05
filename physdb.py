@@ -51,6 +51,13 @@ TERM_STARTS = [("Winter", (1, 1)), ("Spring", (3, 25)), ("Summer", (6, 15)), ("A
 _TERM_POSITION = {name: i for i, (name, _) in enumerate(TERM_STARTS)}
 
 
+def term_dates(conn, season, year):
+    """(start_date, end_date) as ISO text from the term calendar (the Terms page), or None if that term hasn't been entered."""
+    row = conn.execute("SELECT start_date, end_date FROM terms WHERE term_season = ? AND term_year = ?",
+                       (season, year)).fetchone()
+    return (row["start_date"], row["end_date"]) if row else None
+
+
 def current_term(today=None):
     """(season, calendar year) for today's date, e.g. ('Autumn', 2026)."""
     today = today or datetime.date.today()

@@ -115,6 +115,18 @@ CREATE TABLE IF NOT EXISTS forms (
 );
 CREATE INDEX IF NOT EXISTS idx_forms_student ON forms(student_id);
 
+-- The term calendar: the real first and last day of each term, entered once a year by an administrator. Letters
+-- (and anything else that needs an actual date) read it; physdb.TERM_STARTS is only an approximation for "today's term".
+CREATE TABLE IF NOT EXISTS terms (
+    id          INTEGER PRIMARY KEY,
+    term_year   INTEGER NOT NULL CHECK (term_year BETWEEN 1950 AND 2100),
+    term_season TEXT NOT NULL CHECK (term_season IN ('Winter', 'Spring', 'Summer', 'Autumn')),
+    start_date  TEXT NOT NULL CHECK (start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    end_date    TEXT NOT NULL CHECK (end_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    CHECK (end_date >= start_date),
+    UNIQUE (term_year, term_season)
+);
+
 -- The audit log (see audit.py): who changed what, and when. Written by triggers; never edited by the app.
 CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY,

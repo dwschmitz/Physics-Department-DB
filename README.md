@@ -170,6 +170,10 @@ person's password and role (for example, to regain admin access if no admin can 
   (graduate in Summer 2026 and you're listed through Autumn 2026, gone from Winter 2027); one with no recorded term
   stays. Faculty pages keep graduated and withdrawn students indefinitely. Staff see the same table on
   an FSR's page (FSRs → click a name).
+- **Terms** (administrators and the chair): the term calendar, with the real first and last day of each term. Add a term
+  once a year (year, term, first day, last day); edits and removals are in the audit log. Appointment letters will read
+  their start and end dates from here. The approximate dates in `physdb.TERM_STARTS` are still used only to work out
+  which term today falls in.
 - **Sorting:** click any column heading on the Students, Faculty, Milestones, Funding and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - **Prev / Next on a student's page** step through students in the order of the Students list you last looked at

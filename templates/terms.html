@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% from "_macros.html" import delete_button with context %}{% block body %}
+<h1>Term calendar <a class="btn small" href="{{ url_for('term_new') }}">+ Add term</a></h1>
+<p class="muted">The real first and last day of each term. Appointment letters take their start and end dates from here, so add each
+  term before you generate its letters.</p>
+{% if rows %}
+<table><tr><th>Term</th><th>First day</th><th>Last day</th><th></th></tr>
+{% for r in rows %}<tr><td>{{ r.term_season }} {{ r.term_year }}</td><td>{{ r.start_date }}</td><td>{{ r.end_date }}</td>
+<td class="actions"><a class="btn secondary small" href="{{ url_for('term_edit', tid=r.id) }}">Edit</a>
+{{ delete_button(url_for('term_delete', tid=r.id), 'Remove ' ~ r.term_season ~ ' ' ~ r.term_year ~ ' from the calendar?') }}</td></tr>
+{% endfor %}</table>
+{% else %}<p>No terms have been entered yet.</p>{% endif %}
+{% endblock %}

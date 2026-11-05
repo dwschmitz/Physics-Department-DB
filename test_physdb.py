@@ -16,6 +16,18 @@ class PhysDBTests(unittest.TestCase):
             research_area="Quantum optics", notes=None)
         self.fid = physdb.add_faculty(self.conn, "Niels", "Bohr", "bohr@uni.edu", "Atomic")
 
+    def test_term_calendar_lookup_and_date_rules(self):
+        self.assertIsNone(physdb.term_dates(self.conn, "Autumn", 2026))
+        self.conn.execute("INSERT INTO terms (term_year, term_season, start_date, end_date) VALUES (2026, 'Autumn', '2026-09-28', '2026-12-11')")
+        self.assertEqual(physdb.term_dates(self.conn, "Autumn", 2026), ("2026-09-28", "2026-12-11"))
+        self.assertIsNone(physdb.term_dates(self.conn, "Winter", 2026))
+        for bad in [(2026, "Autumn", "2026-10-01", "2026-12-01"),        # a second row for the same term
+                    (2026, "Winter", "2026-12-01", "2026-10-01"),        # ends before it starts
+                    (2026, "Winter", "Dec 1", "2026-12-20"),             # not an ISO date
+                    (2026, "Fall", "2026-01-01", "2026-03-01")]:         # not a term
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.conn.execute("INSERT INTO terms (term_year, term_season, start_date, end_date) VALUES (?,?,?,?)", bad)
+
     def test_lookup_by_id_email_university_id(self):
         for key in (self.sid, "ada@uni.edu", "U1001"):
             self.assertEqual(physdb._find(self.conn, "students", key)["id"], self.sid)
