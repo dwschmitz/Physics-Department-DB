@@ -2808,7 +2808,6 @@ class WebTests(unittest.TestCase):
 
     def test_ra_letter_download(self):
         import zipfile, io
-        from unittest import mock
         ed, vw = self.client("ed"), self.client("vw")
         self.add_student(ed)
         t = self.token(ed)
@@ -2827,10 +2826,7 @@ class WebTests(unittest.TestCase):
         ad = self.client("ad")
         ad.post("/terms/new", data=dict(term_year="2026", term_season="Autumn", start_date="2026-09-28",
                                         end_date="2026-12-11", csrf_token=self.token(ad)))
-        r = ed.get("/students/1/funding/1/letter", follow_redirects=True)           # reply address not set
-        self.assertIn("PHYSDB_LETTER_REPLY_EMAIL", r.get_data(as_text=True))
-        with mock.patch.dict(os.environ, {"PHYSDB_LETTER_REPLY_EMAIL": "grad@u.edu"}):
-            r = ed.get("/students/1/funding/1/letter")
+        r = ed.get("/students/1/funding/1/letter")
         self.assertEqual(r.status_code, 200)
         self.assertIn("attachment", r.headers["Content-Disposition"])
         xml = zipfile.ZipFile(io.BytesIO(r.data)).read("word/document.xml").decode()

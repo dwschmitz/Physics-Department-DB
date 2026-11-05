@@ -5,10 +5,10 @@ with its value as plain text (keeping the formatting of the field), so the lette
 template with nothing left to merge. Which field a spot is comes from the name shown between the « » marks, not from
 Word's hidden field code (the START_DATE spot in the RA template carries a stale DEPT_OR_PROGRAM code).
 
-Settings that are the same for every letter come from environment variables, like the email settings:
-  PHYSDB_LETTER_DEPARTMENT   the employing unit, default "Physics"
-  PHYSDB_LETTER_PROGRAM      the signature block, default "Physics"
-  PHYSDB_LETTER_REPLY_EMAIL  where the signed letter is returned (required)
+Settings that are the same for every letter have the defaults below; an environment variable replaces one:
+  PHYSDB_LETTER_DEPARTMENT   the employing unit
+  PHYSDB_LETTER_PROGRAM      the signature block
+  PHYSDB_LETTER_REPLY_EMAIL  where the signed letter is returned
 """
 import datetime
 import io
@@ -35,8 +35,9 @@ def long_date(d):
 def settings(environ=None):
     env = os.environ if environ is None else environ
     get = lambda name, default="": (env.get(name) or default).strip()
-    return dict(department=get("PHYSDB_LETTER_DEPARTMENT", "Physics"), program=get("PHYSDB_LETTER_PROGRAM", "Physics"),
-                reply_email=get("PHYSDB_LETTER_REPLY_EMAIL"))
+    return dict(department=get("PHYSDB_LETTER_DEPARTMENT", "Physics"),
+                program=get("PHYSDB_LETTER_PROGRAM", "Department of Physics"),
+                reply_email=get("PHYSDB_LETTER_REPLY_EMAIL", "putrikusumo@uchicago.edu"))
 
 
 def supervisors(conn, student_id, start, end):
@@ -57,9 +58,6 @@ def values_for(conn, student, funding, today=None, environ=None):
     if dates is None:
         raise LetterError(f"{funding['term_season']} {funding['term_year']} is not in the term calendar yet. "
                           "An administrator can add its dates on the Terms page.")
-    if not cfg["reply_email"]:
-        raise LetterError("The email address for returning signed letters is not set. Ask whoever runs the app to set "
-                          "PHYSDB_LETTER_REPLY_EMAIL (see the README).")
     advisors = supervisors(conn, student["id"], *dates)
     if not advisors:
         raise LetterError(f"{student['first_name']} {student['last_name']} has no advisor recorded for "

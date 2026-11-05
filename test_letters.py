@@ -9,7 +9,7 @@ from unittest import mock
 import letters
 import physdb
 
-ENV = {"PHYSDB_LETTER_REPLY_EMAIL": "grad@u.edu"}
+ENV = {}
 TODAY = datetime.date(2026, 11, 5)
 
 
@@ -41,7 +41,7 @@ class LetterTests(unittest.TestCase):
         text, xml = text_of(data)
         for want in ("To: Ada Lovelace", "November 5, 2026", "Dear Ada,", "begin on September 28, 2026.",
                      "Employment unit: Physics.", "Supervisor) is Niels Bohr.", "email is bohr@u.edu.",
-                     "returning via email to grad@u.edu."):
+                     "returning via email to putrikusumo@uchicago.edu.", "Sincerely,Department of Physics"):
             self.assertIn(want, text)
         self.assertNotIn("«", xml)
         self.assertNotIn("MERGEFIELD", xml)                # flattened: nothing left to merge in Word
@@ -73,8 +73,9 @@ class LetterTests(unittest.TestCase):
         self.assertNotIn("Planck", text)
 
     def test_what_is_missing_is_explained(self):
-        with self.assertRaisesRegex(letters.LetterError, "PHYSDB_LETTER_REPLY_EMAIL"):
-            self.make({})
+        text, _ = text_of(self.make({"PHYSDB_LETTER_REPLY_EMAIL": "other@u.edu", "PHYSDB_LETTER_PROGRAM": "Physics Dept"})[0])
+        self.assertIn("returning via email to other@u.edu.", text)         # settings can be overridden
+        self.assertIn("Physics Dept", text)
         self.conn.execute("INSERT INTO funding (student_id, kind, term_year, term_season) VALUES (?, 'RA', 2027, 'Winter')", (self.sid,))
         self.conn.commit()
         with self.assertRaisesRegex(letters.LetterError, "Winter 2027 is not in the term calendar"):

@@ -178,9 +178,9 @@ person's password and role (for example, to regain admin access if no admin can 
   the filled-in Word letter for that term (the template is `letter_templates/RA_Primary_Template.docx`; the file is made
   fresh each time and the download is noted in the audit log). The start date is the term's first day from the **Terms**
   calendar, and the supervisor is whoever is recorded as the student's advisor or co-advisor during that term. If something
-  is missing (the term isn't in the calendar, no advisor, no reply address) the page says what to fix. Set these before use:
-  `PHYSDB_LETTER_REPLY_EMAIL` (where signed letters are returned; required), and optionally `PHYSDB_LETTER_DEPARTMENT` and
-  `PHYSDB_LETTER_PROGRAM` (both default to "Physics"). Wording that is fixed in the template, such as the pay amount, is
+  is missing (the term isn't in the calendar, or no advisor) the page says what to fix. Fixed values: employing unit
+  "Physics", signature "Department of Physics", signed letters returned to putrikusumo@uchicago.edu (change them with
+  `PHYSDB_LETTER_DEPARTMENT`, `PHYSDB_LETTER_PROGRAM` and `PHYSDB_LETTER_REPLY_EMAIL`). Wording that is fixed in the template, such as the pay amount, is
   changed by editing the template in Word and keeping the «FIELD» names.
 - **Sorting:** click any column heading on the Students, Faculty, Milestones, Funding and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
