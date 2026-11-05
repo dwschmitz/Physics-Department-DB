@@ -512,7 +512,7 @@ class WebTests(unittest.TestCase):
         with mock.patch.object(physdb, "current_term", return_value=("Autumn", 2026)):
             html = c.get(report).get_data(as_text=True)
         out = {}
-        for m in re.finditer(r"<tr><td[^>]*><a href=\"/students/(\d+)\">.*?</tr>", html, re.S):
+        for m in re.finditer(r"<tr>(?:<td>(?:<input[^>]*>)?</td>)?<td[^>]*><a href=\"/students/(\d+)\">.*?</tr>", html, re.S):
             sid, row = m.group(1), m.group(0)
             out.setdefault(sid, []).append(row)
         return html, out
