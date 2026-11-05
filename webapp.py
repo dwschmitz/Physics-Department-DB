@@ -1311,8 +1311,8 @@ def create_app(db_path=None):
 
     @app.post("/reports/funding/letters")
     def funding_letters():
-        """The checked rows of the Funding tab as one zip of letters. A letter that can't be made is left out and
-        listed, with the reason, in NOT_MADE.txt inside the zip."""
+        """The checked rows of the Funding tab as one zip of letters, each as a Word file and a PDF. A letter that
+        can't be made is left out and listed, with the reason, in NOT_MADE.txt inside the zip."""
         require_editor()
         import io, zipfile
         back = _safe_path(request.form.get("next")) or url_for("funding_report")
@@ -1326,26 +1326,40 @@ def create_app(db_path=None):
         if len(ids) > MAX_LETTERS_AT_ONCE:
             flash(f"Please make at most {MAX_LETTERS_AT_ONCE} letters at once.", "error")
             return redirect(back)
-        out, used, problems, made = io.BytesIO(), set(), [], []
+        out, used, problems, made, files = io.BytesIO(), set(), [], [], {}
+        for fid in ids:
+            f = db().execute("SELECT * FROM funding WHERE id = ?", (fid,)).fetchone()
+            s = db().execute("SELECT * FROM students WHERE id = ?", (f["student_id"],)).fetchone() if f else None
+            if s is None:
+                continue
+            who = f"{s['last_name']}, {s['first_name']}"
+            try:
+                data, name = build_letter(s, f)
+            except letters.LetterError as e:
+                problems.append(f"{who}: {e}")
+                continue
+            stem, n = name[:-len(".docx")], 1
+            while name in used:                              # two students with the same last name
+                n += 1; name = f"{stem}_{n}.docx"
+            used.add(name); made.append(f)
+            files[name] = data
+        pdfs = {}
+        if files:
+            try:
+                pdfs = letters.docx_to_pdfs(files)
+            except letters.LetterError as e:
+                problems.append(str(e))
+            missing = [n for n in files if n[:-len(".docx")] + ".pdf" not in pdfs]
+            if pdfs and missing:
+                problems.append("No PDF could be made for: " + ", ".join(missing))
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-            for fid in ids:
-                f = db().execute("SELECT * FROM funding WHERE id = ?", (fid,)).fetchone()
-                s = db().execute("SELECT * FROM students WHERE id = ?", (f["student_id"],)).fetchone() if f else None
-                if s is None:
-                    continue
-                who = f"{s['last_name']}, {s['first_name']}"
-                try:
-                    data, name = build_letter(s, f)
-                except letters.LetterError as e:
-                    problems.append(f"{who}: {e}")
-                    continue
-                stem, n = name[:-len(".docx")], 1
-                while name in used:                              # two students with the same last name
-                    n += 1; name = f"{stem}_{n}.docx"
-                used.add(name); made.append(f)
+            for name, data in files.items():
                 z.writestr(name, data)
+                pdf = pdfs.get(name[:-len(".docx")] + ".pdf")
+                if pdf:
+                    z.writestr(name[:-len(".docx")] + ".pdf", pdf)
             if problems:
-                z.writestr("NOT_MADE.txt", "These letters could not be made:\r\n\r\n" + "\r\n\r\n".join(problems) + "\r\n")
+                z.writestr("NOT_MADE.txt", "Some things could not be made:\r\n\r\n" + "\r\n\r\n".join(problems) + "\r\n")
         if not made:
             flash("No letters were made. " + " ".join(problems[:5]) + (" ..." if len(problems) > 5 else ""), "error")
             return redirect(back)

@@ -60,9 +60,11 @@ class LetterTests(unittest.TestCase):
         self.assertIn("A<b>&Z Lovelace", text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
         self.assertNotIn("<b>&Z", xml)
 
-    def test_joint_supervisors_and_only_those_advising_during_the_term(self):
+    def test_joint_supervisors_and_only_current_advisors(self):
         f2 = physdb.add_faculty(self.conn, "Marie", "Curie", "curie@u.edu", "Radio")
         f3 = physdb.add_faculty(self.conn, "Max", "Planck", "planck@u.edu", "Quanta")
+        f4 = physdb.add_faculty(self.conn, "Lise", "Meitner", "meitner@u.edu", "Nuclear")
+        self.conn.execute("INSERT INTO advising (student_id, faculty_id, role, start_date, end_date) VALUES (?, ?, 'advisor', '2025-01-01', '2026-10-01')", (self.sid, f4))   # ended mid-term, before today
         self.conn.execute("INSERT INTO advising (student_id, faculty_id, role, start_date) VALUES (?, ?, 'co-advisor', '2026-10-15')", (self.sid, f2))
         self.conn.execute("INSERT INTO advising (student_id, faculty_id, role, start_date, end_date) VALUES (?, ?, 'advisor', '2020-01-01', '2026-09-01')", (self.sid, f3))
         self.conn.execute("INSERT INTO advising (student_id, faculty_id, role, start_date) VALUES (?, ?, 'committee', '2024-01-01')", (self.sid, f3))
@@ -71,6 +73,7 @@ class LetterTests(unittest.TestCase):
         self.assertIn("Supervisor) is Niels Bohr and Marie Curie.", text)
         self.assertIn("email is bohr@u.edu and curie@u.edu.", text)
         self.assertNotIn("Planck", text)
+        self.assertNotIn("Meitner", text)                  # her "to" date has passed
 
     def test_what_is_missing_is_explained(self):
         text, _ = text_of(self.make({"PHYSDB_LETTER_REPLY_EMAIL": "other@u.edu", "PHYSDB_LETTER_PROGRAM": "Physics Dept"})[0])
@@ -81,9 +84,9 @@ class LetterTests(unittest.TestCase):
         with self.assertRaisesRegex(letters.LetterError, "Winter 2027 is not in the term calendar"):
             self.make()
         self.conn.execute("INSERT INTO terms (term_year, term_season, start_date, end_date) VALUES (2027, 'Winter', '2027-01-04', '2027-03-19')")
-        self.conn.execute("UPDATE advising SET end_date = '2026-12-31'")
+        self.conn.execute("UPDATE advising SET end_date = '2026-10-01'")          # in the past
         self.conn.commit()
-        with self.assertRaisesRegex(letters.LetterError, "no advisor recorded for Winter 2027"):
+        with self.assertRaisesRegex(letters.LetterError, "no current advisor"):
             self.make()
         self.conn.execute("INSERT INTO funding (student_id, kind) VALUES (?, 'RA')", (self.sid,))
         self.conn.commit()
@@ -93,6 +96,23 @@ class LetterTests(unittest.TestCase):
         self.conn.commit()
         with self.assertRaisesRegex(letters.LetterError, "no letter template for TA"):
             self.make()
+
+    def test_word_files_convert_to_pdfs(self):
+        import shutil
+        if not (shutil.which("soffice") or shutil.which("libreoffice")):
+            self.skipTest("LibreOffice is not installed")
+        import pypdf
+        data, name = self.make()
+        pdfs = letters.docx_to_pdfs({name: data, "second.docx": data})
+        self.assertEqual(sorted(pdfs), ["RA_letter_Lovelace_Autumn_2026.pdf", "second.pdf"])
+        pdf = pdfs["second.pdf"]
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertIn("Dear Ada,", pypdf.PdfReader(io.BytesIO(pdf)).pages[0].extract_text())
+
+    def test_missing_libreoffice_is_explained(self):
+        with mock.patch("shutil.which", return_value=None):
+            with self.assertRaisesRegex(letters.LetterError, "LibreOffice is not installed"):
+                letters.docx_to_pdfs({"a.docx": b"x"})
 
     def test_a_field_the_app_cannot_fill_is_refused(self):
         template = (letters.TEMPLATES_DIR / letters.TEMPLATES["RA"]).read_bytes()

@@ -177,14 +177,16 @@ person's password and role (for example, to regain admin access if no admin can 
 - **Assignment letters** (editors and above): each *RA* funding row on a student's page has a **Letter** button that downloads
   the filled-in Word letter for that term (the template is `letter_templates/RA_Primary_Template.docx`; the file is made
   fresh each time and the download is noted in the audit log). The start date is the term's first day from the **Terms**
-  calendar, and the supervisor is whoever is recorded as the student's advisor or co-advisor during that term. If something
+  calendar, and the supervisor is whoever is recorded as the student's current advisor or co-advisor (one whose "to" date has passed is left out). If something
   is missing (the term isn't in the calendar, or no advisor) the page says what to fix. Fixed values: employing unit
   "Physics", signature "Department of Physics", signed letters returned to putrikusumo@uchicago.edu (change them with
   `PHYSDB_LETTER_DEPARTMENT`, `PHYSDB_LETTER_PROGRAM` and `PHYSDB_LETTER_REPLY_EMAIL`). Wording that is fixed in the template, such as the pay amount, is
   changed by editing the template in Word and keeping the «FIELD» names.
 - **Letters from the Funding tab:** every RA row has a **Letter** button, and a tick box (with *select all* in the header)
-  for making several at once: tick the students, press **Generate letters**, and a zip of their letters downloads. A
-  letter that can't be made (term not in the calendar, no advisor) is left out and explained in `NOT_MADE.txt` inside the zip.
+  for making several at once: tick the students, press **Generate letters**, and a zip downloads with each letter as a
+  Word file and a PDF (the PDFs need LibreOffice installed on the computer running the app; the single-row **Letter** button gives
+  just the Word file). A letter that can't be made (term not in the calendar, no current advisor) is left out and explained in
+  `NOT_MADE.txt` inside the zip.
 - **Sorting:** click any column heading on the Students, Faculty, Milestones, Funding and Accounts lists to sort by
   it; click again to reverse. Filters stay in place, and blank values always sort to the bottom.
 - **Prev / Next on a student's page** step through students in the order of the Students list you last looked at

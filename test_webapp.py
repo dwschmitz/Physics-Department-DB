@@ -4,6 +4,7 @@ import unittest
 
 from werkzeug.security import generate_password_hash
 
+import letters
 import physdb
 import webapp
 
@@ -2837,6 +2838,7 @@ class WebTests(unittest.TestCase):
 
     def test_funding_tab_letter_buttons_and_the_zip_of_checked_letters(self):
         import io, zipfile
+        from unittest import mock
         ed, vw, ad = self.client("ed"), self.client("vw"), self.client("ad")
         t = self.token(ed)
         ed.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", csrf_token=t))
@@ -2861,24 +2863,34 @@ class WebTests(unittest.TestCase):
         r = post(ed)                                                          # nothing ticked
         self.assertEqual(r.status_code, 302)
         self.assertIn("Tick the students", ed.get("/reports/funding").get_data(as_text=True))
+        fake = lambda files: {n[:-5] + ".pdf": b"%PDF-fake " + n.encode() for n in files}
+        patcher = mock.patch.object(letters, "docx_to_pdfs", fake); patcher.start(); self.addCleanup(patcher.stop)
         r = post(ed, "1", "2", "1", "abc", "999", next="/reports/funding?year=2026&season=Autumn")
         self.assertEqual(r.mimetype, "application/zip")
         self.assertIn("Letters_Autumn_2026.zip", r.headers["Content-Disposition"])
         z = zipfile.ZipFile(io.BytesIO(r.data))
-        self.assertEqual(sorted(z.namelist()), ["RA_letter_Aa_Autumn_2026.docx", "RA_letter_Bb_Autumn_2026.docx"])
+        self.assertEqual(sorted(z.namelist()), ["RA_letter_Aa_Autumn_2026.docx", "RA_letter_Aa_Autumn_2026.pdf",
+                                                "RA_letter_Bb_Autumn_2026.docx", "RA_letter_Bb_Autumn_2026.pdf"])    # Word and PDF of each
         letter = zipfile.ZipFile(io.BytesIO(z.read("RA_letter_Aa_Autumn_2026.docx"))).read("word/document.xml").decode()
         self.assertIn("September 28, 2026", letter)
         # one that can't be made (no advisor) and one with no template (TA) are listed, the rest still come
         r = post(ed, "1", "3", "4")
         z = zipfile.ZipFile(io.BytesIO(r.data))
-        self.assertEqual(sorted(z.namelist()), ["NOT_MADE.txt", "RA_letter_Aa_Autumn_2026.docx"])
+        self.assertEqual(sorted(z.namelist()), ["NOT_MADE.txt", "RA_letter_Aa_Autumn_2026.docx", "RA_letter_Aa_Autumn_2026.pdf"])
         note = z.read("NOT_MADE.txt").decode()
-        self.assertIn("Cc, Ada: Ada Cc has no advisor", note); self.assertIn("Dd, Ada: There is no letter template for TA", note)
+        self.assertIn("Cc, Ada: Ada Cc has no current advisor", note); self.assertIn("Dd, Ada: There is no letter template for TA", note)
         # nothing could be made: back to the page with the reasons, no zip
         r = post(ed, "3", next="/reports/funding?year=2026&season=Autumn")
         self.assertEqual(r.status_code, 302)
         self.assertIn("No letters were made", ed.get("/reports/funding").get_data(as_text=True))
         self.assertEqual(post(ed, "1", next="https://evil.example/").status_code, 200)          # still just a download
+        # without LibreOffice the Word files still come, with the reason in NOT_MADE.txt
+        def no_office(files):
+            raise letters.LetterError("PDFs could not be made because LibreOffice is not installed on the computer running this app.")
+        with mock.patch.object(letters, "docx_to_pdfs", no_office):
+            z = zipfile.ZipFile(io.BytesIO(post(ed, "1").data))
+        self.assertEqual(sorted(z.namelist()), ["NOT_MADE.txt", "RA_letter_Aa_Autumn_2026.docx"])
+        self.assertIn("LibreOffice is not installed", z.read("NOT_MADE.txt").decode())
         # the one-letter button from the Funding tab returns to the tab if it fails
         r = ed.get("/students/3/funding/3/letter?next=/reports/funding%3Fyear%3D2026", follow_redirects=False)
         self.assertEqual(r.headers["Location"], "/reports/funding?year=2026")

@@ -40,13 +40,14 @@ def settings(environ=None):
                 reply_email=get("PHYSDB_LETTER_REPLY_EMAIL", "putrikusumo@uchicago.edu"))
 
 
-def supervisors(conn, student_id, start, end):
-    """The faculty advising this student (advisor or co-advisor) at any point from `start` to `end` (ISO dates)."""
+def supervisors(conn, student_id, term_end, today):
+    """The student's current advisors and co-advisors: those whose advising has begun by the end of the term and has
+    not ended before `today` (ISO dates). One whose "to" date is in the past is not listed."""
     return conn.execute(
         """SELECT DISTINCT f.first_name, f.last_name, f.email FROM advising a JOIN faculty f ON f.id = a.faculty_id
            WHERE a.student_id = ? AND a.role IN ('advisor', 'co-advisor') AND a.start_date <= ?
              AND (a.end_date IS NULL OR a.end_date >= ?)
-           ORDER BY a.role, f.last_name, f.first_name""", (student_id, end, start)).fetchall()
+           ORDER BY a.role, f.last_name, f.first_name""", (student_id, term_end, today)).fetchall()
 
 
 def values_for(conn, student, funding, today=None, environ=None):
@@ -58,15 +59,16 @@ def values_for(conn, student, funding, today=None, environ=None):
     if dates is None:
         raise LetterError(f"{funding['term_season']} {funding['term_year']} is not in the term calendar yet. "
                           "An administrator can add its dates on the Terms page.")
-    advisors = supervisors(conn, student["id"], *dates)
+    today = today or datetime.date.today()
+    advisors = supervisors(conn, student["id"], dates[1], today.isoformat())
     if not advisors:
-        raise LetterError(f"{student['first_name']} {student['last_name']} has no advisor recorded for "
-                          f"{funding['term_season']} {funding['term_year']}. Add one on the student's page first.")
+        raise LetterError(f"{student['first_name']} {student['last_name']} has no current advisor recorded. "
+                          "Add one on the student's page first (an advisor whose \"to\" date has passed does not count).")
     start = datetime.date.fromisoformat(dates[0])
     join = lambda parts: " and ".join(parts)
     return {
         "FULL_ADDRESEE_NAME": f"{student['first_name']} {student['last_name']}",
-        "DATE": long_date(today or datetime.date.today()),
+        "DATE": long_date(today),
         "STUDENT_FIRST": student["first_name"],
         "START_DATE": long_date(start),
         "DEPT_OR_PROGRAM": cfg["department"],
@@ -109,6 +111,31 @@ def fill(template_bytes, values):
         for item in src.infolist():
             dst.writestr(item, xml.encode("utf-8") if item.filename == "word/document.xml" else src.read(item.filename))
     return out.getvalue()
+
+
+def docx_to_pdfs(files):
+    """Convert Word files to PDF with LibreOffice (if the computer has it). `files` maps a file name to its bytes;
+    returns the same names with .pdf, mapped to the PDF bytes. Raises LetterError, with a message for the user, if
+    LibreOffice is missing or fails; a file it could not convert is simply absent from the result."""
+    import shutil
+    import subprocess
+    import tempfile
+    office = shutil.which("soffice") or shutil.which("libreoffice")
+    if office is None:
+        raise LetterError("PDFs could not be made because LibreOffice is not installed on the computer running this app.")
+    with tempfile.TemporaryDirectory(prefix="physdb-letters-") as tmp:
+        tmp = Path(tmp)
+        (tmp / "in").mkdir(); (tmp / "out").mkdir()
+        for name, data in files.items():
+            (tmp / "in" / Path(name).name).write_bytes(data)
+        try:
+            subprocess.run([office, "--headless", "--norestore", "--nolockcheck",
+                            f"-env:UserInstallation={(tmp / 'profile').as_uri()}",       # its own settings: no clash with another run
+                            "--convert-to", "pdf", "--outdir", str(tmp / "out"), *sorted(str(p) for p in (tmp / "in").iterdir())],
+                           capture_output=True, timeout=60 + 5 * len(files), check=True, cwd=tmp)
+        except (subprocess.SubprocessError, OSError):
+            raise LetterError("PDFs could not be made: LibreOffice did not finish converting the letters.") from None
+        return {p.name: p.read_bytes() for p in (tmp / "out").glob("*.pdf")}
 
 
 def make_letter(conn, student, funding, today=None, environ=None):
