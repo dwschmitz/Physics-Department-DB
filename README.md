@@ -178,9 +178,9 @@ person's password and role (for example, to regain admin access if no admin can 
   the filled-in Word letter for that term (the templates are `letter_templates/RA_Primary_Template.docx` and `TA_Primary_Template.docx`; the file is made
   fresh each time and the download is noted in the audit log). The start date is the term's first day from the **Terms**
   calendar (a TA letter also gives the term's last day), and the supervisor is whoever is recorded as the student's current advisor or co-advisor (one whose "to" date has passed is left out). If something
-  is missing (the term isn't in the calendar, or no advisor) the page says what to fix. Fixed values: employing unit
-  "Physics", signature "Department of Physics", signed letters returned to putrikusumo@uchicago.edu (change them with
-  `PHYSDB_LETTER_DEPARTMENT`, `PHYSDB_LETTER_PROGRAM` and `PHYSDB_LETTER_REPLY_EMAIL`). Wording that is fixed in the template, such as the pay amount, is
+  is missing (the term isn't in the calendar, or no advisor) the page says what to fix. Fixed values: the department
+  ("Physics", used for the employing unit and the signature) and the address signed letters are returned to
+  (putrikusumo@uchicago.edu); change them with `PHYSDB_LETTER_DEPARTMENT` and `PHYSDB_LETTER_REPLY_EMAIL`. Wording that is fixed in the template, such as the pay amount, is
   changed by editing the template in Word and keeping the «FIELD» names.
 - **TA letters** need the course: a TA funding entry has a **Course code** box (shown only when the type is TA; optional when
   saving, required to make the letter). The supervisor on a TA letter is the instructor of record, not the student's advisor:

@@ -3,11 +3,10 @@
 A template is an ordinary .docx whose fill-in spots are Word mail-merge fields, shown as «NAME». We replace each field
 with its value as plain text (keeping the formatting of the field), so the letter opens in Word looking like the
 template with nothing left to merge. Which field a spot is comes from the name shown between the « » marks, not from
-Word's hidden field code (the START_DATE spot in the RA template carries a stale DEPT_OR_PROGRAM code).
+Word's hidden field code.
 
 Settings that are the same for every letter have the defaults below; an environment variable replaces one:
-  PHYSDB_LETTER_DEPARTMENT   the employing unit
-  PHYSDB_LETTER_PROGRAM      the signature block
+  PHYSDB_LETTER_DEPARTMENT   the employing unit and the signature block (DEPT_OR_PROGRAM)
   PHYSDB_LETTER_REPLY_EMAIL  where the signed letter is returned
   PHYSDB_LETTER_INSTRUCTOR, PHYSDB_LETTER_INSTRUCTOR_EMAIL  the TA letters' instructor of record
   PHYSDB_LETTER_ENROLLMENT_LIMIT  the TA letters' expected class size (a placeholder until it is recorded per course)
@@ -38,7 +37,6 @@ def settings(environ=None):
     env = os.environ if environ is None else environ
     get = lambda name, default="": (env.get(name) or default).strip()
     return dict(department=get("PHYSDB_LETTER_DEPARTMENT", "Physics"),
-                program=get("PHYSDB_LETTER_PROGRAM", "Department of Physics"),
                 reply_email=get("PHYSDB_LETTER_REPLY_EMAIL", "putrikusumo@uchicago.edu"),
                 instructor=get("PHYSDB_LETTER_INSTRUCTOR", "Stuart Gazes"),
                 instructor_email=get("PHYSDB_LETTER_INSTRUCTOR_EMAIL", "gazes@uchicago.edu"),
@@ -76,8 +74,6 @@ def values_for(conn, student, funding, today=None, environ=None):
         "START_DATE": long_date(start),
         "END_DATE": long_date(end),
         "DEPT_OR_PROGRAM": cfg["department"],
-        "PROGRAM": cfg["program"],
-        "DEPARTMENT_OR_PROGRAM": cfg["program"],           # the signature block, in the TA template
         "PREFERRED_EMAIL": cfg["reply_email"],
     }
     if funding["kind"] == "TA":
