@@ -41,7 +41,7 @@ class LetterTests(unittest.TestCase):
         text, xml = text_of(data)
         for want in ("To: Ada Lovelace", "November 5, 2026", "Dear Ada,", "begin on  September 28, 2026.",
                      "Employment unit: Physics.", "Supervisor) is Niels Bohr.", "email is bohr@u.edu.",
-                     "returning via email to putrikusumo@uchicago.edu.", "Sincerely,Physics"):
+                     "returning via email to putrikusumo@uchicago.edu.", "Sincerely,Department of Physics"):
             self.assertIn(want, text)
         self.assertNotIn("«", xml)
         self.assertNotIn("MERGEFIELD", xml)                # flattened: nothing left to merge in Word
@@ -75,9 +75,9 @@ class LetterTests(unittest.TestCase):
         self.assertNotIn("Meitner", text)                  # her "to" date has passed
 
     def test_what_is_missing_is_explained(self):
-        text, _ = text_of(self.make({"PHYSDB_LETTER_REPLY_EMAIL": "other@u.edu", "PHYSDB_LETTER_DEPARTMENT": "Physics Dept"})[0])
+        text, _ = text_of(self.make({"PHYSDB_LETTER_REPLY_EMAIL": "other@u.edu", "PHYSDB_LETTER_DEPARTMENT": "Physics Dept", "PHYSDB_LETTER_SIGNATURE": "Dept. Sig"})[0])
         self.assertIn("returning via email to other@u.edu.", text)         # settings can be overridden
-        self.assertIn("Employment unit: Physics Dept.", text); self.assertIn("Sincerely,Physics Dept", text)   # one value, both places
+        self.assertIn("Employment unit: Physics Dept.", text); self.assertIn("Sincerely,Dept. Sig", text)   # the two are separate
         self.conn.execute("INSERT INTO funding (student_id, kind, term_year, term_season) VALUES (?, 'RA', 2027, 'Winter')", (self.sid,))
         self.conn.commit()
         with self.assertRaisesRegex(letters.LetterError, "Winter 2027 is not in the term calendar"):
@@ -105,7 +105,7 @@ class LetterTests(unittest.TestCase):
         for want in ("To: Ada Lovelace", "Dear Ada,", "begin on September 28, 2026, and end on December 11, 2026, and after relevant grade",
                      "Employment unit: Physics.", "Supervisor) is Stuart Gazes.", "email is gazes@uchicago.edu.",
                      "Course Title: PHYS 13100", "Expected number of students in the course or section: 100",
-                     "returning via email to putrikusumo@uchicago.edu.", "Sincerely,Physics"):
+                     "returning via email to putrikusumo@uchicago.edu.", "Sincerely,Department of Physics"):
             self.assertIn(want, text)
         self.assertNotIn("«", xml); self.assertNotIn("Bohr", text)           # the instructor, not the advisor
         text, _ = text_of(self.make({"PHYSDB_LETTER_ENROLLMENT_LIMIT": "35", "PHYSDB_LETTER_INSTRUCTOR": "A. Teacher"})[0])
