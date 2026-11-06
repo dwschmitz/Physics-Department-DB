@@ -174,15 +174,20 @@ person's password and role (for example, to regain admin access if no admin can 
   once a year (year, term, first day, last day); edits and removals are in the audit log. Appointment letters will read
   their start and end dates from here. The approximate dates in `physdb.TERM_STARTS` are still used only to work out
   which term today falls in.
-- **Assignment letters** (editors and above): each *RA* funding row on a student's page has a **Letter** button that downloads
-  the filled-in Word letter for that term (the template is `letter_templates/RA_Primary_Template.docx`; the file is made
+- **Assignment letters** (editors and above): each *RA* or *TA* funding row on a student's page has a **Letter** button that downloads
+  the filled-in Word letter for that term (the templates are `letter_templates/RA_Primary_Template.docx` and `TA_Primary_Template.docx`; the file is made
   fresh each time and the download is noted in the audit log). The start date is the term's first day from the **Terms**
-  calendar, and the supervisor is whoever is recorded as the student's current advisor or co-advisor (one whose "to" date has passed is left out). If something
+  calendar (a TA letter also gives the term's last day), and the supervisor is whoever is recorded as the student's current advisor or co-advisor (one whose "to" date has passed is left out). If something
   is missing (the term isn't in the calendar, or no advisor) the page says what to fix. Fixed values: employing unit
   "Physics", signature "Department of Physics", signed letters returned to putrikusumo@uchicago.edu (change them with
   `PHYSDB_LETTER_DEPARTMENT`, `PHYSDB_LETTER_PROGRAM` and `PHYSDB_LETTER_REPLY_EMAIL`). Wording that is fixed in the template, such as the pay amount, is
   changed by editing the template in Word and keeping the «FIELD» names.
-- **Letters from the Funding tab:** every RA row has a **Letter** button, and a tick box (with *select all* in the header)
+- **TA letters** need the course: a TA funding entry has a **Course code** box (shown only when the type is TA; optional when
+  saving, required to make the letter). The supervisor on a TA letter is the instructor of record, not the student's advisor:
+  Stuart Gazes, gazes@uchicago.edu, and the expected class size is a placeholder of 100 until it is recorded per course
+  (change them with `PHYSDB_LETTER_INSTRUCTOR`, `PHYSDB_LETTER_INSTRUCTOR_EMAIL`, `PHYSDB_LETTER_ENROLLMENT_LIMIT`). Copying a
+  term's funding does not copy course codes, since the course changes each term.
+- **Letters from the Funding tab:** every RA and TA row has a **Letter** button, and a tick box (with *select all* in the header)
   for making several at once: tick the students, press **Generate letters**, and a zip downloads with each letter as a
   Word file and a PDF (the PDFs need LibreOffice installed on the computer running the app; the single-row **Letter** button gives
   just the Word file). A letter that can't be made (term not in the calendar, no current advisor) is left out and explained in

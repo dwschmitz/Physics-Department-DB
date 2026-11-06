@@ -28,6 +28,22 @@ class PhysDBTests(unittest.TestCase):
             with self.assertRaises(sqlite3.IntegrityError):
                 self.conn.execute("INSERT INTO terms (term_year, term_season, start_date, end_date) VALUES (?,?,?,?)", bad)
 
+    def test_an_older_database_gets_the_funding_course_code_column(self):
+        import os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "old.db")
+        conn = physdb.connect(path)
+        sid = physdb.add_student(conn, university_id="U9", first_name="Old", last_name="Timer", email="o@u.edu",
+                                 matriculation_year=2020, research_area=None, notes=None)
+        conn.execute("INSERT INTO funding (student_id, kind, term_year, term_season) VALUES (?, 'TA', 2026, 'Autumn')", (sid,))
+        audit.drop_triggers(conn)                                    # as in a database from before the column
+        conn.execute("ALTER TABLE funding DROP COLUMN course_code")
+        conn.commit(); conn.close()
+        conn = physdb.connect(path)
+        self.assertIn("course_code", {r[1] for r in conn.execute("PRAGMA table_info(funding)")})
+        self.assertIsNone(conn.execute("SELECT course_code FROM funding").fetchone()[0])      # the entry is kept
+        conn.execute("UPDATE funding SET course_code = 'PHYS 13100'"); conn.commit()
+        self.assertIn("course_code", conn.execute("SELECT new_values FROM audit_log WHERE action = 'update' ORDER BY id DESC").fetchone()[0])
+
     def test_lookup_by_id_email_university_id(self):
         for key in (self.sid, "ada@uni.edu", "U1001"):
             self.assertEqual(physdb._find(self.conn, "students", key)["id"], self.sid)

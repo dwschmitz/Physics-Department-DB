@@ -9,6 +9,8 @@ Settings that are the same for every letter have the defaults below; an environm
   PHYSDB_LETTER_DEPARTMENT   the employing unit
   PHYSDB_LETTER_PROGRAM      the signature block
   PHYSDB_LETTER_REPLY_EMAIL  where the signed letter is returned
+  PHYSDB_LETTER_INSTRUCTOR, PHYSDB_LETTER_INSTRUCTOR_EMAIL  the TA letters' instructor of record
+  PHYSDB_LETTER_ENROLLMENT_LIMIT  the TA letters' expected class size (a placeholder until it is recorded per course)
 """
 import datetime
 import io
@@ -21,7 +23,7 @@ from pathlib import Path
 import physdb
 
 TEMPLATES_DIR = Path(__file__).with_name("letter_templates")
-TEMPLATES = {"RA": "RA_Primary_Template.docx"}          # funding kind -> template
+TEMPLATES = {"RA": "RA_Primary_Template.docx", "TA": "TA_Primary_Template.docx"}          # funding kind -> template
 
 
 class LetterError(Exception):
@@ -37,7 +39,10 @@ def settings(environ=None):
     get = lambda name, default="": (env.get(name) or default).strip()
     return dict(department=get("PHYSDB_LETTER_DEPARTMENT", "Physics"),
                 program=get("PHYSDB_LETTER_PROGRAM", "Department of Physics"),
-                reply_email=get("PHYSDB_LETTER_REPLY_EMAIL", "putrikusumo@uchicago.edu"))
+                reply_email=get("PHYSDB_LETTER_REPLY_EMAIL", "putrikusumo@uchicago.edu"),
+                instructor=get("PHYSDB_LETTER_INSTRUCTOR", "Stuart Gazes"),
+                instructor_email=get("PHYSDB_LETTER_INSTRUCTOR_EMAIL", "gazes@uchicago.edu"),
+                enrollment_limit=get("PHYSDB_LETTER_ENROLLMENT_LIMIT", "100"))
 
 
 def supervisors(conn, student_id, term_end, today):
@@ -60,23 +65,36 @@ def values_for(conn, student, funding, today=None, environ=None):
         raise LetterError(f"{funding['term_season']} {funding['term_year']} is not in the term calendar yet. "
                           "An administrator can add its dates on the Terms page.")
     today = today or datetime.date.today()
-    advisors = supervisors(conn, student["id"], dates[1], today.isoformat())
-    if not advisors:
-        raise LetterError(f"{student['first_name']} {student['last_name']} has no current advisor recorded. "
-                          "Add one on the student's page first (an advisor whose \"to\" date has passed does not count).")
     start = datetime.date.fromisoformat(dates[0])
-    join = lambda parts: " and ".join(parts)
-    return {
-        "FULL_ADDRESEE_NAME": f"{student['first_name']} {student['last_name']}",
+    end = datetime.date.fromisoformat(dates[1])
+    name = f"{student['first_name']} {student['last_name']}"
+    values = {
+        "FULL_ADDRESEE_NAME": name,                        # the RA template's spelling
+        "FULL_ADDRESSEE_NAME": name,                       # the TA template's
         "DATE": long_date(today),
         "STUDENT_FIRST": student["first_name"],
         "START_DATE": long_date(start),
+        "END_DATE": long_date(end),
         "DEPT_OR_PROGRAM": cfg["department"],
-        "SUPERVISOR_NAME": join([f"{a['first_name']} {a['last_name']}" for a in advisors]),
-        "SUPERVISOR_EMAIL": join([a["email"] for a in advisors if a["email"]]),
-        "PREFERRED_EMAIL": cfg["reply_email"],
         "PROGRAM": cfg["program"],
+        "DEPARTMENT_OR_PROGRAM": cfg["program"],           # the signature block, in the TA template
+        "PREFERRED_EMAIL": cfg["reply_email"],
     }
+    if funding["kind"] == "TA":
+        course = (funding["course_code"] or "").strip()
+        if not course:
+            raise LetterError("This TA entry has no course code. Edit the funding entry and fill it in.")
+        values.update({"INSTRUCTOR_OF_RECORD": cfg["instructor"], "INSTRUCTOR_EMAIL": cfg["instructor_email"],
+                       "COURSE_CODE": course, "ENROLLMENT_LIMIT": cfg["enrollment_limit"]})
+    else:
+        advisors = supervisors(conn, student["id"], dates[1], today.isoformat())
+        if not advisors:
+            raise LetterError(f"{name} has no current advisor recorded. Add one on the student's page first "
+                              "(an advisor whose \"to\" date has passed does not count).")
+        join = lambda parts: " and ".join(parts)
+        values.update({"SUPERVISOR_NAME": join([f"{a['first_name']} {a['last_name']}" for a in advisors]),
+                       "SUPERVISOR_EMAIL": join([a["email"] for a in advisors if a["email"]])})
+    return values
 
 
 # One Word field: the run holding the "begin" mark, through the run holding the "end" mark.

@@ -85,7 +85,8 @@ def next_term(season, year):
 def copy_funding(conn, student_id, from_year, from_season, to_year, to_season):
     """Make a student's funding for one term a copy of their funding for another term.
 
-    Every entry of the source term (type, source, POETAF/COA, amount, notes) is copied. Any entries the student
+    Every entry of the source term (type, source, POETAF/COA, amount, notes) is copied; a TA's course code is not, since
+    the course changes from term to term and the letter needs the new one. Any entries the student
     already has for the target term are replaced. If the source term has no entries nothing is changed at all.
     Returns (entries copied, entries replaced).
     """
@@ -174,6 +175,7 @@ def connect(path=DB_PATH, actor="command line"):
     _add_fsr_accounts(conn)
     _drop_program_column(conn)
     _add_funding_notes(conn)
+    _add_funding_course_code(conn)
     _add_student_citizenship(conn)
     _migrate_matriculation(conn)
     _add_student_cnet(conn)
@@ -301,6 +303,12 @@ def _add_student_citizenship(conn):
 def _add_funding_notes(conn):
     if "notes" not in {r[1] for r in conn.execute("PRAGMA table_info(funding)")}:
         conn.execute("ALTER TABLE funding ADD COLUMN notes TEXT")
+        conn.commit()
+
+
+def _add_funding_course_code(conn):
+    if "course_code" not in {r[1] for r in conn.execute("PRAGMA table_info(funding)")}:
+        conn.execute("ALTER TABLE funding ADD COLUMN course_code TEXT")
         conn.commit()
 
 
@@ -775,7 +783,7 @@ def funding_report(conn, year, season):
                      JOIN faculty fa ON fa.id = a.faculty_id
                     WHERE a.student_id = s.id AND a.end_date IS NULL
                       AND a.role IN ('advisor', 'co-advisor')) AS advisors_full,
-                  f.id AS funding_id, f.kind, f.source, f.poetaf_coa, f.amount, f.notes
+                  f.id AS funding_id, f.kind, f.course_code, f.source, f.poetaf_coa, f.amount, f.notes
            FROM students s
            LEFT JOIN funding f ON f.student_id = s.id AND f.term_year = ? AND f.term_season = ?
            WHERE s.status = 'active'

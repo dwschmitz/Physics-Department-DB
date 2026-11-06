@@ -174,6 +174,10 @@ def fields_for(table, conn, row=None):
         return [F("kind", "Type", "select", True, enum(FUNDING_KINDS)),
                 F("term_year", "Year", "select", True, term_years(), placeholder=True),
                 F("term_season", "Term", "select", True, [(s, s) for s in physdb.SEASONS], placeholder=True),
+                {**F("course_code", "Course code", maxlen=40,
+                     help="The course this TA assists with, as it should appear in the letter (for example PHYS 12100). "
+                          "Not needed to save the entry, but the assignment letter can't be made without it."),
+                 "show_when": ("kind", "TA")},
                 F("source", "Source"),
                 F("poetaf_coa", "POETAF/COA", maxlen=60, help="Account number for this funding."),
                 F("amount", "Amount ($)", "number"),
@@ -987,6 +991,8 @@ def create_app(db_path=None):
                                        (prefix + "_year", f"Enter the year they {verb}.")):
                         if values[name] is None:
                             errors[name] = text
+            if table == "funding" and values.get("kind") != "TA":     # only a TA has a course
+                values["course_code"] = None
             if "start_date" in values and "end_date" in values and not errors and \
                     values["end_date"] and values["end_date"] < values["start_date"]:
                 errors["end_date"] = "End date can't be before the start date."
@@ -1731,7 +1737,7 @@ def create_app(db_path=None):
         w.writerow(["Last name", "First name", "University ID", "CNET", "Email", "Citizenship", "Status",
                     "Matriculation term", "Matriculation year", "Clock (years)",
                     "Research area", "Advisor", "Student notes",
-                    "Funding term", "Funding type", "Source", "POETAF/COA", "Amount", "Funding notes"])
+                    "Funding term", "Funding type", "Source", "POETAF/COA", "Amount", "Funding notes", "Course code"])
         now = physdb.current_term()
         for r in rows:
             w.writerow([physdb._csv_safe(v) if v is not None else "" for v in (
@@ -1741,7 +1747,7 @@ def create_app(db_path=None):
                 None if physdb.clock_label(r, now) == "\u2014" else physdb.clock_label(r, now),
                 r["research_area"], r["advisors_full"], r["student_notes"],
                 f"{season} {year}", label(r["kind"]) if r["kind"] else None, r["source"], r["poetaf_coa"],
-                r["amount"], r["notes"])])
+                r["amount"], r["notes"], r["course_code"])])
         return Response(buf.getvalue(), mimetype="text/csv", headers={
             "Content-Disposition": f"attachment; filename=funding_{season}_{year}.csv"})
 

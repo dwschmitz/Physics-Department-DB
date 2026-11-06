@@ -39,7 +39,7 @@ class LetterTests(unittest.TestCase):
         data, name = self.make()
         self.assertEqual(name, "RA_letter_Lovelace_Autumn_2026.docx")
         text, xml = text_of(data)
-        for want in ("To: Ada Lovelace", "November 5, 2026", "Dear Ada,", "begin on September 28, 2026.",
+        for want in ("To: Ada Lovelace", "November 5, 2026", "Dear Ada,", "begin on  September 28, 2026.",
                      "Employment unit: Physics.", "Supervisor) is Niels Bohr.", "email is bohr@u.edu.",
                      "returning via email to putrikusumo@uchicago.edu.", "Sincerely,Department of Physics"):
             self.assertIn(want, text)
@@ -47,10 +47,9 @@ class LetterTests(unittest.TestCase):
         self.assertNotIn("MERGEFIELD", xml)                # flattened: nothing left to merge in Word
         self.assertIn("Graduate Student Employee", text)   # the rest of the document is intact
 
-    def test_start_date_comes_from_the_calendar_not_from_the_stale_field_code(self):
-        # the template's START_DATE spot carries a DEPT_OR_PROGRAM field code; it must still get the date
+    def test_start_date_comes_from_the_calendar_and_settings_can_be_overridden(self):
         text, _ = text_of(self.make({**ENV, "PHYSDB_LETTER_DEPARTMENT": "Dept of Physics"})[0])
-        self.assertIn("begin on September 28, 2026.", text)
+        self.assertIn("begin on  September 28, 2026.", text)
         self.assertIn("Employment unit: Dept of Physics.", text)
 
     def test_values_are_escaped(self):
@@ -92,10 +91,39 @@ class LetterTests(unittest.TestCase):
         self.conn.commit()
         with self.assertRaisesRegex(letters.LetterError, "no term"):
             self.make()
+        self.conn.execute("INSERT INTO funding (student_id, kind, term_year, term_season) VALUES (?, 'fellowship', 2026, 'Autumn')", (self.sid,))
+        self.conn.commit()
+        with self.assertRaisesRegex(letters.LetterError, "no letter template for fellowship"):
+            self.make()
+
+    def test_ta_letter_has_both_dates_the_instructor_and_the_course(self):
+        self.conn.execute("INSERT INTO funding (student_id, kind, term_year, term_season, course_code) VALUES (?, 'TA', 2026, 'Autumn', 'PHYS 13100')", (self.sid,))
+        self.conn.commit()
+        data, name = self.make()
+        self.assertEqual(name, "TA_letter_Lovelace_Autumn_2026.docx")
+        text, xml = text_of(data)
+        for want in ("To: Ada Lovelace", "Dear Ada,", "begin on September 28, 2026, and end on December 11, 2026, and after relevant grade",
+                     "Employment unit: Physics.", "Supervisor) is Stuart Gazes.", "email is gazes@uchicago.edu.",
+                     "Course Title: PHYS 13100", "Expected number of students in the course or section: 100",
+                     "returning via email to putrikusumo@uchicago.edu.", "Sincerely,Department of Physics"):
+            self.assertIn(want, text)
+        self.assertNotIn("«", xml); self.assertNotIn("Bohr", text)           # the instructor, not the advisor
+        text, _ = text_of(self.make({"PHYSDB_LETTER_ENROLLMENT_LIMIT": "35", "PHYSDB_LETTER_INSTRUCTOR": "A. Teacher"})[0])
+        self.assertIn("course or section: 35", text); self.assertIn("is A. Teacher.", text)
+
+    def test_a_ta_letter_needs_the_course_code_but_not_an_advisor(self):
+        self.conn.execute("DELETE FROM advising")
         self.conn.execute("INSERT INTO funding (student_id, kind, term_year, term_season) VALUES (?, 'TA', 2026, 'Autumn')", (self.sid,))
         self.conn.commit()
-        with self.assertRaisesRegex(letters.LetterError, "no letter template for TA"):
+        with self.assertRaisesRegex(letters.LetterError, "no course code"):
             self.make()
+        self.conn.execute("UPDATE funding SET course_code = '   ' WHERE kind = 'TA'")
+        self.conn.commit()
+        with self.assertRaisesRegex(letters.LetterError, "no course code"):
+            self.make()
+        self.conn.execute("UPDATE funding SET course_code = 'PHYS 13100' WHERE kind = 'TA'")
+        self.conn.commit()
+        self.assertIn("Course Title: PHYS 13100", text_of(self.make()[0])[0])
 
     def test_word_files_convert_to_pdfs(self):
         import shutil

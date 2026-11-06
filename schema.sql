@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS funding (
     legacy_term TEXT,                   -- free-text term from before the fixed menu; re-enter it
     amount      REAL,
     notes       TEXT,
+    course_code TEXT,                   -- a TA entry's course, needed for the assignment letter
     CHECK ((term_year IS NULL) = (term_season IS NULL))
 );
 

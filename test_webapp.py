@@ -350,7 +350,7 @@ class WebTests(unittest.TestCase):
             "Last name", "First name", "University ID", "CNET", "Email", "Citizenship", "Status",
             "Matriculation term", "Matriculation year", "Clock (years)",
             "Research area", "Advisor", "Student notes",
-            "Funding term", "Funding type", "Source", "POETAF/COA", "Amount", "Funding notes"])
+            "Funding term", "Funding type", "Source", "POETAF/COA", "Amount", "Funding notes", "Course code"])
         self.assertEqual(len(body), 4)                                   # same rows as the screen
         rows = [dict(zip(header, r)) for r in body]
         aa = [r for r in rows if r["Last name"] == "Aa" and r["Funding type"] == "RA"][0]
@@ -2815,7 +2815,7 @@ class WebTests(unittest.TestCase):
         ed.post("/faculty/new", data=dict(first_name="Niels", last_name="Bohr", email="b@u.edu", csrf_token=t))
         ed.post("/students/1/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
         ed.post("/students/1/funding/new", data=dict(kind="RA", term_year="2026", term_season="Autumn", csrf_token=t))
-        ed.post("/students/1/funding/new", data=dict(kind="TA", term_year="2026", term_season="Autumn", csrf_token=t))
+        ed.post("/students/1/funding/new", data=dict(kind="fellowship", term_year="2026", term_season="Autumn", csrf_token=t))
         page = ed.get("/students/1").get_data(as_text=True)
         self.assertEqual(page.count("/funding/1/letter"), 1)                      # RA rows only
         self.assertNotIn("/funding/2/letter", page)
@@ -2832,7 +2832,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("attachment", r.headers["Content-Disposition"])
         xml = zipfile.ZipFile(io.BytesIO(r.data)).read("word/document.xml").decode()
         self.assertIn("September 28, 2026", xml)
-        self.assertEqual(ed.get("/students/1/funding/2/letter", follow_redirects=True).status_code, 200)   # TA: no template, explained
+        self.assertEqual(ed.get("/students/1/funding/2/letter", follow_redirects=True).status_code, 200)   # no template, explained
         self.assertIn("Made the RA letter for Ada Lovelace", ad.get("/audit").get_data(as_text=True))
         self.assertEqual(ed.get("/students/1/funding/9/letter").status_code, 404)
 
@@ -2846,12 +2846,12 @@ class WebTests(unittest.TestCase):
             self.add_student(ed, last_name=last, university_id=f"U{i}", email=f"u{i}@u.edu")
             if last != "Cc":                                                  # Cc has no advisor
                 ed.post(f"/students/{i}/advising/new", data=dict(faculty_id=1, role="advisor", start_date="2024-01-01", csrf_token=t))
-        for i, kind in enumerate(["RA", "RA", "RA", "TA"], 1):
+        for i, kind in enumerate(["RA", "RA", "RA", "fellowship"], 1):
             ed.post(f"/students/{i}/funding/new", data=dict(kind=kind, term_year="2026", term_season="Autumn", csrf_token=t))
         ad.post("/terms/new", data=dict(term_year="2026", term_season="Autumn", start_date="2026-09-28", end_date="2026-12-11",
                                         csrf_token=self.token(ad)))
         page = ed.get("/reports/funding?year=2026&season=Autumn").get_data(as_text=True)
-        self.assertEqual(re.findall(r'name="funding_id" value="(\d+)"', page), ["1", "2", "3"])    # RA rows only, not the TA
+        self.assertEqual(re.findall(r'name="funding_id" value="(\d+)"', page), ["1", "2", "3"])    # RA rows only, not the fellowship
         self.assertEqual(page.count("/funding/1/letter"), 1)
         self.assertIn("data-select-all", page); self.assertIn("Generate letters", page)
         self.assertEqual(page.count('data-select-all'), 1)
@@ -2878,7 +2878,7 @@ class WebTests(unittest.TestCase):
         z = zipfile.ZipFile(io.BytesIO(r.data))
         self.assertEqual(sorted(z.namelist()), ["NOT_MADE.txt", "RA_letter_Aa_Autumn_2026.docx", "RA_letter_Aa_Autumn_2026.pdf"])
         note = z.read("NOT_MADE.txt").decode()
-        self.assertIn("Cc, Ada: Ada Cc has no current advisor", note); self.assertIn("Dd, Ada: There is no letter template for TA", note)
+        self.assertIn("Cc, Ada: Ada Cc has no current advisor", note); self.assertIn("Dd, Ada: There is no letter template for fellowship", note)
         # nothing could be made: back to the page with the reasons, no zip
         r = post(ed, "3", next="/reports/funding?year=2026&season=Autumn")
         self.assertEqual(r.status_code, 302)
@@ -2895,6 +2895,44 @@ class WebTests(unittest.TestCase):
         r = ed.get("/students/3/funding/3/letter?next=/reports/funding%3Fyear%3D2026", follow_redirects=False)
         self.assertEqual(r.headers["Location"], "/reports/funding?year=2026")
         self.assertIn("Made the RA letter for Ada Aa", ad.get("/audit").get_data(as_text=True))
+
+    def test_ta_course_code_field_and_ta_letters(self):
+        import io, zipfile
+        ed, ad = self.client("ed"), self.client("ad")
+        self.add_student(ed)
+        t = self.token(ed)
+        page = ed.get("/students/1/funding/new").get_data(as_text=True)
+        self.assertIn('name="course_code"', page)
+        self.assertIn('data-show-when="kind=TA"', page)                            # only shown for a TA
+        ad.post("/terms/new", data=dict(term_year="2026", term_season="Autumn", start_date="2026-09-28", end_date="2026-12-11",
+                                        csrf_token=self.token(ad)))
+        # a TA entry saves without a course code, but its letter can't be made
+        self.assertEqual(ed.post("/students/1/funding/new", data=dict(kind="TA", term_year="2026", term_season="Autumn", csrf_token=t)).status_code, 302)
+        self.assertIn("Letter</a>", ed.get("/students/1").get_data(as_text=True))
+        r = ed.get("/students/1/funding/1/letter", follow_redirects=True)
+        self.assertIn("no course code", r.get_data(as_text=True))
+        # fill it in: the code shows on the student page and the Funding tab, and the letter downloads
+        ed.post("/students/1/funding/1/edit", data=dict(kind="TA", term_year="2026", term_season="Autumn", course_code=" PHYS 13100 ", csrf_token=t))
+        self.assertIn("PHYS 13100", ed.get("/students/1").get_data(as_text=True))
+        self.assertIn("PHYS 13100", ed.get("/reports/funding?year=2026&season=Autumn").get_data(as_text=True))
+        r = ed.get("/students/1/funding/1/letter")
+        self.assertEqual(r.status_code, 200)
+        xml = zipfile.ZipFile(io.BytesIO(r.data)).read("word/document.xml").decode()
+        self.assertIn("PHYS 13100", xml); self.assertIn("December 11, 2026", xml)
+        # the Funding tab offers a tick box for it, and the bulk zip makes it (no advisor needed)
+        page = ed.get("/reports/funding?year=2026&season=Autumn").get_data(as_text=True)
+        self.assertIn('name="funding_id" value="1"', page)
+        from unittest import mock
+        with mock.patch.object(letters, "docx_to_pdfs", lambda files: {n[:-5] + ".pdf": b"%PDF" for n in files}):
+            z = zipfile.ZipFile(io.BytesIO(ed.post("/reports/funding/letters", data={"funding_id": ["1"], "csrf_token": t}).data))
+        self.assertEqual(sorted(z.namelist()), ["TA_letter_Lovelace_Autumn_2026.docx", "TA_letter_Lovelace_Autumn_2026.pdf"])
+        # changing the type away from TA drops the course; copying a term does not carry it over
+        ed.post("/students/1/funding/copy?year=2027&season=Winter", data=dict(from_year="2026", from_season="Autumn", year="2027", season="Winter", csrf_token=t))
+        with mock.patch.object(physdb, "current_term", return_value=("Winter", 2027)):
+            copied = ed.get("/reports/funding?year=2027&season=Winter").get_data(as_text=True)
+        self.assertIn("TA", copied); self.assertNotIn("PHYS 13100", copied)
+        ed.post("/students/1/funding/1/edit", data=dict(kind="RA", term_year="2026", term_season="Autumn", course_code="PHYS 13100", csrf_token=t))
+        self.assertNotIn("PHYS 13100", ed.get("/students/1").get_data(as_text=True))
 
     def test_student_columns_sort_both_ways(self):
         from unittest import mock

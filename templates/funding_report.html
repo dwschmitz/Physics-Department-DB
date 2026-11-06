@@ -23,19 +23,19 @@
 {% if undated %}<div class="flash error">{{ undated }} funding entr{{ 'y' if undated == 1 else 'ies' }} of active students
   {{ 'has' if undated == 1 else 'have' }} no term yet (marked &ldquo;please re-enter&rdquo; on the student&rsquo;s page) and
   {{ 'is' if undated == 1 else 'are' }} not included here.</div>{% endif %}
-<table class="wide"><tr>{% if can_edit %}<th><input type="checkbox" data-select-all="funding_id" aria-label="Select all students with an RA entry"
+<table class="wide"><tr>{% if can_edit %}<th><input type="checkbox" data-select-all="funding_id" aria-label="Select all students with an RA or TA entry"
   title="Select all"></th>{% endif %}{{ sort_th("Name", "name", sort, sdir) }}{{ sort_th("Clock", "clock", sort, sdir, "Years since matriculation, counted in terms (0.25 per term), up to the current term") }}{{ sort_th("Advisor", "advisor", sort, sdir) }}{{ sort_th("Type", "type", sort, sdir) }}{{ sort_th("Source", "source", sort, sdir, cls="source") }}{{ sort_th("POETAF/COA", "poetaf_coa", sort, sdir) }}{{ sort_th("Amount", "amount", sort, sdir) }}<th class="notes">Notes</th>{% if can_edit %}<th></th>{% endif %}</tr>
-{% for r in rows %}<tr>{% if can_edit %}<td>{% if r.funding_id and r.kind == 'RA' %}<input type="checkbox" name="funding_id" value="{{ r.funding_id }}" form="letters-form"
+{% for r in rows %}<tr>{% if can_edit %}<td>{% if r.funding_id and r.kind in ('RA', 'TA') %}<input type="checkbox" name="funding_id" value="{{ r.funding_id }}" form="letters-form"
   aria-label="Letter for {{ r.last_name }}, {{ r.first_name }}">{% endif %}</td>{% endif %}<td style="white-space:nowrap"><a href="{{ url_for('student', sid=r.student_id) }}">{{ r.last_name }}, {{ r.first_name }}</a></td>
 <td>{{ r.clock }}</td><td>{{ r.advisors or '' }}</td>
-<td>{{ r.kind|label if r.kind else '' }}</td><td class="source">{{ r.source or '' }}</td><td style="white-space:nowrap">{{ r.poetaf_coa or '' }}</td>
+<td>{{ r.kind|label if r.kind else '' }}{% if r.course_code %} <span class="muted">{{ r.course_code }}</span>{% endif %}</td><td class="source">{{ r.source or '' }}</td><td style="white-space:nowrap">{{ r.poetaf_coa or '' }}</td>
 <td>{% if r.amount is not none %}${{ '{:,.0f}'.format(r.amount) }}{% endif %}</td>
 <td class="notes" style="white-space:pre-wrap">{{ r.notes or '' }}</td>
 {% if can_edit %}{% set who = r.last_name ~ ', ' ~ r.first_name %}{% set term = season ~ ' ' ~ year %}
 <td class="actions">
   {% if r.funding_id %}
     <a class="btn secondary small" href="{{ url_for('child_edit', sid=r.student_id, table='funding', rid=r.funding_id, next=here) }}">Edit</a>
-    {% if r.kind == 'RA' %}<a class="btn secondary small" href="{{ url_for('funding_letter', sid=r.student_id, fid=r.funding_id, next=here) }}"
+    {% if r.kind in ('RA', 'TA') %}<a class="btn secondary small" href="{{ url_for('funding_letter', sid=r.student_id, fid=r.funding_id, next=here) }}"
         title="Download the assignment letter (Word)">Letter</a>{% endif %}
     {{ post_button(url_for('child_delete', sid=r.student_id, table='funding', rid=r.funding_id, next=here), "Clear",
          "Delete this funding entry (" ~ r.kind|label ~ (", $" ~ '{:,.0f}'.format(r.amount) if r.amount is not none else "") ~ ") for " ~ who ~ " in " ~ term ~ "? This cannot be undone.",
